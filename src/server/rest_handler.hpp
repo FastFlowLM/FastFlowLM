@@ -101,6 +101,12 @@ public:
         StreamResponseCallback send_streaming_response,
         std::shared_ptr<CancellationToken> cancellation_token = nullptr);
 
+    // Anthropic API handlers
+    void handle_anthropic_messages(const json& request,
+                                   std::function<void(const json&)> send_response,
+                                   StreamResponseCallback send_streaming_response,
+                                   std::shared_ptr<CancellationToken> cancellation_token = nullptr);
+
 private:
     void ensure_model_loaded(const std::string& model_tag);
     void ensure_asr_model_loaded(const std::string& model_tag);

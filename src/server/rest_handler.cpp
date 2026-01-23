@@ -10,6 +10,7 @@
 #include "wstream_buf.hpp"
 #include "streaming_ostream.hpp"
 #include "streaming_ostream_openai.hpp"
+#include "streaming_ostream_anthropic.hpp"
 #include "image/image_reader.hpp"
 #include <sstream>
 #include <iostream>
@@ -1064,6 +1065,167 @@ void RestHandler::handle_openai_completion(const json& request,
                 {"message", e.what()},
                 {"type", "server_error"},
                 {"code", 500}
+            }}
+        };
+        send_response(error_response);
+    }
+}
+
+///@brief Handle the Anthropic messages request
+///@param request the request
+///@param send_response the send response
+///@param send_streaming_response the send streaming response
+void RestHandler::handle_anthropic_messages(const json& request,
+                                            std::function<void(const json&)> send_response,
+                                            StreamResponseCallback send_streaming_response,
+                                            std::shared_ptr<CancellationToken> cancellation_token) {
+    try {
+        // Extract Anthropic-style parameters
+        std::string model = request.value("model", current_model_tag);
+        int max_tokens = request.value("max_tokens", 4096);
+        bool stream = request.value("stream", false);
+        float temperature = request.value("temperature", 1.0f);
+        json tools = request.value("tools", json::array());
+        
+        // Anthropic puts system prompt at top level, not in messages
+        std::string system_prompt = request.value("system", "");
+        json anthropic_messages = request["messages"];
+        
+        // Convert Anthropic messages format to internal format
+        // Anthropic uses the same role/content structure but system is separate
+        json messages = json::array();
+        
+        // Add system message if provided
+        if (!system_prompt.empty()) {
+            messages.push_back({
+                {"role", "system"},
+                {"content", system_prompt}
+            });
+        }
+        
+        // Process Anthropic messages - handle content blocks if present
+        for (const auto& msg : anthropic_messages) {
+            json converted_msg;
+            converted_msg["role"] = msg["role"];
+            
+            // Anthropic content can be a string or array of content blocks
+            if (msg["content"].is_string()) {
+                converted_msg["content"] = msg["content"];
+            } else if (msg["content"].is_array()) {
+                // Convert content blocks to string (combine text blocks)
+                std::string combined_content;
+                for (const auto& block : msg["content"]) {
+                    if (block["type"] == "text") {
+                        if (!combined_content.empty()) combined_content += "\n";
+                        combined_content += block["text"].get<std::string>();
+                    }
+                    // TODO: Handle image blocks if needed
+                }
+                converted_msg["content"] = combined_content;
+            }
+            messages.push_back(converted_msg);
+        }
+        
+        auto load_start_time = time_utils::now();
+        ensure_model_loaded(model);
+        auto load_end_time = time_utils::now();
+        
+        // Configure parameters
+        if (request.contains("temperature")) {
+            auto_chat_engine->set_temperature(temperature);
+        }
+        if (request.contains("top_p")) {
+            float top_p = request["top_p"];
+            auto_chat_engine->set_topp(top_p);
+        }
+        if (request.contains("top_k")) {
+            int top_k = request["top_k"];
+            auto_chat_engine->set_topk(top_k);
+        }
+        
+        chat_meta_info_t meta_info;
+        lm_uniform_input_t uniformed_input;
+        uniformed_input.messages = messages;
+        uniformed_input.tools = tools;
+        meta_info.load_duration = (uint64_t)time_utils::duration_ns(load_start_time, load_end_time).first;
+        
+        if (stream) {
+            // Streaming response using Anthropic format
+            cancellation_token->reset();
+            auto anthropic_stream_callback = [&send_streaming_response](const std::string& data, bool is_final) {
+                json data_json = data;
+                send_streaming_response(data_json, is_final);
+            };
+            streaming_ostream_anthropic ostream(model, auto_chat_engine.get(), anthropic_stream_callback);
+            
+            header_print("FLM", "Start prefill...");
+            bool success = auto_chat_engine->insert(meta_info, uniformed_input);
+            if (!success) {
+                json error_response = {
+                    {"type", "error"},
+                    {"error", {
+                        {"type", "invalid_request_error"},
+                        {"message", "Max context length reached"}
+                    }}
+                };
+                send_response(error_response);
+                return;
+            }
+            
+            // Send message_start event
+            ostream.send_message_start(meta_info.prompt_tokens);
+            
+            header_print("FLM", "Start generating...");
+            auto_chat_engine->generate(meta_info, max_tokens, ostream, [&] { return cancellation_token->cancelled(); });
+            ostream.finalize(meta_info);
+            
+            if (meta_info.stop_reason == CANCEL_DETECTED) {
+                header_print("FLM", "Generation Cancelled!");
+            }
+            
+            this->auto_chat_engine->clear_context();
+        } else {
+            // Non-streaming response
+            nullstream nstream;
+            std::string response_text = auto_chat_engine->generate_with_prompt(meta_info, uniformed_input, max_tokens, nstream);
+            
+            // Determine stop reason
+            std::string stop_reason = "end_turn";
+            if (meta_info.stop_reason == MAX_LENGTH_REACHED) {
+                stop_reason = "max_tokens";
+            }
+            
+            // Build Anthropic response format
+            json response = {
+                {"id", "msg_fastflowlm_" + std::to_string(std::time(nullptr))},
+                {"type", "message"},
+                {"role", "assistant"},
+                {"content", json::array({
+                    {
+                        {"type", "text"},
+                        {"text", response_text}
+                    }
+                })},
+                {"model", model},
+                {"stop_reason", stop_reason},
+                {"stop_sequence", nullptr},
+                {"usage", {
+                    {"input_tokens", meta_info.prompt_tokens},
+                    {"output_tokens", meta_info.generated_tokens}
+                }}
+            };
+            
+            send_response(response);
+            this->auto_chat_engine->clear_context();
+        }
+        
+    } catch (const std::exception& e) {
+        // Anthropic error format
+        json error_response = {
+            {"type", "error"},
+            {"error", {
+                {"type", "api_error"},
+                {"message", e.what()}
             }}
         };
         send_response(error_response);

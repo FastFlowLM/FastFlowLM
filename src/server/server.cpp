@@ -157,6 +157,7 @@ bool requires_npu_access(const std::string& method, const std::string& path) {
         return path == "/api/generate" || 
                path == "/api/chat" || 
                path == "/v1/chat/completions" ||
+               path == "/v1/messages" ||
                path == "/v1/audio/transcriptions" ||
                path == "/v1/embeddings";
     }
@@ -920,6 +921,19 @@ std::unique_ptr<WebServer> create_lm_server(model_list& models, ModelDownloader&
                 rest_handler->handle_openai_completion(request_json, send_response, send_streaming_response, cancellation_token);
         });
 
+    // Add Anthropic endpoint
+    server->register_handler("POST", "/v1/messages",
+        [rest_handler](const http::request<http::string_body>& req,
+                      std::function<void(const json&)> send_response,
+                      std::function<void(const json&, bool)> send_streaming_response,
+                      std::shared_ptr<HttpSession> session,
+                      std::shared_ptr<CancellationToken> cancellation_token) {
+            json request_json;
+            if (!req.body().empty()) {
+                request_json = json::parse(req.body());
+            }
+            rest_handler->handle_anthropic_messages(request_json, send_response, send_streaming_response, cancellation_token);
+        });
 
     // Add cancel endpoint - capture server by raw pointer
     WebServer* server_ptr = server.get();

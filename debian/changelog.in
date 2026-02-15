@@ -1,0 +1,5 @@
+fastflowlm (@@DEB_VERSION@@) @@DEB_CODENAME@@; urgency=medium
+
+  * Automated build.
+
+ -- FastFlowLM <noreply@example.com>  @@DEB_DATE@@

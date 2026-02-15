@@ -1,0 +1,93 @@
+name: Build Packages
+
+on:
+  push:
+    branches:
+      - linux
+  workflow_dispatch:
+
+jobs:
+  package-deb:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - ubuntu_version: "24.04"
+            container_tag: "ubuntu24.04"
+            deb_codename: "noble"
+          - ubuntu_version: "26.04"
+            container_tag: "ubuntu26.04"
+            deb_codename: "resolute"
+    container:
+      image: ghcr.io/fastflowlm/fastflowlm/build-environment:${{ matrix.container_tag }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    env:
+      DEB_VERSION: 0+b${{ github.run_number }}
+    steps:
+      - name: Get short SHA
+        id: short_sha
+        run: echo "sha=$(echo ${{ github.sha }} | cut -c1-7)" >> $GITHUB_OUTPUT
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Create Debian packaging metadata
+        working-directory: ${{ github.workspace }}
+        run: |
+          sed -e "s|@@DEB_VERSION@@|${DEB_VERSION}|g" \
+              -e "s|@@DEB_CODENAME@@|${{ matrix.deb_codename }}|g" \
+              -e "s|@@DEB_DATE@@|$(date -R)|g" \
+              debian/changelog.in > debian/changelog
+
+          chmod +x debian/rules
+
+      - name: Upgrade Rust toolchain (24.04)
+        if: ${{ matrix.ubuntu_version == '24.04' }}
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends curl ca-certificates
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
+            sh -s -- -y --profile minimal --default-toolchain stable
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+          rustc --version
+
+      - name: Build Debian package
+        working-directory: ${{ github.workspace }}
+        env:
+          DEBEMAIL: noreply@example.com
+          DEBFULLNAME: fastflowlm
+        run: |
+          dpkg-buildpackage -b -us -uc
+          mv ../fastflowlm_${DEB_VERSION}_amd64.deb ./fastflowlm_${DEB_VERSION}_ubuntu${{ matrix.ubuntu_version }}_amd64.deb
+          ls -lah ./fastflowlm_${DEB_VERSION}_ubuntu${{ matrix.ubuntu_version }}_amd64.deb
+
+      - name: Upload Debian package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: flm-ubuntu${{ matrix.ubuntu_version }}-${{ steps.short_sha.outputs.sha }}-deb
+          path: ./fastflowlm_${{ env.DEB_VERSION }}_ubuntu${{ matrix.ubuntu_version }}_amd64.deb
+          if-no-files-found: error
+
+  release:
+    runs-on: ubuntu-latest
+    needs: package-deb
+    if: github.event_name == 'push'
+    steps:
+      - name: Download all deb artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: debs
+          pattern: '*-deb'
+
+      - name: Create or update release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: debs/*/*.deb
+          tag_name: b${{ github.run_number }}
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

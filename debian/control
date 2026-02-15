@@ -1,0 +1,33 @@
+Source: fastflowlm
+Section: utils
+Priority: optional
+Maintainer: FastFlowLM <noreply@example.com>
+Build-Depends: debhelper-compat (= 13),
+ build-essential,
+ cargo,
+ cmake,
+ git,
+ libavcodec-dev,
+ libavformat-dev,
+ libavutil-dev,
+ libboost-dev,
+ libboost-program-options-dev,
+ libcurl4-openssl-dev,
+ libdrm-dev,
+ libfftw3-dev,
+ libreadline-dev,
+ libswresample-dev,
+ libswscale-dev,
+ libxrt-dev,
+ ninja-build,
+ patchelf,
+ pkg-config,
+ rustc,
+ uuid-dev
+Standards-Version: 4.7.3
+
+Package: fastflowlm
+Architecture: amd64
+Depends: ${shlibs:Depends}, ${misc:Depends}, libxrt-npu2
+Description: FastFlowLM CLI
+ FastFlowLM runtime and CLI.

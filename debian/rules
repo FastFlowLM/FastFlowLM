@@ -1,0 +1,43 @@
+#!/usr/bin/make -f
+%:
+	dh $@
+
+override_dh_strip:
+	# dh_strip is skipped because objcopy is failing on the flm binary
+
+override_dh_dwz:
+	# dh_dwz is skipped because it causes issues with the binary structure
+
+override_dh_auto_configure:
+	cmake -S src -B build \
+		-GNinja \
+		-DCMAKE_BUILD_TYPE=Release \
+		-DCMAKE_INSTALL_PREFIX=/opt/fastflowlm
+
+override_dh_auto_build:
+	cmake --build build
+
+override_dh_auto_install:
+	install -d debian/fastflowlm/opt/fastflowlm debian/fastflowlm/usr/bin
+	DESTDIR=$(CURDIR)/debian/fastflowlm cmake --install build --prefix=/opt/fastflowlm
+	mv debian/fastflowlm/opt/fastflowlm/bin/flm debian/fastflowlm/opt/fastflowlm/flm
+	rmdir --ignore-fail-on-non-empty debian/fastflowlm/opt/fastflowlm/bin
+	ln -sf /opt/fastflowlm/flm debian/fastflowlm/usr/bin/flm
+
+	# Install model list
+	install -m 644 src/model_list.json debian/fastflowlm/opt/fastflowlm/model_list.json
+
+	# Install xclbins
+	cp -r src/xclbins debian/fastflowlm/opt/fastflowlm/
+
+	# Remove include and lib directories
+	rm -rf debian/fastflowlm/opt/fastflowlm/include debian/fastflowlm/opt/fastflowlm/lib
+
+	# Install custom libraries and update their RPATH
+	install -m 644 src/lib/*.so debian/fastflowlm/opt/fastflowlm/
+	patchelf --set-rpath '/opt/fastflowlm' debian/fastflowlm/opt/fastflowlm/flm
+	for lib in debian/fastflowlm/opt/fastflowlm/*.so; do \
+		if [ -f "$$lib" ]; then \
+			patchelf --set-rpath '/opt/fastflowlm' "$$lib"; \
+		fi; \
+	done

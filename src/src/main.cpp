@@ -141,8 +141,8 @@ void ensure_models_directory(const std::string& exe_dir) {
 ///@brief handle_user_input is used to handle the user input
 void handle_user_input() {
     std::string input;
+    header_print("FLM", "Enter 'exit' to stop the server: ");
     while (!should_exit) {
-        header_print("FLM", "Enter 'exit' to stop the server: ");
         std::getline(std::cin, input);
         if (input == "exit") {
             should_exit = true;

@@ -66,7 +66,7 @@ sudo apt install ./fastflowlm*.deb
 
 1. Ensure all required development packages are installed:
    ```sh
-   sudo apt ninja
+   sudo apt install ninja
    sudo apt install libavformat-dev  libavutil-dev libavcodec-dev libswresample-dev libswscale-dev libxrt-dev uuid-dev libdrm-dev
    ```
 

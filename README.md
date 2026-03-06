@@ -144,6 +144,8 @@ For developers who want to build FastFlowLM from source, we provide CMake preset
 
 ### Build Instructions
 
+More details on the exact procedure, with dependencies to be installed, for linux can be found in [linux-getting-started.md](docs/linux-getting-started.md).
+
 1.  **Clone the repository:**
 
     ```bash

@@ -39,6 +39,7 @@ all:
 	@mkdir -p $(OUT_DIR)
 	@cmake --preset linux-default
 	@cmake --build build
+	@cp build/flm $(OUT_DIR)
 
 run:
 	@cp lib/*.so $(OUT_DIR)
@@ -56,6 +57,6 @@ clean:
 
 install:
 	@echo "Installing using CMake..."
-	@cd $(BUILD_DIR) && cmake --install . --prefix $(PREFIX)
+	@cd $(BUILD_DIR) && sudo cmake --install . 
 
 endif

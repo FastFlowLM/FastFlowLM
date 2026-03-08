@@ -26,6 +26,11 @@ CXX_FLAGS += -MMD -MP
 CXX_FLAGS += -DDEV_BUILD
 CXX_FLAGS += -fopenmp
 CXX_FLAGS += -DCMAKE_INSTALL_PREFIX="\"/opt/fastflowlm\""
+CXX_FLAGS += -DCMAKE_XCLBIN_PREFIX="\"/opt/fastflowlm/share/flm/xclbins\""
+#NOTE: TODO: FIXME: Either deprecate makefile, or keep the parameter sync with ../CMAKELists.txt, otherwise it is error-prone
+CXX_FLAGS += -D__FLM_VERSION__="\"0.9.34\""
+CXX_FLAGS += -D__NPU_VERSION__="\"32.0.203.304\""
+CXX_FLAGS += -DDISABLE_ABI_CHECK=1
 
 LDFLAGS += -L/opt/xilinx/xrt/lib
 LDFLAGS += -Wl,-rpath,/opt/xilinx/xrt/lib

@@ -345,6 +345,10 @@ inline bool check_file_exists(std::string name) {
 /// \return the user's Documents directory path on Windows, ~/.config on Linux
 std::string get_user_documents_directory();
 
+/// \brief get the user's cache directory on Windows or ~/.cache on Linux
+/// \return the user's cache directory path on Windows, ~/.cache on Linux
+std::string get_cache_directory();
+
 ///@brief get_executable_directory gets the directory where the executable is located
 ///@return the executable directory path
 std::string get_executable_directory();
@@ -376,7 +380,7 @@ std::string find_xclbin_path();
 ///@return the server port, default is 52625 if environment variable is not set
 int get_server_port(int user_port);
 
-///@brief get_models_directory gets the models directory from environment variable or defaults to Documents/flm/models on Windows or ~/.config/flm on Linux
+///@brief get_models_directory gets the models directory from environment variable or defaults to Documents/flm/models on Windows or ~/.cache/flm on Linux
 ///@return the models directory path
 std::string get_models_directory();
 

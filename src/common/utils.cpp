@@ -140,6 +140,30 @@ std::string get_user_documents_directory() {
 #endif
 }
 
+std::string get_cache_directory() {
+#ifdef _WIN32
+    char* local_app_data = nullptr;
+    size_t len = 0;
+    if (_dupenv_s(&local_app_data, &len, "LOCALAPPDATA") == 0 && local_app_data != nullptr) {
+        std::string result(local_app_data);
+        free(local_app_data);
+        return result;
+    }
+    return ".";
+#else
+    const char* xdg_cache = std::getenv("XDG_CACHE_HOME");
+    if (xdg_cache && *xdg_cache) {
+        return std::string(xdg_cache);
+    }
+
+    const char* home = std::getenv("HOME");
+    if (home && *home) {
+        return std::string(home) + "/.cache";
+    }
+    return ".";
+#endif
+}
+
 int get_server_port(int user_port) {
     if (user_port > 0 && user_port <= 65535) {
         return user_port;
@@ -197,12 +221,22 @@ std::string get_models_directory() {
         return std::string(model_path_env);
     }
 #endif
-    // Fallback to Documents/flm/models on Windows or ~/.config/flm on Linux if environment variable is not set
+    // Fallback to Documents/flm/models on Windows or ~/.cache/flm on Linux if environment variable is not set
     std::string documents_dir = get_user_documents_directory();
+    std::string cache_dir = get_cache_directory();
 #ifdef _WIN32
     return documents_dir + "/flm/models";
 #else
-    return documents_dir + "/flm";
+    // Check for deprecated location ~/.config/flm/models and warn user
+    std::string deprecated_path = documents_dir + "/flm/models";
+    if (std::filesystem::exists(deprecated_path)) {
+        std::cerr << "[FLM] WARNING: Found models in deprecated location: " << deprecated_path << std::endl;
+        std::cerr << "[FLM] Please move your models to: " << cache_dir << "/flm/models" << std::endl;
+        std::cerr << "[FLM] Alternatively, set FLM_MODEL_PATH environment variable to specify a custom location." << std::endl;
+        std::cerr << "[FLM] The deprecated location may be removed in future versions." << std::endl;
+        return deprecated_path;
+    }
+    return cache_dir + "/flm";
 #endif
 }
 

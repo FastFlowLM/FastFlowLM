@@ -46,19 +46,19 @@ AMD Ryzen™ AI 7 350 (Kraken Point) with 32 GB DRAM; performance is comparable 
 
 ### 🚀 Prefill TTFT with Image Input (Seconds)
 
-Prefill time-to-first-token (TTFT) for Qwen3.5-VL-4B on NPU (FastFlowLM) with different image resolutions.
+Prefill time-to-first-token (TTFT) for Qwen3.5-4B on NPU (FastFlowLM) with different image resolutions.
 
 **Mid Resolution Images:**
 
 | Model        | HW  | 720p (1280×720) | 1080p (1920×1080) | 
 |--------------|-----------|----------------:|------------------:|
-| Qwen3.5-VL-4B  | NPU (FLM) |            3.3 |               7.4 |
+| Qwen3.5-4B  | NPU (FLM) |            3.3 |               7.4 |
 
 
 **High Resolution Images:**
 
 | Model        | HW  | 2K (2560×1440) | 4K (3840×2160) |
 |--------------|-----------|---------------:|---------------:|
-| Qwen3.5-VL-4B  | NPU (FLM) |           13.7 |             41.2 |
+| Qwen3.5-4B  | NPU (FLM) |           13.7 |             41.2 |
 
 > This test uses a short prompt: “Describe this image.”

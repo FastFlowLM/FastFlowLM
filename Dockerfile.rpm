@@ -1,0 +1,52 @@
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+
+LABEL org.opencontainers.image.description="FastFlowLM RPM build environment with all dependencies pre-installed"
+LABEL org.opencontainers.image.source="https://github.com/FastFlowLM/FastFlowLM"
+
+ARG XRT_REPO_URL=""
+
+# Set up XRT repo if provided
+RUN if [ -n "$XRT_REPO_URL" ]; then \
+        dnf install -y 'dnf-command(config-manager)' && \
+        dnf config-manager --add-repo "$XRT_REPO_URL"; \
+    fi
+
+# Install all build dependencies
+RUN dnf install -y \
+    boost-devel \
+    cargo \
+    cmake \
+    fftw-devel \
+    gcc-c++ \
+    git \
+    libcurl-devel \
+    libdrm-devel \
+    libuuid-devel \
+    ninja-build \
+    patchelf \
+    pkg-config \
+    readline-devel \
+    rpm-build \
+    rpmdevtools \
+    rust \
+    && dnf clean all
+
+# Install ffmpeg development libraries
+# On Fedora these come from rpmfusion or fedora repos
+RUN dnf install -y \
+    ffmpeg-free-devel \
+    libavcodec-free-devel \
+    libavformat-free-devel \
+    libavutil-free-devel \
+    libswresample-free-devel \
+    libswscale-free-devel \
+    2>/dev/null; \
+    dnf install -y \
+    ffmpeg-devel \
+    2>/dev/null; \
+    true
+
+WORKDIR /workspace
+
+CMD ["/bin/bash"]

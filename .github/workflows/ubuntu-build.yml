@@ -12,6 +12,101 @@ on:
   workflow_dispatch:
 
 jobs:
+  package-rpm:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - version: "41"
+            distro: "fedora"
+          - version: "42"
+            distro: "fedora"
+
+    container:
+      image: ghcr.io/fastflowlm/fastflowlm/build-environment-rpm:${{ matrix.distro }}${{ matrix.version }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Configure git safe directory
+        run: git config --global --add safe.directory $(pwd)
+
+      - name: Get version from git describe
+        id: get_version
+        run: |
+          VERSION=$(git describe --tags --always)
+          RPM_VERSION=$(echo "${VERSION}" | sed 's/^v//' | sed 's/-/~/g')
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "rpm_version=${RPM_VERSION}" >> $GITHUB_OUTPUT
+
+      - name: Get short SHA
+        id: short_sha
+        run: echo "sha=$(echo ${{ github.sha }} | cut -c1-7)" >> $GITHUB_OUTPUT
+
+      - name: Upgrade Rust toolchain
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
+            sh -s -- -y --profile minimal --default-toolchain stable
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+          rustc --version
+
+      - name: Build RPM package
+        env:
+          RPM_VERSION: ${{ steps.get_version.outputs.rpm_version }}
+        run: |
+          mkdir -p rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
+
+          # Create source tarball
+          git archive --format=tar.gz --prefix=fastflowlm-${RPM_VERSION}/ \
+            --output=rpmbuild/SOURCES/fastflowlm-${RPM_VERSION}.tar.gz HEAD
+
+          # Include submodules in tarball
+          if [ -f .gitmodules ]; then
+            TMPDIR=$(mktemp -d)
+            tar -xzf rpmbuild/SOURCES/fastflowlm-${RPM_VERSION}.tar.gz -C "$TMPDIR"
+            git submodule foreach --quiet --recursive \
+              'SUBPATH="${displaypath}"; \
+               mkdir -p "'"$TMPDIR"'/fastflowlm-'"${RPM_VERSION}"'/${SUBPATH}"; \
+               git archive --format=tar HEAD | tar -x -C "'"$TMPDIR"'/fastflowlm-'"${RPM_VERSION}"'/${SUBPATH}"'
+            tar -czf rpmbuild/SOURCES/fastflowlm-${RPM_VERSION}.tar.gz \
+              -C "$TMPDIR" fastflowlm-${RPM_VERSION}
+            rm -rf "$TMPDIR"
+          fi
+
+          cp rpm/fastflowlm.spec rpmbuild/SPECS/
+
+          rpmbuild \
+            --define "_topdir $(pwd)/rpmbuild" \
+            --define "flm_version ${RPM_VERSION}" \
+            -bb rpmbuild/SPECS/fastflowlm.spec
+
+      - name: Collect RPM
+        id: collect_rpm
+        env:
+          RPM_VERSION: ${{ steps.get_version.outputs.rpm_version }}
+        run: |
+          RPM_FILE=$(find rpmbuild/RPMS -name '*.rpm' -type f | head -1)
+          RPM_NAME=$(basename "$RPM_FILE")
+          # Rename to include distro info
+          FINAL_NAME="fastflowlm-${RPM_VERSION}.${{ matrix.distro }}${{ matrix.version }}.x86_64.rpm"
+          cp "$RPM_FILE" "./${FINAL_NAME}"
+          echo "rpm_file=${FINAL_NAME}" >> $GITHUB_OUTPUT
+          ls -lah "./${FINAL_NAME}"
+
+      - name: Upload RPM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: flm-${{ matrix.distro }}${{ matrix.version }}-${{ steps.short_sha.outputs.sha }}-rpm
+          path: ./${{ steps.collect_rpm.outputs.rpm_file }}
+          if-no-files-found: error
+
   package-deb:
     runs-on: ubuntu-latest
     strategy:
@@ -100,7 +195,7 @@ jobs:
     permissions:
       contents: write
     runs-on: ubuntu-latest
-    needs: package-deb
+    needs: [package-deb, package-rpm]
     if: github.ref_type == 'tag'
     steps:
       - name: Checkout code
@@ -120,10 +215,24 @@ jobs:
           path: debs
           pattern: '*-deb'
 
-      - name: Upload Binaries to Release
+      - name: Download all rpm artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: rpms
+          pattern: '*-rpm'
+
+      - name: Upload Deb packages to Release
         uses: svenstaro/upload-release-action@v2
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           tag: ${{ github.ref }}
           file_glob: true
           file: debs/*/*.deb
+
+      - name: Upload RPM packages to Release
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          tag: ${{ github.ref }}
+          file_glob: true
+          file: rpms/*/*.rpm

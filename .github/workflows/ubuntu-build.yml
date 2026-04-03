@@ -17,9 +17,7 @@ jobs:
     strategy:
       matrix:
         include:
-          - version: "41"
-            distro: "fedora"
-          - version: "42"
+          - version: "43"
             distro: "fedora"
 
     container:

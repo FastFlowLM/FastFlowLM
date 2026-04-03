@@ -11,9 +11,7 @@ jobs:
     strategy:
       matrix:
         include:
-          - release: "41"
-            distro: "fedora"
-          - release: "42"
+          - release: "43"
             distro: "fedora"
 
     permissions:

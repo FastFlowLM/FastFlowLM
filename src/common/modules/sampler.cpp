@@ -7,6 +7,7 @@
 #pragma once
 
 #include "modules/sampler.hpp"
+#include "grammar/grammar.hpp"
 
 #include <deque>
 #include <algorithm>  // for std::sort
@@ -371,6 +372,33 @@ int Sampler::sample(buffer<bf16>& x) {
     #endif
 
     sampler_penalty_apply_sparse();
+
+    // Grammar-constrained sampling: reject tokens that violate the grammar
+    // BEFORE top-k, so the full vocabulary is considered for filtering.
+    bool grammar_fell_back = false;
+    if (this->grammar) {
+        // Snapshot so we can recover if the grammar masks every token —
+        // otherwise softmax over all -inf produces NaNs and sampling breaks.
+        std::vector<float> pre_grammar(this->logits.begin(),
+                                       this->logits.begin() + this->in_features);
+        this->grammar->apply(this->logits.data(), this->in_features);
+
+        float max_l = -std::numeric_limits<float>::infinity();
+        for (int i = 0; i < this->in_features; i++) {
+            if (this->logits[i] > max_l) max_l = this->logits[i];
+        }
+        if (!std::isfinite(max_l)) {
+            fprintf(stderr, "Sampler: grammar masked all tokens; falling "
+                            "back to unconstrained sampling for this step\n");
+            std::copy(pre_grammar.begin(), pre_grammar.end(),
+                      this->logits.begin());
+            // Skip grammar->accept() below: the sampled token would not
+            // correspond to any valid grammar state transition and advancing
+            // would corrupt the parser state.
+            grammar_fell_back = true;
+        }
+    }
+
     sampler_topk_apply(this->top_k);
     if (this->use_optimized_sampling) {
         softmax_with_topp_minp(this->top_p, this->min_p);
@@ -388,6 +416,13 @@ int Sampler::sample(buffer<bf16>& x) {
 
     int sampled_index = sample_from_probs();
     ring_buffer_update_sparse(sampled_index);
+
+    // Advance the grammar state after the token is selected, unless we
+    // fell back because every token was masked — then the sampled token
+    // is outside the grammar and accepting it would corrupt the parser.
+    if (this->grammar && !grammar_fell_back) {
+        this->grammar->accept(sampled_index);
+    }
 
     return sampled_index;
 }

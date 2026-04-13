@@ -33,6 +33,7 @@
 #include "models/nanbeige/nanbeige_npu.hpp"
 #include "tokenizer/tokenizer.hpp"
 #include "modules/sampler.hpp"
+#include "grammar/grammar.hpp"
 #include "utils/utils.hpp"
 #include "utils/profiler.hpp"
 #include "tensor_utils/q4_npu_eXpress.hpp"
@@ -173,11 +174,15 @@ protected:
 	std::vector<profiler> profiler_list;
 	time_utils::time_with_unit last_prefill_time;
 
-	std::string tool_name_; 
+	std::string tool_name_;
 	bool is_in_tool_block_ = false;
 	std::string buffer_;
 	StreamEventType current_mode_ = StreamEventType::CONTENT;
 	bool waiting_for_header_ = true;
+
+	// Grammar-constrained sampling state (per-request)
+	std::unique_ptr<FlmGrammar> grammar_;
+	std::vector<std::string> token_pieces_cache_;
 
 
 
@@ -280,6 +285,16 @@ public:
 	/// \brief Set the penalty window
 	/// \param penalty_window the penalty window
 	void set_penalty_window(int penalty_window);
+
+	/// \brief Set a GBNF grammar for constrained decoding.
+	/// Builds token-piece lookup on first call (cached), parses the grammar,
+	/// and wires it into the sampler.  Pass empty string to clear.
+	/// \param grammar_str  GBNF grammar text
+	/// \param grammar_root name of the start rule (default "root")
+	void set_grammar(const std::string & grammar_str, const std::string & grammar_root = "root");
+
+	/// \brief Clear any active grammar constraint.
+	void clear_grammar();
 
 	/// \brief Start the ttft timer
 	/// \return the ttft timer

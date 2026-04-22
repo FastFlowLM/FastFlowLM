@@ -9,6 +9,21 @@
 #include <iomanip>
 #include <string>
 
+namespace debug_utils {
+inline bool& quiet_mode() {
+    static bool enabled = false;
+    return enabled;
+}
+
+inline void set_quiet_mode(bool enabled) {
+    quiet_mode() = enabled;
+}
+
+inline bool is_quiet_mode() {
+    return quiet_mode();
+}
+} // namespace debug_utils
+
 #ifndef VERBOSE
 #define VERBOSE 0
 #endif
@@ -109,9 +124,11 @@
 /// \param msg the message to log
 #define header_print(header, msg) \
     do { \
-        std::ostringstream oss; \
-        oss << msg; \
-        std::cout << '[' << header << "]  " << oss.str() << std::endl; \
+        if (!debug_utils::is_quiet_mode()) { \
+            std::ostringstream oss; \
+            oss << msg; \
+            std::cout << '[' << header << "]  " << oss.str() << std::endl; \
+        } \
     } while (0)
 
 /// \brief header_print_r macro, in red color
@@ -119,9 +136,11 @@
 /// \param msg the message to log
 #define header_print_r(header, msg) \
     do { \
-        std::ostringstream oss; \
-        oss << msg; \
-        std::cerr << "\033[31m[" << header << "]  " << oss.str() << "\033[0m" << std::endl; \
+        if (!debug_utils::is_quiet_mode()) { \
+            std::ostringstream oss; \
+            oss << msg; \
+            std::cerr << "\033[31m[" << header << "]  " << oss.str() << "\033[0m" << std::endl; \
+        } \
     } while (0)
 
     
@@ -130,9 +149,11 @@
 /// \param msg the message to log
 #define header_print_g(header, msg) \
     do { \
-        std::ostringstream oss; \
-        oss << msg; \
-        std::cout << "\033[32m[" << header << "]  " << oss.str() << "\033[0m" << std::endl; \
+        if (!debug_utils::is_quiet_mode()) { \
+            std::ostringstream oss; \
+            oss << msg; \
+            std::cout << "\033[32m[" << header << "]  " << oss.str() << "\033[0m" << std::endl; \
+        } \
     } while (0)
 
 /// \brief box_print macro

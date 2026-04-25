@@ -1326,6 +1326,36 @@ void RestHandler::handle_openai_audio_transcriptions(const json& request,
                     if (seg_end > max_end) max_end = seg_end;
                 }
 
+                // Fallback: if no segments were emitted (e.g. fewer than two
+                // timestamp markers were produced for very short clips, or every
+                // candidate segment trimmed to empty), surface the raw transcript
+                // as a single segment so verbose_json never drops text the model
+                // actually produced.
+                if (segments.empty()) {
+                    std::string fallback_text = std::regex_replace(raw_output, ts_regex, "");
+                    size_t fa = fallback_text.find_first_not_of(" \t\n\r");
+                    if (fa != std::string::npos) {
+                        size_t fb = fallback_text.find_last_not_of(" \t\n\r");
+                        fallback_text = fallback_text.substr(fa, fb - fa + 1);
+                        float fb_start = markers.empty() ? 0.0f : std::get<0>(markers.front());
+                        float fb_end = markers.empty() ? 0.0f : std::get<0>(markers.back());
+                        segments.push_back({
+                            {"id", 0},
+                            {"seek", 0},
+                            {"start", fb_start},
+                            {"end", fb_end},
+                            {"text", std::string(" ") + fallback_text},
+                            {"tokens", json::array()},
+                            {"temperature", 0.0},
+                            {"avg_logprob", 0.0},
+                            {"compression_ratio", 0.0},
+                            {"no_speech_prob", 0.0}
+                        });
+                        plain_text = fallback_text;
+                        if (fb_end > max_end) max_end = fb_end;
+                    }
+                }
+
                 response = {
                     {"task", "transcribe"},
                     {"language", language},

@@ -1262,6 +1262,8 @@ void RestHandler::handle_openai_audio_transcriptions(const json& request,
         if (this->asr) {
             std::string response_format = request.value("response_format", std::string("json"));
             bool want_verbose = (response_format == "verbose_json");
+            std::string raw_output;
+            std::string language;
 #ifndef FASTFLOWLM_LINUX_LIMITED_MODELS
             this->whisper_engine->load_audio(audio_raw);
             header_print("FLM", "Transforming audio to text...");
@@ -1271,13 +1273,11 @@ void RestHandler::handle_openai_audio_transcriptions(const json& request,
                 true,
                 want_verbose,
                 std::cout);
-            std::string raw_output = audio_result.first;
-            std::string language = audio_result.second;
+            raw_output = audio_result.first;
+            language = audio_result.second;
             std::cout << std::endl;
 #else
             throw std::runtime_error("ASR models are not supported in this build");
-            std::string raw_output;
-            std::string language;
 #endif
 
             static const std::regex ts_regex(R"(<\|(\d+\.\d+)\|>)");

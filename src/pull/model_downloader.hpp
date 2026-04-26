@@ -15,6 +15,14 @@
 #include <string>
 #include <iostream>
 
+struct ModelDownloadSize {
+    double total_mb = 0.0;
+    double missing_mb = 0.0;
+    size_t total_files = 0;
+    size_t missing_files = 0;
+    bool exact = false;
+};
+
 class ModelDownloader {
 public:
     ModelDownloader(model_list& models);
@@ -25,6 +33,9 @@ public:
     // Download model files if not present
     bool pull_model(const std::string& model_tag, bool force_redownload = false);
     
+    // Get total and missing download size information
+    ModelDownloadSize get_download_size_info(const std::string& model_tag);
+
     // Get list of missing files for a model
     std::vector<std::string> get_missing_files(const std::string& model_tag);
     

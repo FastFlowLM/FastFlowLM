@@ -51,6 +51,7 @@ inline void print_help(po::options_description& general) {
     std::cout << "\tflm list" << std::endl;
     std::cout << "\tflm list --quiet" << std::endl;
     std::cout << "\tflm list --filter installed" << std::endl;
+    std::cout << "\tflm list --sizes" << std::endl;
     std::cout << std::endl;
 }
 
@@ -73,14 +74,16 @@ bool parse_options(int argc, char *argv[], program_args_t& parsed_args) {
              "If load asr model")
             ("embed,e", po::value<bool>(&parsed_args.embed)->default_value(0),
             "If load embed model")
-            ("host", po::value<std::string>(&parsed_args.host)->default_value("127.0.0.1"), 
+            ("host", po::value<std::string>(&parsed_args.host)->default_value("127.0.0.1"),
              "Set the server address (for serve command)")
-            ("port,p", po::value<int>(&parsed_args.port)->default_value(-1), 
+            ("port,p", po::value<int>(&parsed_args.port)->default_value(-1),
              "Set the server port number (for serve command)")
             ("force", po::bool_switch(&parsed_args.force_redownload),
              "Force re-download even if model exists (for pull command)")
             ("filter", po::value<std::string>(&parsed_args.list_filter)->default_value("all"),
              "Show models: all | installed | not-installed")
+            ("sizes", po::bool_switch(&parsed_args.list_sizes),
+             "Show total and missing download sizes when listing models")
             ("quiet", po::bool_switch(&parsed_args.sub_process_mode),
              "Quiet mode, for sub-process usages")
             ("json,j", po::bool_switch(&parsed_args.json_output),
@@ -201,7 +204,7 @@ bool parse_options(int argc, char *argv[], program_args_t& parsed_args) {
         // Note: serve command allows empty model_tag (will use default)
 
         // Validate power mode for run/serve commands
-        if ((parsed_args.command == "run" || parsed_args.command == "serve") && 
+        if ((parsed_args.command == "run" || parsed_args.command == "serve") &&
             !parsed_args.power_mode.empty()) {
             const std::vector<std::string> valid_modes = {"default", "powersaver", "balanced", "performance", "turbo"};
             if (std::find(valid_modes.begin(), valid_modes.end(), parsed_args.power_mode) == valid_modes.end()) {

@@ -34,6 +34,7 @@
 #include "utils/vm_args.hpp"
 #include <boost/program_options.hpp>
 #include "benchmarking.hpp"
+#include <iomanip>
 
 #ifndef _WIN32
 #include <fcntl.h>
@@ -507,7 +508,7 @@ int main(int argc, char* argv[]) {
   
     if (parsed_args.command == "serve" || parsed_args.command == "run" || parsed_args.command == "bench"){
         // Configure AMD XRT for the specified power mode
-        if (parsed_args.power_mode == "default" || parsed_args.power_mode == "powersaver" || parsed_args.power_mode == "balanced" || 
+        if (parsed_args.power_mode == "default" || parsed_args.power_mode == "powersaver" || parsed_args.power_mode == "balanced" ||
             parsed_args.power_mode == "performance" || parsed_args.power_mode == "turbo") {
 #ifdef _WIN32
             std::string xrt_cmd = "cd \"C:\\Windows\\System32\\AMD\" && .\\xrt-smi.exe configure --pmode " + parsed_args.power_mode + " > NUL 2>&1";
@@ -680,6 +681,14 @@ int main(int argc, char* argv[]) {
                     if ((parsed_args.list_filter == "installed") == is_present || parsed_args.list_filter == "all") {
                         nlohmann::json model_entry = model;
                         model_entry["installed"] = is_present ? true : false;
+                        if (parsed_args.list_sizes) {
+                            auto size_info = downloader.get_download_size_info(model["name"].get<std::string>());
+                            model_entry["download_total_size_mb"] = size_info.total_mb;
+                            model_entry["download_missing_size_mb"] = size_info.missing_mb;
+                            model_entry["download_total_files"] = size_info.total_files;
+                            model_entry["download_missing_files"] = size_info.missing_files;
+                            model_entry["download_size_exact"] = size_info.exact;
+                        }
                         output_json["models"].push_back(model_entry);
                     }
                 }
@@ -695,6 +704,21 @@ int main(int argc, char* argv[]) {
                         std::cout << "  - " << model["name"].get<std::string>();
                         if (!parsed_args.sub_process_mode) {
                             std::cout << (is_present ? " ✅" : " ⏬");
+                        }
+                        if (parsed_args.list_sizes) {
+                            auto size_info = downloader.get_download_size_info(model["name"].get<std::string>());
+                            if (size_info.exact) {
+                                std::cout << "  total: "
+                                          << std::fixed << std::setprecision(2)
+                                          << size_info.total_mb / 1024.0 << " GB";
+                                if (!is_present) {
+                                    std::cout << "  dl: "
+                                              << std::fixed << std::setprecision(2)
+                                              << size_info.missing_mb / 1024.0 << " GB";
+                                }
+                            } else {
+                                std::cout << "  size: unknown";
+                            }
                         }
                         std::cout << std::endl;
                         any_model_listed = true;

@@ -13,8 +13,56 @@
 /// \brief Constructor
 /// \param models the model list
 /// \return the model downloader
-ModelDownloader::ModelDownloader(model_list& models) 
+ModelDownloader::ModelDownloader(model_list& models)
     : supported_models(models), curl_init() {
+}
+
+/// \brief Get total and missing download size information for a model
+/// \param model_tag the model tag
+/// \return model download size information
+ModelDownloadSize ModelDownloader::get_download_size_info(const std::string& model_tag) {
+    ModelDownloadSize info;
+
+    try {
+        auto [new_model_tag, model_info] = supported_models.get_model_info(model_tag);
+
+        std::string file_url = model_info["file_url"];
+        std::string model_path = supported_models.get_model_path(new_model_tag);
+        std::vector<std::string> model_files = model_info["files"];
+
+        std::string hf_response = download_utils::download_string(file_url);
+        nlohmann::json hf_model_infos = nlohmann::json::parse(hf_response);
+
+        for (const auto& filename : model_files) {
+            auto it = std::find_if(
+                hf_model_infos.begin(),
+                hf_model_infos.end(),
+                [&](const nlohmann::json& f) {
+                    return f.contains("path") && f["path"] == filename;
+                }
+            );
+
+            if (it == hf_model_infos.end() || !it->contains("size")) {
+                continue;
+            }
+
+            double file_size_mb = static_cast<double>((*it)["size"]) / 1024.0 / 1024.0;
+            info.total_mb += file_size_mb;
+            info.total_files++;
+
+            std::string local_path = get_model_file_path(model_path, filename);
+            if (!file_exists(local_path)) {
+                info.missing_mb += file_size_mb;
+                info.missing_files++;
+            }
+        }
+
+        info.exact = true;
+    } catch (const std::exception&) {
+        info.exact = false;
+    }
+
+    return info;
 }
 
 /// \brief Check if the model is downloaded

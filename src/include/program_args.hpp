@@ -29,6 +29,7 @@ struct program_args_t {
 
     // for list command
     std::string list_filter = "all";
+    bool list_sizes = false;
 
     // for pull command
     bool force_redownload = false;

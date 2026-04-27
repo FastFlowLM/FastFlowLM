@@ -106,6 +106,7 @@ if(NOT WIN32)
     find_library(READLINE_LIBRARY readline)
     find_library(READLINE_TINFO_LIBRARY tinfo)
     find_library(READLINE_NCURSES_LIBRARY ncurses)
+    find_library(ONIG_LIBRARY onig)
 endif()
 
 # ———————————————————————————————————————————————
@@ -276,6 +277,12 @@ else()
         elseif(READLINE_NCURSES_LIBRARY)
             target_link_libraries(flm PUBLIC ${READLINE_NCURSES_LIBRARY})
         endif()
+    endif()
+
+    if(ONIG_LIBRARY)
+        target_link_libraries(flm PUBLIC ${ONIG_LIBRARY})
+    else()
+        target_link_libraries(flm PUBLIC onig)
     endif()
 
     # Link with dl library for dlopen() support (used for preloading bundled libraries)

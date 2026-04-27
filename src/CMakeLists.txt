@@ -48,7 +48,8 @@ if(CMAKE_CXX_STANDARD LESS 17)
 endif()
 
 add_subdirectory(${CMAKE_SOURCE_DIR}/../third_party/tokenizers-cpp
-                 ${CMAKE_BINARY_DIR}/tokenizers-cpp)
+                 ${CMAKE_BINARY_DIR}/tokenizers-cpp
+                 EXCLUDE_FROM_ALL)
 
 # ———————————————————————————————————————————————
 # Gather your sources

@@ -342,9 +342,9 @@ install(DIRECTORY xclbins DESTINATION share/flm)
 if(NOT WIN32 AND NOT CMAKE_INSTALL_PREFIX STREQUAL "/usr" AND NOT CMAKE_INSTALL_PREFIX STREQUAL "/usr/local")
     install(CODE "
         message(STATUS \"Creating symlink for flm\")
-        file(MAKE_DIRECTORY \"$ENV{DESTDIR}/usr/local/bin\")
+        file(MAKE_DIRECTORY \"\$ENV{DESTDIR}/usr/local/bin\")
         execute_process(COMMAND \"${CMAKE_COMMAND}\" -E create_symlink
             \"${CMAKE_INSTALL_PREFIX}/bin/flm\"
-            \"$ENV{DESTDIR}/usr/local/bin/flm\")"
+            \"\$ENV{DESTDIR}/usr/local/bin/flm\")"
     )
 endif()

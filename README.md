@@ -17,23 +17,23 @@ Run large language models — now with **Vision**, **Audio**, **Embedding** and 
 🤝 **Think Ollama — but deeply optimized for NPUs.**  
 ✨ **From Idle Silicon to Instant Power — FastFlowLM Makes Ryzen™ AI Shine.**
 
-> FastFlowLM (FLM) supports all Ryzen™ AI Series chips with XDNA2 NPUs (Strix, Strix Halo, Kraken, and Gorgon Point).
+> FastFlowLM (FLM) supports all Ryzen™ AI Series chips with XDNA2 NPUs (Strix, Strix Halo, Kraken, Gorgon Point) and XDNA1 NPUs (Ryzen 5 8600G, Ryzen 5 8500G).
 
 ---
 
 ## 🔗 Quick Links
 
-  🔽 **[Download](https://github.com/FastFlowLM/FastFlowLM/releases/latest/download/flm-setup.exe)** | 📊 **[Benchmarks](https://fastflowlm.com/docs/benchmarks/)** | 📦 **[Model List](https://fastflowlm.com/docs/models/)**  
+  🔽 **[Download](https://github.com/FastFlowLM/FastFlowLM/releases/latest/download/flm-setup.exe)** | 📊 **[Benchmarks](https://fastflowlm.com/docs/benchmarks/)** | 📦 **[Model List](https:[...]
 
   🐧 **[Linux Getting Started Guide](./docs/linux-getting-started.md)**
 
-  📖 **[Docs](https://fastflowlm.com/docs)** | 📺 **[Demos](https://www.youtube.com/playlist?list=PLf87s9UUZrJoDdz639Yc6w1UTyJ4cFHZ1)** | 🧪 **[Test Drive](https://fastflowlm.com/docs/#-test-drive-remote-demo)** | 💬 **[Discord](https://discord.gg/z24t23HsHF)** 
+  📖 **[Docs](https://fastflowlm.com/docs)** | 📺 **[Demos](https://www.youtube.com/playlist?list=PLf87s9UUZrJoDdz639Yc6w1UTyJ4cFHZ1)** | 🧪 **[Test Drive](https://fastflowlm.com/docs/#-test[...]
 
 ---
 
 ## 🚀 Quick Start
 
-A packaged FLM Windows installer is available here: [**flm-setup.exe**](https://github.com/FastFlowLM/FastFlowLM/releases/latest/download/flm-setup.exe). For more details, see the [release notes](https://github.com/FastFlowLM/FastFlowLM/releases/).
+A packaged FLM Windows installer is available here: [**flm-setup.exe**](https://github.com/FastFlowLM/FastFlowLM/releases/latest/download/flm-setup.exe). For more details, see the [release notes]([...]
 
 📺 [**Watch the quick start video (Windows)**](https://www.youtube.com/watch?v=mYOfDNkyBII)
 
@@ -56,7 +56,7 @@ flm run llama3.2:1b
 >   - **Linux**: `~/.config/flm/`
 > - During installation on Windows, you can select a different base folder (e.g., if you choose `C:\Users\<USER>\flm`, models will be saved under `C:\Users\<USER>\flm\models\`).
 > - On Linux, you can override the default location by setting the `FLM_MODEL_PATH` environment variable.
-> - ⚠️ If HuggingFace is not accessible in your region, manually download the model ([check this issue](https://github.com/FastFlowLM/FastFlowLM/issues/2)) and place it in the chosen directory.   
+> - ⚠️ If HuggingFace is not accessible in your region, manually download the model ([check this issue](https://github.com/FastFlowLM/FastFlowLM/issues/2)) and place it in the chosen directory[...]
 
 🎉🚀 FastFlowLM (FLM) is ready — your NPU is unlocked and you can start chatting with models right away!
 
@@ -71,7 +71,7 @@ To start the local server (**Server Mode**):
 ```powershell
 flm serve llama3.2:1b
 ```
-> The model tag (e.g., `llama3.2:1b`) sets the initial model, which is optional. If another model is requested, FastFlowLM will automatically switch to it. Local server is on port 52625 (default).  
+> The model tag (e.g., `llama3.2:1b`) sets the initial model, which is optional. If another model is requested, FastFlowLM will automatically switch to it. Local server is on port 52625 (default).[...]
 
 **[![FastFlowLM Docs](https://img.shields.io/badge/FastFlowLM-Detailed%20Instructions-red?style=flat&logo=readthedocs)](https://fastflowlm.com/docs/instructions/)**
 
@@ -79,9 +79,9 @@ flm serve llama3.2:1b
 
 ## 📰 In the News
 
-- 03/11/2026 🎉 FLM now supports Linux 🐧 ! To get started, check out the **[quick start guide](https://fastflowlm.com/docs/install_lin/)** or the **[Lemonade Server docs](https://lemonade-server.ai/flm_npu_linux.html)**, and watch the **[short video](https://www.youtube.com/watch?v=tXRchP3sKA8)** for a quick walkthrough of FLM on Linux via Lemonade 🍋.
+- 03/11/2026 🎉 FLM now supports Linux 🐧 ! To get started, check out the **[quick start guide](https://fastflowlm.com/docs/install_lin/)** or the **[Lemonade Server docs](https://lemonade-ser[...]
 
-- 10/01/2025 🎉 FLM was integrated into AMD's **[Lemonade Server](https://lemonade-server.ai/)** 🍋. Watch this **[short demo](https://www.youtube.com/watch?v=w0Tb3h4WUnE)** about using FLM in Lemonade.
+- 10/01/2025 🎉 FLM was integrated into AMD's **[Lemonade Server](https://lemonade-server.ai/)** 🍋. Watch this **[short demo](https://www.youtube.com/watch?v=w0Tb3h4WUnE)** about using FLM in[...]
 
 ---
 
@@ -119,7 +119,7 @@ For commercial licensing inquiries, email us: info@fastflowlm.com
 
 ---
 
-💬 Have **feedback/issues** or want **early access** to our new releases? [Open an issue](https://github.com/fastflowlm/fastflowlm/issues/new) or [Join our Discord community](https://discord.gg/z24t23HsHF)
+💬 Have **feedback/issues** or want **early access** to our new releases? [Open an issue](https://github.com/fastflowlm/fastflowlm/issues/new) or [Join our Discord community](https://discord.gg[...]
 
 ---
 
@@ -190,4 +190,3 @@ More details on the exact procedure, with dependencies to be installed, for linu
         ```bash
         cmake --install build
         ```
-

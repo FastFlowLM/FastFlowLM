@@ -36,16 +36,16 @@
 
 ///@brief npu device
 ///@note This is an enum to specify the npu device
-///@warning npu1 is not supported yet
+///@warning XDNA1 (device_npu1) is now supported for Ryzen 5 8600G
 typedef enum{
-    device_npu1,
-    device_npu2
+    device_npu1,    // XDNA1 - AMD Ryzen 5 8600G, Ryzen 5 8500G, etc. (4 columns)
+    device_npu2     // XDNA2 - Ryzen AI, Ryzen AI Pro (8 columns)
 } npu_device;
 
 ///@brief npu tiles
 ///@note This is an enum to specify the npu tiles
 ///@note The low 4 bit is col, the high 4 bit is row
-///@warning Though npu1 only has 4 cols, the enum defines 8 cols for convenience
+///@warning XDNA1 only uses 4 cols (0-3), XDNA2 uses 8 cols (0-7)
 typedef enum: uint32_t{
     IT0 = 0x00,  IT1 = 0x01,  IT2 = 0x02,  IT3 = 0x03,
     IT4 = 0x04,  IT5 = 0x05,  IT6 = 0x06,  IT7 = 0x07,
@@ -66,6 +66,7 @@ typedef enum: uint32_t{
 ///@param col column of the tile
 ///@return the tile
 ///@note This is a helper function to get the tile from the row and column
+///@note For XDNA1, col must be 0-3; for XDNA2, col can be 0-7
 inline npu_tiles get_tile(uint32_t row, uint32_t col){
     assert(col < 8 && row < 6);
     return static_cast<npu_tiles>((row << 4) | col);
@@ -225,24 +226,25 @@ class npu_sequence{
         
         ///@brief setup the npu device
         ///@param device the npu device
-        ///@note The function will setup the npu device
+        ///@note The function will setup the npu device based on device generation
         ///@warning The function is only used for the npu sequence that is not pre-generated
         void setup_device(npu_device device){
             if (device == device_npu1){
-                // Might be wrong
+                // XDNA1: AMD Ryzen 5 8600G, Ryzen 5 8500G, etc.
                 this->npu_major = 0;
-                this->npu_minor = 1;
-                this->npu_dev_gen = 1;
+                this->npu_minor = 0;
+                this->npu_dev_gen = 2;    // XDNA1 generation identifier
                 this->npu_rows = 6;
-                this->npu_cols = 4;
+                this->npu_cols = 4;       // XDNA1 has 4 columns
                 this->npu_mem_tile_rows = 1;
             }
             else if (device == device_npu2){
+                // XDNA2: Ryzen AI, Ryzen AI Pro (Strix, Strix Halo, Kraken, Gorgon Point)
                 this->npu_major = 0;
                 this->npu_minor = 1;
-                this->npu_dev_gen = 4;
+                this->npu_dev_gen = 4;    // XDNA2 generation identifier
                 this->npu_rows = 6;
-                this->npu_cols = 8;
+                this->npu_cols = 8;       // XDNA2 has 8 columns
                 this->npu_mem_tile_rows = 1;
             }
         }

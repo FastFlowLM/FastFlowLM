@@ -255,7 +255,7 @@ NonStreamResult Qwen3_5VL::parse_nstream_content(const std::string response_text
         size_t brace_end = json_str.rfind("}"); // Find the last closing brace
 
         if (brace_start != std::string::npos && brace_end != std::string::npos && brace_end > brace_start) {
-            arguments = json_str.substr(brace_start, brace_end - brace_start);
+            arguments = json_str.substr(brace_start, brace_end - brace_start + 1);
         }
     }
 

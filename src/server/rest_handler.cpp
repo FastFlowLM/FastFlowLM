@@ -308,6 +308,12 @@ void RestHandler::ensure_embed_model_loaded(const std::string& model_tag) {
 #endif
 }
 
+///@brief Clear KV cache and invalidate prompt cache
+void RestHandler::reset_context() {
+    auto_chat_engine->clear_context();
+    prompt_cache.reset();
+}
+
 ///@brief Configure chat engine parameters from options and request
 ///@param options the options JSON object
 ///@param request the request JSON object
@@ -475,13 +481,13 @@ void RestHandler::handle_generate(const json& request,
                 if (!success){
                     json error_response = {{"error", "Max length reached"}};
                     send_response(error_response);
-                    this->auto_chat_engine->clear_context();
+                    this->reset_context();
                     return;
                 }
             } catch (const std::exception& e) {
                 json error_response = {{"error", e.what()}};
                 send_response(error_response);
-                this->auto_chat_engine->clear_context();
+                this->reset_context();
                 return;
             }
             try {
@@ -489,7 +495,7 @@ void RestHandler::handle_generate(const json& request,
             } catch (const std::exception& e) {
                 json error_response = {{"error", e.what()}};
                 send_response(error_response);
-                this->auto_chat_engine->clear_context();
+                this->reset_context();
                 return;
             }
             auto total_end_time = time_utils::now();
@@ -508,13 +514,13 @@ void RestHandler::handle_generate(const json& request,
                 if (!success){
                     json error_response = {{"error", "Max length reached"}};
                     send_response(error_response);
-                    this->auto_chat_engine->clear_context();
+                    this->reset_context();
                     return;
                 }
             } catch (const std::exception& e) {
                 json error_response = {{"error", e.what()}};
                 send_response(error_response);
-                this->auto_chat_engine->clear_context();
+                this->reset_context();
                 return;
             }
             try {
@@ -522,7 +528,7 @@ void RestHandler::handle_generate(const json& request,
             } catch (const std::exception& e) {
                 json error_response = {{"error", e.what()}};
                 send_response(error_response);
-                this->auto_chat_engine->clear_context();
+                this->reset_context();
                 return;
             }
             std::string response_text = ss.str();
@@ -591,13 +597,13 @@ void RestHandler::handle_chat(const json& request,
                 if (!success){
                     json error_response = {{"error", "Max length reached"}};
                     send_response(error_response);
-                    this->auto_chat_engine->clear_context();
+                    this->reset_context();
                     return;
                 }
             } catch (const std::exception& e) {
                 json error_response = {{"error", e.what()}};
                 send_response(error_response);
-                this->auto_chat_engine->clear_context();
+                this->reset_context();
                 return;
             }
             try {
@@ -605,22 +611,22 @@ void RestHandler::handle_chat(const json& request,
                 if (!success){
                     json error_response = {{"error", "Max length reached"}};
                     send_response(error_response);
-                    this->auto_chat_engine->clear_context();
+                    this->reset_context();
                     return;
                 }
             } catch (const std::exception& e) {
                 json error_response = {{"error", e.what()}};
                 send_response(error_response);
-                this->auto_chat_engine->clear_context();
+                this->reset_context();
                 return;
             }
             auto total_end_time = time_utils::now();
             meta_info.total_duration = (uint64_t)time_utils::duration_ns(total_start_time, total_end_time).first;
-            
+
             ostream.finalize_chat(meta_info);
             // auto history = this->chat_engine->get_history();
             // std::cout << "history: " << history.first << std::endl;
-            this->auto_chat_engine->clear_context();
+            this->reset_context();
         } else {
             // Non-streaming response
             uniformed_input.messages = messages;
@@ -633,7 +639,7 @@ void RestHandler::handle_chat(const json& request,
             } catch (const std::exception& e) {
                 json error_response = {{"error", e.what()}};
                 send_response(error_response);
-                this->auto_chat_engine->clear_context();
+                this->reset_context();
                 return;
             }
             //std::string response_text = chat_engine->generate_with_prompt(meta_info, prompts, length_limit, std::cout, payload);
@@ -660,7 +666,7 @@ void RestHandler::handle_chat(const json& request,
             
             // auto history = this->chat_engine->get_history();
             // std::cout << "history: " << history.first << std::endl;
-            this->auto_chat_engine->clear_context();
+            this->reset_context();
         }
     } catch (const std::exception& e) {
         json error_response = {{"error", e.what()}};
@@ -974,8 +980,7 @@ void RestHandler::handle_openai_chat_completion(const json& request,
                         meta_info.stop_reason = CANCEL_DETECTED;
                         header_print("❌ ", "Prefill Cancelled!");
                         ostream.finalize(meta_info);
-                        this->auto_chat_engine->clear_context();
-                        this->prompt_cache.reset();
+                        this->reset_context();
                         return;
                     }
 
@@ -987,13 +992,13 @@ void RestHandler::handle_openai_chat_completion(const json& request,
                         }}
                     };
                     send_response(error_response);
-                    this->auto_chat_engine->clear_context();
+                    this->reset_context();
                     return;
                 }
             } catch (const std::exception& e) {
                 json error_response = {{"error", e.what()}};
                 send_response(error_response);
-                this->auto_chat_engine->clear_context();
+                this->reset_context();
                 return;
             }
             header_print("FLM", "Start generating...");
@@ -1002,7 +1007,7 @@ void RestHandler::handle_openai_chat_completion(const json& request,
             } catch (const std::exception& e) {
                 json error_response = {{"error", e.what()}};
                 send_response(error_response);
-                this->auto_chat_engine->clear_context();
+                this->reset_context();
                 return;
             }
             if (meta_info.stop_reason == CANCEL_DETECTED) {
@@ -1013,7 +1018,6 @@ void RestHandler::handle_openai_chat_completion(const json& request,
             ostream.finalize(meta_info);
         }
         else {
-            this->auto_chat_engine->clear_context();
             nullstream nstream;
             json response;
             std::string response_text;
@@ -1025,8 +1029,7 @@ void RestHandler::handle_openai_chat_completion(const json& request,
                         meta_info.stop_reason = CANCEL_DETECTED;
                         header_print("❌ ", "Prefill Cancelled!");
                         send_response(response);
-                        this->auto_chat_engine->clear_context();
-                        this->prompt_cache.reset();
+                        this->reset_context();
                         return;
                     }
                     json error_response = {
@@ -1037,13 +1040,13 @@ void RestHandler::handle_openai_chat_completion(const json& request,
                         }}
                     };
                     send_response(error_response);
-                    this->auto_chat_engine->clear_context();
+                    this->reset_context();
                     return;
                 }
             } catch (const std::exception& e) {
                 json error_response = {{"error", e.what()}};
                 send_response(error_response);
-                this->auto_chat_engine->clear_context();
+                this->reset_context();
                 return;
             }
             header_print("FLM", "Start generating...");
@@ -1052,7 +1055,7 @@ void RestHandler::handle_openai_chat_completion(const json& request,
             } catch (const std::exception& e) {
                 json error_response = {{"error", e.what()}};
                 send_response(error_response);
-                this->auto_chat_engine->clear_context();
+                this->reset_context();
                 return;
             }
             // check response_text
@@ -1080,7 +1083,6 @@ void RestHandler::handle_openai_chat_completion(const json& request,
                 header_print("❌ ", "Generation Cancelled!");
             }
             send_response(response);
-            this->prompt_cache.reset();
         }
 
     } catch (const std::exception& e) {
@@ -1207,13 +1209,13 @@ void RestHandler::handle_openai_completion(const json& request,
                 if (!success) {
                     json error_response = { {"error", "Max length reached"} };
                     send_response(error_response);
-                    this->auto_chat_engine->clear_context();
+                    this->reset_context();
                     return;
                 }
             } catch (const std::exception& e) {
                 json error_response = {{"error", e.what()}};
                 send_response(error_response);
-                this->auto_chat_engine->clear_context();
+                this->reset_context();
                 return;
             }
             try {
@@ -1221,12 +1223,12 @@ void RestHandler::handle_openai_completion(const json& request,
             } catch (const std::exception& e) {
                 json error_response = {{"error", e.what()}};
                 send_response(error_response);
-                this->auto_chat_engine->clear_context();
+                this->reset_context();
                 return;
             }
             ostream.finalize(meta_info);
 
-            this->auto_chat_engine->clear_context();
+            this->reset_context();
         }
         else {
             std::stringstream ss;
@@ -1238,13 +1240,13 @@ void RestHandler::handle_openai_completion(const json& request,
                 if (!success) {
                     json error_response = { {"error", "Max length reached"} };
                     send_response(error_response);
-                    this->auto_chat_engine->clear_context();
+                    this->reset_context();
                     return;
                 }
             } catch (const std::exception& e) {
                 json error_response = {{"error", e.what()}};
                 send_response(error_response);
-                this->auto_chat_engine->clear_context();
+                this->reset_context();
                 return;
             }
             try {
@@ -1252,7 +1254,7 @@ void RestHandler::handle_openai_completion(const json& request,
             } catch (const std::exception& e) {
                 json error_response = {{"error", e.what()}};
                 send_response(error_response);
-                this->auto_chat_engine->clear_context();
+                this->reset_context();
                 return;
             }
             std::string response_text = ss.str();

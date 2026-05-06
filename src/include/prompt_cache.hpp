@@ -109,11 +109,11 @@ public:
                 bool has_tool_call = msg.contains("tool_calls");
                 bool skip_this_message = (role == "tool") || has_tool_call;
                 if (template_type == chat_template_type_t::harmony) {
-                    skip_this_message = false; 
+                    skip_this_message = false;
                 }
 
                 if (skip_this_message) continue;
-                    
+
                 if(i < messages.size() - 2)
                     check_sum_to_compare = _calculate_checksum(content.data(), content.size(), check_sum_to_compare);
                 new_checksum = _calculate_checksum(content.data(), content.size(), new_checksum);
@@ -138,15 +138,16 @@ public:
         uint64_t new_checksum = 0;
         for (size_t i = 0; i < messages.size(); ++i) {
             const auto& msg = messages[i];
+            const std::string role = msg.value("role", "");
             const std::string content = msg.value("content", "");
+            bool has_tool_call = msg.contains("tool_calls");
+            bool skip_this_message = (role == "tool") || has_tool_call;
+            if (skip_this_message) continue;
             new_checksum = _calculate_checksum(content.data(), content.size(), new_checksum);
         }
         checksum_ = new_checksum;
     }
 
-    /// @brief Reset the checksum to force cache miss
-    /// @note This function increments the checksum value by 1 to ensure that
-    ///       the next call to can_use_cache will result in a cache miss.
     void reset() {
         checksum_ = checksum_ + 1;
     }

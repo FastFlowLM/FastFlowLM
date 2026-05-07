@@ -34,6 +34,7 @@
 #include "utils/vm_args.hpp"
 #include <boost/program_options.hpp>
 #include "benchmarking.hpp"
+#include "service.hpp"
 
 #ifndef _WIN32
 #include <fcntl.h>
@@ -704,6 +705,13 @@ int main(int argc, char* argv[]) {
                     std::cout << "  No models found for the specified filter." << std::endl;
                 }
             }
+        }
+        else if (parsed_args.command == "service") {
+            if (parsed_args.model_tag.empty() || parsed_args.model_tag == "model-faker") {
+                std::cerr << "Usage: flm service <install|uninstall|start|stop|status>" << std::endl;
+                return 1;
+            }
+            return service_cmd::handle_service_command(parsed_args.model_tag, parsed_args);
         }
         else {
             // Invalid command, this will be used to show the invalid command

@@ -31,6 +31,7 @@ inline void print_help(po::options_description& general) {
     std::cout << "  help                - Show this help message" << std::endl;
     std::cout << "  port                - Show the default server port" << std::endl;
     std::cout << "  validate            - Validate the NPU stack" << std::endl;
+    std::cout << "  service <action>    - Manage systemd service (install|uninstall|start|stop|status)" << std::endl;
     std::cout << std::endl;
     std::cout << general << std::endl;
     std::cout << "Examples:" << std::endl;
@@ -168,7 +169,7 @@ bool parse_options(int argc, char *argv[], program_args_t& parsed_args) {
             return false;
         }
 
-        if (parsed_args.command != "serve")
+        if (parsed_args.command != "serve" && parsed_args.command != "service")
         {
             if (!vm["socket"].defaulted())
             {

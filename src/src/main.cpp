@@ -635,27 +635,11 @@ int main(int argc, char* argv[]) {
             // server->stop();
         }
         else if (parsed_args.command == "pull") {
-            // Check if the model is already downloaded, if true, the model will not be downloaded
-            // Check if model is already downloaded
-            if (!parsed_args.force_redownload && downloader.is_model_downloaded(parsed_args.model_tag)) {
-                header_print("FLM", "Model is already downloaded.");
-                // Show missing files if any, this will be used to show the missing files
-                auto missing_files = downloader.get_missing_files(parsed_args.model_tag);
-                if (!missing_files.empty()) {
-                    header_print("FLM", "Missing files:");
-                    for (const auto& file : missing_files) {
-                        std::cout << "  - " << file << std::endl;
-                    }
-                } else {
-                    header_print("FLM", "All required files are present.");
-                }
-            } else {
-                // Download the model, this will be used to download the model
-                bool success = downloader.pull_model(parsed_args.model_tag, parsed_args.force_redownload);
-                if (!success) {
-                    header_print("ERROR", "Failed to pull model: " + parsed_args.model_tag);
-                    return 1;
-                }
+            // Always call pull_model on explicit pull; it will detect missing and partial files
+            bool success = downloader.pull_model(parsed_args.model_tag, parsed_args.force_redownload);
+            if (!success) {
+                header_print("ERROR", "Failed to pull model: " + parsed_args.model_tag);
+                return 1;
             }
         }
         else if (parsed_args.command == "remove") {

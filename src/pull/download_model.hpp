@@ -38,6 +38,9 @@ bool download_file(const std::string& url, const std::string& local_path, bool i
 // Download content from URL to a string
 std::string download_string(const std::string& url);
 
+// Query the remote file size via a HEAD request. Returns -1 on failure.
+curl_off_t get_remote_file_size(const std::string& url);
+
 // Download multiple files with progress tracking
 bool download_multiple_files(const nlohmann::json downloads,
                            std::function<void(size_t, size_t)> progress_cb = nullptr);

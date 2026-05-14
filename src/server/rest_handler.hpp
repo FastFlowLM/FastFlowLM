@@ -111,6 +111,7 @@ private:
     bool ensure_model_loaded(const std::string& model_tag);
     void ensure_asr_model_loaded(const std::string& model_tag);
     void ensure_embed_model_loaded(const std::string& model_tag);
+    void reset_context();
     void configure_chat_engine_parameters(const json& options, const json& request);
     json build_nstream_response(std::string response_text);
 

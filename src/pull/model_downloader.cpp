@@ -88,23 +88,13 @@ bool ModelDownloader::pull_model(const std::string& model_tag, bool force_redown
         header_print("FLM", "Model: " + new_model_tag);
         header_print("FLM", "Name: " + model_name);
         
-        // Check if model is already downloaded
-        if (!force_redownload && is_model_downloaded(new_model_tag)) {
-            header_print("FLM", "Model already downloaded. Use --force to re-download.");
-            return true;
-        }
-
         // If force, remove the model first
         if (force_redownload) {
             remove_model(new_model_tag);
         }
         
-        // Get missing files
+        // Get missing files (by name only — partial files are handled by build_download_list)
         auto missing_files = get_missing_files(new_model_tag);
-        if (missing_files.empty() && !force_redownload) {
-            header_print("FLM", "All files already present.");
-            return true;
-        }
         
         if (!missing_files.empty()) {
             header_print("FLM", "Missing files (" + std::to_string(missing_files.size()) + "):");
@@ -124,16 +114,17 @@ bool ModelDownloader::pull_model(const std::string& model_tag, bool force_redown
             }
         }
         
-        // Build download list
+        // Build download list (also detects and resumes partial downloads)
+        header_print("FLM", "Checking all files for missing or partial downloads...");
         auto download_list = build_download_list(new_model_tag);
         auto downloads = download_list.first;
         float sum_fize_size = download_list.second;
         if (downloads.empty()) {
-            header_print("FLM", "No files to download for model: " + new_model_tag);
+            header_print("FLM", "All files are complete. Nothing to download.");
             return true; // Return true since all files are already present
         }
         
-        header_print("FLM", "Downloading " + std::to_string(downloads.size()) + " missing files...");
+        header_print("FLM", "Downloading " + std::to_string(downloads.size()) + " file(s)...");
 
         header_print("FLM", "Files to download (" << std::fixed << std::setprecision(2) << sum_fize_size << " MB): ");
         for (const auto& download : downloads) {
@@ -308,14 +299,16 @@ std::pair<nlohmann::json, float> ModelDownloader::build_download_list(const std:
             const auto& file = *it;
             std::string local_path = get_model_file_path(model_path, filename);
 
+            // Build the download URL (needed for both new and partial files)
+            auto build_url = [&]() -> std::string {
+                if (std::string(base_url).find("resolve") != std::string::npos) {
+                    return base_url + "/" + filename + "?download=true";
+                }
+                return base_url + "/resolve/main/" + filename + "?download=true";
+            };
+
             if (!file_exists(local_path)) {
-                std::string url;
-                if (std::string(base_url).find("resolve") != std::string::npos) { // resolve provided , may from a specific branch
-                    url = base_url + "/" + filename + "?download=true";
-                }
-                else {
-                    url = base_url + "/resolve/main/" + filename + "?download=true";
-                }
+                std::string url = build_url();
                 bool is_lfs = file.contains("lfs");
                 std::string oid = is_lfs ? file["lfs"]["oid"] : file["oid"];
                 float file_size = static_cast<float>(file["size"]) / 1024 / 1024;
@@ -330,6 +323,30 @@ std::pair<nlohmann::json, float> ModelDownloader::build_download_list(const std:
                     {"is_lfs", is_lfs},
                 };
                 downloads.push_back(entry);
+            } else {
+                // File exists — check if it is a partial download
+                curl_off_t remote_size = static_cast<curl_off_t>(file["size"]);
+                curl_off_t local_size  = static_cast<curl_off_t>(std::filesystem::file_size(local_path));
+                if (local_size < remote_size) {
+                    std::string url = build_url();
+                    bool is_lfs = file.contains("lfs");
+                    std::string oid = is_lfs ? file["lfs"]["oid"] : file["oid"];
+                    float remaining_size = static_cast<float>(remote_size - local_size) / 1024 / 1024;
+                    sum_file_size += remaining_size;
+                    header_print("FLM", "Partial download detected: " + filename +
+                        " (" + std::to_string(local_size / 1024 / 1024) + " MB / " +
+                        std::to_string(remote_size / 1024 / 1024) + " MB)");
+
+                    nlohmann::json entry = {
+                        {"file", filename},
+                        {"size", remaining_size},
+                        {"url", url},
+                        {"localpath", local_path},
+                        {"oid", oid},
+                        {"is_lfs", is_lfs},
+                    };
+                    downloads.push_back(entry);
+                }
             }
 
         }

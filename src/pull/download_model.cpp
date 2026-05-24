@@ -52,6 +52,12 @@ std::string calculate_git_blob_oid(const std::string& file_path) {
 // Global variable to track if progress bar was shown
 static bool g_progress_bar_shown = false;
 
+/// \brief Context passed to the progress callback
+struct ProgressContext {
+    curl_off_t already_downloaded = 0; ///< Bytes already on disk before this session
+    std::function<void(double)>* user_cb = nullptr;
+};
+
 /// \brief Hide the cursor
 void hide_cursor() {
     std::cout << "\033[?25l" << std::flush;
@@ -99,14 +105,20 @@ int progress_callback(void* clientp, double dltotal, double dlnow, double ultota
         auto now = Clock::now();
         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_print_time);
 
-        double percentage = (dlnow / dltotal) * 100.0;
-
         if (elapsed.count() >= 1000) {
             utils::enable_ansi_on_windows_once();
 
-            double percentage = (dlnow / dltotal) * 100.0;
-            double mb_now = dlnow / 1024.0 / 1024.0;
-            double mb_total = dltotal / 1024.0 / 1024.0;
+            // Adjust for bytes already on disk from a previous partial download
+            curl_off_t offset = 0;
+            if (clientp) {
+                offset = static_cast<ProgressContext*>(clientp)->already_downloaded;
+            }
+            double total_now   = dlnow  + static_cast<double>(offset);
+            double total_total = dltotal + static_cast<double>(offset);
+
+            double percentage = (total_now / total_total) * 100.0;
+            double mb_now   = total_now   / 1024.0 / 1024.0;
+            double mb_total = total_total / 1024.0 / 1024.0;
 
             std::cout << "\r\033[K"
                 << "[FLM]  Downloading: " << std::fixed << std::setprecision(1)
@@ -140,15 +152,29 @@ bool download_file(const std::string& url, const std::string& local_path, bool i
     std::filesystem::path path(local_path);
     std::filesystem::create_directories(path.parent_path());
 
-    FILE* fp = fopen(local_path.c_str(), "wb");
+    // Check for an existing partial download and resume from it
+    curl_off_t resume_from = 0;
+    if (std::filesystem::exists(local_path)) {
+        resume_from = static_cast<curl_off_t>(std::filesystem::file_size(local_path));
+    }
+
+    FILE* fp = fopen(local_path.c_str(), resume_from > 0 ? "ab" : "wb");
     if (!fp) {
         std::cerr << "Failed to open file for writing: " << local_path << std::endl;
         curl_easy_cleanup(curl);
         return false;
     }
 
+    if (resume_from > 0) {
+        header_print("FLM", "Resuming from " << (resume_from / 1024.0 / 1024.0) << " MB");
+    }
+
     // Hide cursor before starting download
     hide_cursor();
+
+    ProgressContext prog_ctx;
+    prog_ctx.already_downloaded = resume_from;
+    prog_ctx.user_cb = &progress_cb;
 
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_data_to_file);
@@ -157,12 +183,18 @@ bool download_file(const std::string& url, const std::string& local_path, bool i
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
     curl_easy_setopt(curl, CURLOPT_USERAGENT, "FastFlowLM/1.0");
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 3600L); // 1 hour timeout
+    // Abort if transfer stalls below 1 byte/sec for 60 seconds
+    curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, 1L);
+    curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, 60L);
+    if (resume_from > 0) {
+        curl_easy_setopt(curl, CURLOPT_RESUME_FROM_LARGE, resume_from);
+    }
 
     // Set progress callback if provided
     if (progress_cb) {
         curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
         curl_easy_setopt(curl, CURLOPT_PROGRESSFUNCTION, progress_callback);
+        curl_easy_setopt(curl, CURLOPT_PROGRESSDATA, &prog_ctx);
     }
 
     CURLcode res = curl_easy_perform(curl);
@@ -175,7 +207,7 @@ bool download_file(const std::string& url, const std::string& local_path, bool i
 
     if (res != CURLE_OK) {
         std::cerr << "CURL error: " << curl_easy_strerror(res) << std::endl;
-        std::filesystem::remove(local_path); // Remove partial download
+        // Keep the partial file so the next retry can resume from where we left off
         return false;
     }
 
@@ -187,7 +219,8 @@ bool download_file(const std::string& url, const std::string& local_path, bool i
     header_print("FLM", "Checking Hash...");
     std::string local_oid = is_lfs ? calculate_file_sha256(local_path) : calculate_git_blob_oid(local_path);
     if (local_oid != remote_oid) {
-        header_print("FLM", "Hash not matched!");
+        header_print("FLM", "Hash not matched! Removing corrupted file.");
+        std::filesystem::remove(local_path); // Remove corrupted file so next retry starts fresh
         show_cursor(); // Show cursor on error
         return false;
     }
@@ -197,17 +230,20 @@ bool download_file(const std::string& url, const std::string& local_path, bool i
 }
 
 static bool download_with_retry(const std::string& url, const std::string& local_path, bool is_lfs, std::string remote_oid,
-    std::function<void(double)> progress_cb, int max_retries = 3) {
+    std::function<void(double)> progress_cb, int max_retries = 10) {
     int attempt = 0;
     while (attempt < max_retries) {
         if (download_file(url, local_path, is_lfs, remote_oid, progress_cb)) {
             return true; 
         }
-        header_print("FLM", "Download failed (attempt " << (attempt + 1) << "/" << max_retries << ")"); 
-        if(attempt < max_retries - 1)
-            header_print("FLM", "Retrying...");
+        header_print("FLM", "Download failed (attempt " << (attempt + 1) << "/" << max_retries << ")");
         attempt++;
-        std::this_thread::sleep_for(std::chrono::seconds(1));
+        if (attempt < max_retries) {
+            // Exponential backoff: 1s, 2s, 4s, 8s, ... capped at 30s
+            int wait_seconds = std::min(1 << (attempt - 1), 30);
+            header_print("FLM", "Retrying in " << wait_seconds << "s...");
+            std::this_thread::sleep_for(std::chrono::seconds(wait_seconds));
+        }
     }
 
     return false;
@@ -243,6 +279,34 @@ std::string download_string(const std::string& url) {
     }
 
     return response;
+}
+
+/// \brief Query the remote file size via a HEAD request
+/// \param url the URL to query
+/// \return the file size in bytes, or -1 on failure
+curl_off_t get_remote_file_size(const std::string& url) {
+    CURL* curl = curl_easy_init();
+    if (!curl) {
+        return -1;
+    }
+
+    curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+    curl_easy_setopt(curl, CURLOPT_NOBODY, 1L);          // HEAD-like: no body
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, "FastFlowLM/1.0");
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
+
+    CURLcode res = curl_easy_perform(curl);
+
+    curl_off_t content_length = -1;
+    if (res == CURLE_OK) {
+        curl_easy_getinfo(curl, CURLINFO_CONTENT_LENGTH_DOWNLOAD_T, &content_length);
+    }
+
+    curl_easy_cleanup(curl);
+    return content_length;
 }
 
 /// \brief Download multiple files with progress tracking

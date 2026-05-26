@@ -737,10 +737,13 @@ bool WebServer::handle_request(http::request<http::string_body>& req,
 
                 if (code == 400) {
                     status = http::status::bad_request;
+                } else if (code == 503) {
+                    status = http::status::service_unavailable;
+                } else if (code == 501) {
+                    status = http::status::not_implemented;
+                } else if (code >= 500) {
+                    status = http::status::internal_server_error;
                 }
-                //else if () {
-
-                //}
             }
 
             response_ref.result(status);

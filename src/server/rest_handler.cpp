@@ -351,16 +351,24 @@ RestHandler::~RestHandler() {
 bool RestHandler::ensure_model_loaded(const std::string& model_tag) {
     note_activity();
 
-    bool was_sleeping = false;
+    bool must_wake = false;
     {
-        std::lock_guard<std::mutex> lock(sleep_mutex);
-        was_sleeping = sleeping;
+        std::unique_lock<std::mutex> lock(sleep_mutex);
+        if (sleeping) {
+            sleep_cv.wait(lock, [&]() {
+                return !sleep_transitioning;
+            });
+            if (sleeping) {
+                sleep_transitioning = true;
+                must_wake = true;
+            }
+        }
     }
 
     std::lock_guard<std::mutex> model_lock(model_mutex);
 
     std::string ensure_tag = model_tag;
-    if (was_sleeping || current_model_tag != ensure_tag) {
+    if (must_wake || current_model_tag != ensure_tag || auto_chat_engine == nullptr) {
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
         if (auto_chat_engine != nullptr) {
             auto_chat_engine.reset();
@@ -382,6 +390,11 @@ bool RestHandler::ensure_model_loaded(const std::string& model_tag) {
             this->npu_device_inst.reset();
             this->npu_device_inst = xrt::device(0);
             this->current_model_tag = "model-faker";
+            if (must_wake) {
+                std::lock_guard<std::mutex> lock(sleep_mutex);
+                sleep_transitioning = false;
+                sleep_cv.notify_all();
+            }
             return false;
         }
         
@@ -391,9 +404,10 @@ bool RestHandler::ensure_model_loaded(const std::string& model_tag) {
         current_model_tag = ensure_tag;
     }
 
-    if (was_sleeping) {
+    if (must_wake) {
         std::lock_guard<std::mutex> lock(sleep_mutex);
         sleeping = false;
+        sleep_transitioning = false;
         last_activity = std::chrono::steady_clock::now();
         sleep_cv.notify_all();
         header_print("FLM", "Woke from idle sleep");
@@ -406,6 +420,9 @@ bool RestHandler::ensure_model_loaded(const std::string& model_tag) {
 void RestHandler::ensure_asr_model_loaded(const std::string& model_tag) {
 #ifndef FASTFLOWLM_LINUX_LIMITED_MODELS
     std::lock_guard<std::mutex> model_lock(model_mutex);
+    if (whisper_engine != nullptr) {
+        return;
+    }
     std::string ensure_tag = model_tag;
     if (!downloader.is_model_downloaded(ensure_tag)) {
         downloader.pull_model(ensure_tag);
@@ -430,6 +447,9 @@ void RestHandler::ensure_asr_model_loaded(const std::string& model_tag) {
 void RestHandler::ensure_embed_model_loaded(const std::string& model_tag) {
 #ifndef FASTFLOWLM_LINUX_LIMITED_MODELS
     std::lock_guard<std::mutex> model_lock(model_mutex);
+    if (auto_embedding_engine != nullptr) {
+        return;
+    }
     std::string ensure_tag = model_tag;
     if (!this->downloader.is_model_downloaded(ensure_tag)) {
         this->downloader.pull_model(ensure_tag);

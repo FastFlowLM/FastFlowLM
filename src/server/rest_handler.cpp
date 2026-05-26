@@ -548,6 +548,7 @@ void RestHandler::start_idle_monitor() {
     if (!is_sleep_enabled()) {
         return;
     }
+    stop_idle_monitoring.store(false);
     last_activity = std::chrono::steady_clock::now();
     idle_monitor_thread = std::thread([this]() {
         idle_monitor_loop();

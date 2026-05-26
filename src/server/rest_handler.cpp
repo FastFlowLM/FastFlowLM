@@ -500,16 +500,23 @@ void RestHandler::on_model_request_start() {
     if (!is_sleep_enabled()) {
         return;
     }
+    std::unique_lock<std::mutex> lock(sleep_mutex);
+    sleep_cv.wait(lock, [&]() {
+        return !sleep_transitioning;
+    });
     active_model_requests.fetch_add(1);
-    note_activity();
+    last_activity = std::chrono::steady_clock::now();
+    sleep_cv.notify_all();
 }
 
 void RestHandler::on_model_request_end() {
     if (!is_sleep_enabled()) {
         return;
     }
+    std::lock_guard<std::mutex> lock(sleep_mutex);
     active_model_requests.fetch_sub(1);
-    note_activity();
+    last_activity = std::chrono::steady_clock::now();
+    sleep_cv.notify_all();
 }
 
 void RestHandler::note_activity() {
@@ -565,13 +572,17 @@ void RestHandler::idle_monitor_loop() {
         if (woke) {
             continue;
         }
-        if (active_model_requests.load() > 0) {
+        if (active_model_requests.load() > 0 || sleep_transitioning) {
             continue;
         }
 
-        sleeping = true;
+        sleep_transitioning = true;
         lock.unlock();
         enter_sleep();
+        lock.lock();
+        sleeping = true;
+        sleep_transitioning = false;
+        sleep_cv.notify_all();
     }
 }
 
@@ -991,7 +1002,13 @@ void RestHandler::handle_embeddings(const json& request,
         json response;
         if (this->embed) {
             if (!ensure_embed_model_ready()) {
-                json error_response = {{"error", "Embedding model is not available"}};
+                json error_response = {
+                    {"error", {
+                        {"code", 503},
+                        {"type", "service_unavailable"},
+                        {"message", "Embedding model is not available"}
+                    }}
+                };
                 send_response(error_response);
                 return;
             }
@@ -1419,11 +1436,7 @@ void RestHandler::handle_openai_audio_transcriptions(const json& request,
         json response;
         if (this->asr) {
 #ifndef FASTFLOWLM_LINUX_LIMITED_MODELS
-            if (!ensure_asr_model_ready()) {
-                json error_response = {{"error", "ASR model is not available"}};
-                send_response(error_response);
-                return;
-            }
+            ensure_asr_model_ready();
             this->whisper_engine->load_audio(audio_raw);
             header_print("FLM", "Transforming audio to text...");
             // Show text
@@ -1454,7 +1467,15 @@ void RestHandler::handle_openai_audio_transcriptions(const json& request,
             };
         }
         else {
-            header_print("Warning", "No asr model loaded, cannot load audio file");
+            json error_response = {
+                {"error", {
+                    {"code", 503},
+                    {"type", "service_unavailable"},
+                    {"message", "ASR model is not available"}
+                }}
+            };
+            send_response(error_response);
+            return;
         }
         send_response(response);
         //this->whisper_engine->clear_context();

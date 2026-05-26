@@ -161,5 +161,6 @@ private:
     std::condition_variable sleep_cv;
     std::chrono::steady_clock::time_point last_activity;
     bool sleeping = false;
+    bool sleep_transitioning = false;
     std::mutex model_mutex;
 };

@@ -417,11 +417,11 @@ bool RestHandler::ensure_model_loaded(const std::string& model_tag) {
 
 ///@brief Ensure the asr model is loaded
 ///@param model_tag the model tag
-void RestHandler::ensure_asr_model_loaded(const std::string& model_tag) {
+bool RestHandler::ensure_asr_model_loaded(const std::string& model_tag) {
 #ifndef FASTFLOWLM_LINUX_LIMITED_MODELS
     std::lock_guard<std::mutex> model_lock(model_mutex);
     if (whisper_engine != nullptr) {
-        return;
+        return true;
     }
     std::string ensure_tag = model_tag;
     if (!downloader.is_model_downloaded(ensure_tag)) {
@@ -435,20 +435,22 @@ void RestHandler::ensure_asr_model_loaded(const std::string& model_tag) {
     }
     catch (const std::exception& e) {
         header_print("ERROR", "Failed to load ASR model: " + std::string(e.what()));
-        exit(EXIT_FAILURE);
+        this->whisper_engine.reset();
+        return false;
     }
+    return true;
 #else
-    throw std::runtime_error("ASR models are not supported in this build");
+    return false;
 #endif
 }
 
 ///@brief Ensure the embed model is loaded
 ///@param model_tag the model tag
-void RestHandler::ensure_embed_model_loaded(const std::string& model_tag) {
+bool RestHandler::ensure_embed_model_loaded(const std::string& model_tag) {
 #ifndef FASTFLOWLM_LINUX_LIMITED_MODELS
     std::lock_guard<std::mutex> model_lock(model_mutex);
     if (auto_embedding_engine != nullptr) {
-        return;
+        return true;
     }
     std::string ensure_tag = model_tag;
     if (!this->downloader.is_model_downloaded(ensure_tag)) {
@@ -463,10 +465,12 @@ void RestHandler::ensure_embed_model_loaded(const std::string& model_tag) {
     }
     catch (const std::exception& e) {
         header_print("ERROR", "Failed to load embedding model: " + std::string(e.what()));
-        exit(EXIT_FAILURE);
+        this->auto_embedding_engine.reset();
+        return false;
     }
+    return true;
 #else
-    throw std::runtime_error("Embedding models are not supported in this build");
+    return false;
 #endif
 }
 
@@ -475,7 +479,9 @@ bool RestHandler::ensure_asr_model_ready() {
     if (!this->asr) {
         return false;
     }
-    ensure_asr_model_loaded(asr_model_tag);
+    if (!ensure_asr_model_loaded(asr_model_tag)) {
+        return false;
+    }
     {
         std::lock_guard<std::mutex> lock(sleep_mutex);
         if (sleeping) {
@@ -496,7 +502,9 @@ bool RestHandler::ensure_embed_model_ready() {
     if (!this->embed) {
         return false;
     }
-    ensure_embed_model_loaded(embed_model_tag);
+    if (!ensure_embed_model_loaded(embed_model_tag)) {
+        return false;
+    }
     {
         std::lock_guard<std::mutex> lock(sleep_mutex);
         if (sleeping) {
@@ -1064,7 +1072,15 @@ void RestHandler::handle_embeddings(const json& request,
             };
         }
         else {
-            header_print("Warning", "No embedding model loaded");
+            json error_response = {
+                {"error", {
+                    {"code", 503},
+                    {"type", "service_unavailable"},
+                    {"message", "Embedding model is not available"}
+                }}
+            };
+            send_response(error_response);
+            return;
         }
         send_response(response);
     }
@@ -1462,35 +1478,39 @@ void RestHandler::handle_openai_audio_transcriptions(const json& request,
         json response;
         if (this->asr) {
 #ifndef FASTFLOWLM_LINUX_LIMITED_MODELS
-            ensure_asr_model_ready();
+            if (!ensure_asr_model_ready()) {
+                json error_response = {
+                    {"error", {
+                        {"code", 503},
+                        {"type", "service_unavailable"},
+                        {"message", "ASR model is not available"}
+                    }}
+                };
+                send_response(error_response);
+                return;
+            }
             this->whisper_engine->load_audio(audio_raw);
             header_print("FLM", "Transforming audio to text...");
-            // Show text
             std::cout << "Audio content: " << std::flush;
             std::pair<std::string, std::string> audio_result = this->whisper_engine->generate(Whisper::whisper_task_type_t::e_transcribe, true, false, std::cout);
             std::string audio_context = audio_result.first;
             std::cout << std::endl;
-#else
-            throw std::runtime_error("ASR models are not supported in this build");
-            std::string audio_context;
-#endif
 
             response = {
                 {"model", model},
                 {"text", audio_context}
-                //{"usage", {
-                //    {"type", "tokens"},
-                //    {"input_tokens", 0},
-                //    {"input_tokens_details", json::array({
-                //        {
-                //            {"text_tokens", 0},
-                //            {"audio_tokens", 0}
-                //        }
-                //    })},
-                //    {"output_tokens", 0},
-                //    {"total_tokens", 0}
-                //}}
             };
+#else
+            json error_response = {
+                {"error", {
+                    {"code", 503},
+                    {"type", "service_unavailable"},
+                    {"message", "ASR models are not supported in this build"}
+                }}
+            };
+            send_response(error_response);
+            return;
+#endif
         }
         else {
             json error_response = {

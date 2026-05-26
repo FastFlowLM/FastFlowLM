@@ -114,8 +114,8 @@ public:
 
 private:
     bool ensure_model_loaded(const std::string& model_tag);
-    void ensure_asr_model_loaded(const std::string& model_tag);
-    void ensure_embed_model_loaded(const std::string& model_tag);
+    bool ensure_asr_model_loaded(const std::string& model_tag);
+    bool ensure_embed_model_loaded(const std::string& model_tag);
     bool ensure_asr_model_ready();
     bool ensure_embed_model_ready();
     void on_model_request_start();

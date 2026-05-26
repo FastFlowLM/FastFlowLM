@@ -22,6 +22,11 @@
 #include <string>
 #include <memory>
 #include <functional>
+#include <atomic>
+#include <chrono>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
 #include "prompt_cache.hpp"
 
 using json = nlohmann::ordered_json;
@@ -111,6 +116,16 @@ private:
     bool ensure_model_loaded(const std::string& model_tag);
     void ensure_asr_model_loaded(const std::string& model_tag);
     void ensure_embed_model_loaded(const std::string& model_tag);
+    bool ensure_asr_model_ready();
+    bool ensure_embed_model_ready();
+    void on_model_request_start();
+    void on_model_request_end();
+    void note_activity();
+    void start_idle_monitor();
+    void stop_idle_monitor();
+    void idle_monitor_loop();
+    void enter_sleep();
+    bool is_sleep_enabled() const;
     void configure_chat_engine_parameters(const json& options, const json& request);
     json build_nstream_response(std::string response_text);
 
@@ -125,6 +140,8 @@ private:
     ModelDownloader& downloader;
     std::string current_model_tag;
     std::string default_model_tag;
+    std::string asr_model_tag;
+    std::string embed_model_tag;
     bool asr;
     bool embed;
     int prefill_chunk_len;
@@ -135,4 +152,14 @@ private:
     std::string last_question;
     bool preemption;
     PromptCache prompt_cache;
+
+    int sleep_idle_seconds;
+    std::atomic<int> active_model_requests{0};
+    std::atomic<bool> stop_idle_monitoring{false};
+    std::thread idle_monitor_thread;
+    std::mutex sleep_mutex;
+    std::condition_variable sleep_cv;
+    std::chrono::steady_clock::time_point last_activity;
+    bool sleeping = false;
+    std::mutex model_mutex;
 };

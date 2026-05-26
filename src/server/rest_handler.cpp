@@ -290,8 +290,10 @@ static json convert_tool_responses_gemma4(json messages) {
 
 ///@return the rest handler
 RestHandler::RestHandler(model_list& models, ModelDownloader& downloader, program_args_t& args)
-    : supported_models(models), downloader(downloader), default_model_tag(args.model_tag), current_model_tag(""), asr(args.asr), embed(args.embed), img_pre_resize(args.img_pre_resize), preemption(args.preemption){
+    : supported_models(models), downloader(downloader), default_model_tag(args.model_tag), current_model_tag(""), asr(args.asr), embed(args.embed), img_pre_resize(args.img_pre_resize), preemption(args.preemption), sleep_idle_seconds(args.sleep_idle_seconds) {
     this->npu_device_inst = xrt::device(0);
+    this->asr_model_tag = "whisper-v3:turbo";
+    this->embed_model_tag = "embed-gemma:300m";
 
     if (args.ctx_length != -1) {
         this->ctx_length = args.ctx_length >= 512 ? args.ctx_length : 512;
@@ -308,12 +310,10 @@ RestHandler::RestHandler(model_list& models, ModelDownloader& downloader, progra
     // Initialize chat bot with default model
 #ifndef FASTFLOWLM_LINUX_LIMITED_MODELS
     if (this->asr) {
-        std::string whisper_tag = "whisper-v3:turbo";
-        ensure_asr_model_loaded(whisper_tag);
+        ensure_asr_model_loaded(asr_model_tag);
     }
     if (this->embed) {
-        std::string embed_tag = "embed-gemma:300m";
-        ensure_embed_model_loaded(embed_tag);
+        ensure_embed_model_loaded(embed_model_tag);
     }
 #else
     if (this->asr) {
@@ -337,17 +337,30 @@ RestHandler::RestHandler(model_list& models, ModelDownloader& downloader, progra
         this->current_model_tag = "model-faker";
     }
     this->prompt_cache = PromptCache();
+    start_idle_monitor();
 }
 
 ///@brief RestHandler destructor
 ///@return the rest handler
-RestHandler::~RestHandler() = default;
+RestHandler::~RestHandler() {
+    stop_idle_monitor();
+}
 
 ///@brief Ensure the model is loaded
 ///@param model_tag the model tag
 bool RestHandler::ensure_model_loaded(const std::string& model_tag) {
+    note_activity();
+
+    bool was_sleeping = false;
+    {
+        std::lock_guard<std::mutex> lock(sleep_mutex);
+        was_sleeping = sleeping;
+    }
+
+    std::lock_guard<std::mutex> model_lock(model_mutex);
+
     std::string ensure_tag = model_tag;
-    if (current_model_tag != ensure_tag) {
+    if (was_sleeping || current_model_tag != ensure_tag) {
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
         if (auto_chat_engine != nullptr) {
             auto_chat_engine.reset();
@@ -377,6 +390,14 @@ bool RestHandler::ensure_model_loaded(const std::string& model_tag) {
         }
         current_model_tag = ensure_tag;
     }
+
+    if (was_sleeping) {
+        std::lock_guard<std::mutex> lock(sleep_mutex);
+        sleeping = false;
+        last_activity = std::chrono::steady_clock::now();
+        sleep_cv.notify_all();
+        header_print("FLM", "Woke from idle sleep");
+    }
     return true;
 }
 
@@ -384,6 +405,7 @@ bool RestHandler::ensure_model_loaded(const std::string& model_tag) {
 ///@param model_tag the model tag
 void RestHandler::ensure_asr_model_loaded(const std::string& model_tag) {
 #ifndef FASTFLOWLM_LINUX_LIMITED_MODELS
+    std::lock_guard<std::mutex> model_lock(model_mutex);
     std::string ensure_tag = model_tag;
     if (!downloader.is_model_downloaded(ensure_tag)) {
         downloader.pull_model(ensure_tag);
@@ -407,6 +429,7 @@ void RestHandler::ensure_asr_model_loaded(const std::string& model_tag) {
 ///@param model_tag the model tag
 void RestHandler::ensure_embed_model_loaded(const std::string& model_tag) {
 #ifndef FASTFLOWLM_LINUX_LIMITED_MODELS
+    std::lock_guard<std::mutex> model_lock(model_mutex);
     std::string ensure_tag = model_tag;
     if (!this->downloader.is_model_downloaded(ensure_tag)) {
         this->downloader.pull_model(ensure_tag);
@@ -425,6 +448,152 @@ void RestHandler::ensure_embed_model_loaded(const std::string& model_tag) {
 #else
     throw std::runtime_error("Embedding models are not supported in this build");
 #endif
+}
+
+bool RestHandler::ensure_asr_model_ready() {
+#ifndef FASTFLOWLM_LINUX_LIMITED_MODELS
+    if (!this->asr) {
+        return false;
+    }
+    if (whisper_engine == nullptr) {
+        ensure_asr_model_loaded(asr_model_tag);
+    }
+    {
+        std::lock_guard<std::mutex> lock(sleep_mutex);
+        if (sleeping) {
+            sleeping = false;
+            last_activity = std::chrono::steady_clock::now();
+            sleep_cv.notify_all();
+            header_print("FLM", "Woke from idle sleep");
+        }
+    }
+    return true;
+#else
+    return false;
+#endif
+}
+
+bool RestHandler::ensure_embed_model_ready() {
+#ifndef FASTFLOWLM_LINUX_LIMITED_MODELS
+    if (!this->embed) {
+        return false;
+    }
+    if (auto_embedding_engine == nullptr) {
+        ensure_embed_model_loaded(embed_model_tag);
+    }
+    {
+        std::lock_guard<std::mutex> lock(sleep_mutex);
+        if (sleeping) {
+            sleeping = false;
+            last_activity = std::chrono::steady_clock::now();
+            sleep_cv.notify_all();
+            header_print("FLM", "Woke from idle sleep");
+        }
+    }
+    return true;
+#else
+    return false;
+#endif
+}
+
+void RestHandler::on_model_request_start() {
+    if (!is_sleep_enabled()) {
+        return;
+    }
+    active_model_requests.fetch_add(1);
+    note_activity();
+}
+
+void RestHandler::on_model_request_end() {
+    if (!is_sleep_enabled()) {
+        return;
+    }
+    active_model_requests.fetch_sub(1);
+    note_activity();
+}
+
+void RestHandler::note_activity() {
+    if (!is_sleep_enabled()) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(sleep_mutex);
+    last_activity = std::chrono::steady_clock::now();
+    sleep_cv.notify_all();
+}
+
+void RestHandler::start_idle_monitor() {
+    if (!is_sleep_enabled()) {
+        return;
+    }
+    last_activity = std::chrono::steady_clock::now();
+    idle_monitor_thread = std::thread([this]() {
+        idle_monitor_loop();
+    });
+}
+
+void RestHandler::stop_idle_monitor() {
+    if (!is_sleep_enabled()) {
+        return;
+    }
+    stop_idle_monitoring.store(true);
+    sleep_cv.notify_all();
+    if (idle_monitor_thread.joinable()) {
+        idle_monitor_thread.join();
+    }
+}
+
+void RestHandler::idle_monitor_loop() {
+    const auto idle_timeout = std::chrono::seconds(sleep_idle_seconds);
+
+    while (!stop_idle_monitoring.load()) {
+        std::unique_lock<std::mutex> lock(sleep_mutex);
+        if (sleeping) {
+            sleep_cv.wait(lock, [&]() {
+                return stop_idle_monitoring.load() || !sleeping;
+            });
+            continue;
+        }
+
+        auto deadline = last_activity + idle_timeout;
+        bool woke = sleep_cv.wait_until(lock, deadline, [&]() {
+            return stop_idle_monitoring.load() || sleeping || active_model_requests.load() > 0;
+        });
+
+        if (stop_idle_monitoring.load()) {
+            return;
+        }
+        if (woke) {
+            continue;
+        }
+        if (active_model_requests.load() > 0) {
+            continue;
+        }
+
+        sleeping = true;
+        lock.unlock();
+        enter_sleep();
+    }
+}
+
+void RestHandler::enter_sleep() {
+    std::lock_guard<std::mutex> model_lock(model_mutex);
+    if (auto_chat_engine != nullptr) {
+        auto_chat_engine.reset();
+    }
+#ifndef FASTFLOWLM_LINUX_LIMITED_MODELS
+    if (whisper_engine != nullptr) {
+        whisper_engine.reset();
+    }
+    if (auto_embedding_engine != nullptr) {
+        auto_embedding_engine.reset();
+    }
+#endif
+    prompt_cache.reset();
+    header_print("FLM", "Server entered idle sleep");
+}
+
+bool RestHandler::is_sleep_enabled() const {
+    return sleep_idle_seconds > 0;
 }
 
 ///@brief Configure chat engine parameters from options and request
@@ -562,6 +731,10 @@ void RestHandler::handle_generate(const json& request,
                                  std::function<void(const json&)> send_response,
                                  StreamResponseCallback send_streaming_response,
                                  std::shared_ptr<CancellationToken> cancellation_token) {
+    on_model_request_start();
+    auto request_scope = std::unique_ptr<void, std::function<void(void*)>>(
+        reinterpret_cast<void*>(1),
+        [&](void*) { on_model_request_end(); });
     try {
         std::string prompt = request["prompt"];
         bool stream = request.value("stream", true);
@@ -676,6 +849,10 @@ void RestHandler::handle_chat(const json& request,
                              std::function<void(const json&)> send_response,
                              StreamResponseCallback send_streaming_response,
                              std::shared_ptr<CancellationToken> cancellation_token) {
+    on_model_request_start();
+    auto request_scope = std::unique_ptr<void, std::function<void(void*)>>(
+        reinterpret_cast<void*>(1),
+        [&](void*) { on_model_request_end(); });
     try {
         nlohmann::ordered_json messages = request["messages"];
         bool stream = request.value("stream", false);
@@ -794,6 +971,10 @@ void RestHandler::handle_chat(const json& request,
 void RestHandler::handle_embeddings(const json& request,
                                    std::function<void(const json&)> send_response,
                                    StreamResponseCallback send_streaming_response) {
+    on_model_request_start();
+    auto request_scope = std::unique_ptr<void, std::function<void(void*)>>(
+        reinterpret_cast<void*>(1),
+        [&](void*) { on_model_request_end(); });
     try {
         std::string model = request["model"];
         std::vector<std::string> inputs;
@@ -809,6 +990,11 @@ void RestHandler::handle_embeddings(const json& request,
 
         json response;
         if (this->embed) {
+            if (!ensure_embed_model_ready()) {
+                json error_response = {{"error", "Embedding model is not available"}};
+                send_response(error_response);
+                return;
+            }
             json embedding_data = json::array();
 #ifndef FASTFLOWLM_LINUX_LIMITED_MODELS
             for (size_t i = 0; i < inputs.size(); ++i) {
@@ -1013,6 +1199,10 @@ void RestHandler::handle_openai_chat_completion(const json& request,
                                                std::function<void(const json&)> send_response,
                                                StreamResponseCallback send_streaming_response,
                                                std::shared_ptr<CancellationToken> cancellation_token) {
+    on_model_request_start();
+    auto request_scope = std::unique_ptr<void, std::function<void(void*)>>(
+        reinterpret_cast<void*>(1),
+        [&](void*) { on_model_request_end(); });
     static std::string model_used_for_last_message = "model-faker";
     try {
         // Extract OpenAI-style parameters
@@ -1217,6 +1407,10 @@ void RestHandler::handle_openai_audio_transcriptions(const json& request,
                                         std::function<void(const json&)> send_response,
                                         StreamResponseCallback send_streaming_response,
                                         std::shared_ptr<CancellationToken> cancellation_token) {
+    on_model_request_start();
+    auto request_scope = std::unique_ptr<void, std::function<void(void*)>>(
+        reinterpret_cast<void*>(1),
+        [&](void*) { on_model_request_end(); });
     try {
         std::string model = request["model"];
         std::string file_content = request["file"].get<std::string>();
@@ -1225,6 +1419,11 @@ void RestHandler::handle_openai_audio_transcriptions(const json& request,
         json response;
         if (this->asr) {
 #ifndef FASTFLOWLM_LINUX_LIMITED_MODELS
+            if (!ensure_asr_model_ready()) {
+                json error_response = {{"error", "ASR model is not available"}};
+                send_response(error_response);
+                return;
+            }
             this->whisper_engine->load_audio(audio_raw);
             header_print("FLM", "Transforming audio to text...");
             // Show text
@@ -1280,6 +1479,10 @@ void RestHandler::handle_openai_completion(const json& request,
     std::function<void(const json&)> send_response,
     StreamResponseCallback send_streaming_response,
     std::shared_ptr<CancellationToken> cancellation_token) {
+    on_model_request_start();
+    auto request_scope = std::unique_ptr<void, std::function<void(void*)>>(
+        reinterpret_cast<void*>(1),
+        [&](void*) { on_model_request_end(); });
     try {
         // Extract OpenAI-style parameters
         std::string prompt = request["prompt"];

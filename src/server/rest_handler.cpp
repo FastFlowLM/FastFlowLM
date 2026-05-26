@@ -475,9 +475,7 @@ bool RestHandler::ensure_asr_model_ready() {
     if (!this->asr) {
         return false;
     }
-    if (whisper_engine == nullptr) {
-        ensure_asr_model_loaded(asr_model_tag);
-    }
+    ensure_asr_model_loaded(asr_model_tag);
     {
         std::lock_guard<std::mutex> lock(sleep_mutex);
         if (sleeping) {
@@ -498,9 +496,7 @@ bool RestHandler::ensure_embed_model_ready() {
     if (!this->embed) {
         return false;
     }
-    if (auto_embedding_engine == nullptr) {
-        ensure_embed_model_loaded(embed_model_tag);
-    }
+    ensure_embed_model_loaded(embed_model_tag);
     {
         std::lock_guard<std::mutex> lock(sleep_mutex);
         if (sleeping) {
@@ -581,9 +577,18 @@ void RestHandler::idle_monitor_loop() {
             continue;
         }
 
-        auto deadline = last_activity + idle_timeout;
+        if (active_model_requests.load() > 0) {
+            sleep_cv.wait(lock, [&]() {
+                return stop_idle_monitoring.load() || sleeping || active_model_requests.load() == 0;
+            });
+            continue;
+        }
+
+        auto activity_snapshot = last_activity;
+        auto deadline = activity_snapshot + idle_timeout;
         bool woke = sleep_cv.wait_until(lock, deadline, [&]() {
-            return stop_idle_monitoring.load() || sleeping || active_model_requests.load() > 0;
+            return stop_idle_monitoring.load() || sleeping ||
+                active_model_requests.load() > 0 || last_activity != activity_snapshot;
         });
 
         if (stop_idle_monitoring.load()) {
@@ -592,7 +597,7 @@ void RestHandler::idle_monitor_loop() {
         if (woke) {
             continue;
         }
-        if (active_model_requests.load() > 0 || sleep_transitioning) {
+        if (active_model_requests.load() > 0 || sleep_transitioning || last_activity != activity_snapshot) {
             continue;
         }
 

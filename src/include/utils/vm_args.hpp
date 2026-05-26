@@ -89,6 +89,8 @@ bool parse_options(int argc, char *argv[], program_args_t& parsed_args) {
              "Set context length")
             ("prefill-chunk-len,pcl", po::value<int>(&parsed_args.prefill_chunk_len)->default_value(-1),
              "Set prefill chunk length")
+            ("sleep-idle-seconds,sis", po::value<int>(&parsed_args.sleep_idle_seconds)->default_value(-1),
+             "Sleep after N idle seconds (-1 disables)")
             ("img-pre-resize,r", po::value<int>(&parsed_args.img_pre_resize)->default_value(2),
              "Pre-resize the image, 0: original size, 1: height = 480, 2: height = 720, 3: height = 1080, 4: height = 1440")
             ("socket,s", po::value<size_t>(&parsed_args.max_socket_connections)->default_value(10),
@@ -190,6 +192,17 @@ bool parse_options(int argc, char *argv[], program_args_t& parsed_args) {
                 std::cerr << "Error: The cors option is only supported with the serve command! " << std::endl;
                 return false;
             }
+            if (!vm["sleep-idle-seconds"].defaulted())
+            {
+                std::cerr << "Error: The sleep-idle-seconds option is only supported with the serve command! " << std::endl;
+                return false;
+            }
+        }
+
+        if (parsed_args.sleep_idle_seconds == 0 || parsed_args.sleep_idle_seconds < -1)
+        {
+            std::cerr << "Error: sleep-idle-seconds must be -1 (disabled) or a positive integer." << std::endl;
+            return false;
         }
 
         // Handle all options

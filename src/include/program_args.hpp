@@ -20,6 +20,7 @@ struct program_args_t {
     bool json_output = false;
     int ctx_length = -1; // let model decide
     int prefill_chunk_len = -1; // let model decide
+    int sleep_idle_seconds = -1; // if >0, unload models after this many idle seconds
 
     // handling input file
     std::string input_file_name = "";

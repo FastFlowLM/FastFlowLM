@@ -643,10 +643,104 @@ std::string ModelDownloader::register_hf_model(const std::string& hf_repo,
     // Inject flm_model_name into config.json so lm_config can resolve the
     // correct xclbin directory even when the snapshot path ends in a branch
     // name ("main") rather than the repo name (e.g. "Qwen3.5-0.8B-NPU2").
-    if (!config.contains("flm_model_name") || config["flm_model_name"] != repo) {
-        config["flm_model_name"] = repo;
-        std::ofstream out_cfg(config_path);
-        out_cfg << config.dump(4) << "\n";
+    // Also resolve flm_xclbin_name (the kernel directory) via auto-detection
+    // if the repo name does not map directly to an installed xclbin dir.
+    // We do this early so the resolved value is saved into config.json.
+    {
+        // 1. If config.json already carries flm_xclbin_name, trust it.
+        std::string xclbin_dir = config.value("flm_xclbin_name", "");
+
+        if (xclbin_dir.empty()) {
+            // 2. Check if the repo name itself is a valid xclbin directory.
+            std::string xclbin_base;
+            try { xclbin_base = utils::find_xclbin_path() + "/xclbins"; }
+            catch (...) {}
+            if (!xclbin_base.empty() &&
+                std::filesystem::exists(xclbin_base + "/" + repo)) {
+                xclbin_dir = repo; // repo name matches an installed kernel dir
+            }
+        }
+
+        if (xclbin_dir.empty()) {
+            // 3. Auto-detect: scan model_list entries with the same family and
+            //    compare architecture fingerprints.  Try local HF cache first,
+            //    then fall back to a lightweight HF API fetch.
+            int layers = config.value("num_hidden_layers", -1);
+            int hidden  = config.value("hidden_size", -1);
+            std::string our_model_type = config.value("model_type", "");
+
+            auto family_key_for_model_type = [&](const std::string& mt) -> std::string {
+                auto it = kHFModelTypeToFamily.find(mt);
+                return it != kHFModelTypeToFamily.end() ? it->second : "";
+            };
+            std::string our_family = family_key_for_model_type(our_model_type);
+
+            if (layers > 0 && hidden > 0 && !our_family.empty() &&
+                supported_models.get_config().contains("models")) {
+                for (const auto& [fam_key, sizes] : supported_models.get_config()["models"].items()) {
+                    for (const auto& [size_key, entry] : sizes.items()) {
+                        // Only consider entries from the same family
+                        std::string entry_family = entry.value(
+                            nlohmann::json::json_pointer("/details/family"), "");
+                        if (entry_family != our_family) continue;
+
+                        std::string entry_name = entry.value("name", "");
+                        if (entry_name.empty()) continue;
+
+                        // Try to get the candidate's config.json from local
+                        // HF cache (fast, no network).
+                        std::string owner = "FastFlowLM";
+                        std::string candidate_config_path =
+                            hf_cache_root() + "/models--" + owner + "--" +
+                            entry_name + "/snapshots/main/config.json";
+
+                        nlohmann::json candidate_config;
+                        if (std::filesystem::exists(candidate_config_path)) {
+                            try {
+                                std::ifstream cf(candidate_config_path);
+                                candidate_config = nlohmann::json::parse(cf);
+                            } catch (...) { continue; }
+                        } else {
+                            // Fetch just the config.json from HF (small file).
+                            std::string cfg_url =
+                                "https://huggingface.co/FastFlowLM/" +
+                                entry_name +
+                                "/resolve/main/config.json?download=true";
+                            try {
+                                std::string cfg_str =
+                                    download_utils::download_string(cfg_url);
+                                candidate_config = nlohmann::json::parse(cfg_str);
+                            } catch (...) { continue; }
+                        }
+
+                        int c_layers = candidate_config.value("num_hidden_layers", -1);
+                        int c_hidden  = candidate_config.value("hidden_size", -1);
+                        if (c_layers == layers && c_hidden == hidden) {
+                            xclbin_dir = entry_name;
+                            header_print("FLM", "[HF] Auto-detected xclbin dir: " +
+                                         xclbin_dir + " for " + hf_repo);
+                            break;
+                        }
+                    }
+                    if (!xclbin_dir.empty()) break;
+                }
+            }
+        }
+
+        // Persist the resolved xclbin_dir and ensure flm_model_name is set.
+        bool config_changed = false;
+        if (!xclbin_dir.empty() && config.value("flm_xclbin_name", "") != xclbin_dir) {
+            config["flm_xclbin_name"] = xclbin_dir;
+            config_changed = true;
+        }
+        if (config.value("flm_model_name", "") != repo) {
+            config["flm_model_name"] = repo;
+            config_changed = true;
+        }
+        if (config_changed) {
+            std::ofstream out_cfg(config_path);
+            out_cfg << config.dump(4) << "\n";
+        }
     }
 
     // -----------------------------------------------------------------------

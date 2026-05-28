@@ -80,11 +80,20 @@ class LM_Config{
             // Allow config.json to override the path-derived model_name so that
             // xclbin lookup works even when the snapshot directory is a branch
             // name (e.g. "main") rather than the model repo name.
+            // Priority: flm_xclbin_name > flm_model_name > path basename
             {
                 std::string _flm_model_name;
                 JSON_GET(_flm_model_name, this->_json_config, "flm_model_name", "", std::string);
                 if (!_flm_model_name.empty()) {
                     this->model_name = _flm_model_name;
+                }
+                // flm_xclbin_name explicitly sets the xclbin directory,
+                // decoupling the model's display name from the kernel directory.
+                // Useful for custom models built on top of a standard FLM base.
+                std::string _flm_xclbin_name;
+                JSON_GET(_flm_xclbin_name, this->_json_config, "flm_xclbin_name", "", std::string);
+                if (!_flm_xclbin_name.empty()) {
+                    this->model_name = _flm_xclbin_name;
                 }
             }
             JSON_GET(this->sliding_window, this->_json_config, "sliding_window", 0, u32);

@@ -144,6 +144,11 @@ class model_list {
             return this->model_root_path;
         }
 
+        /// \brief get read-only access to the raw model list config JSON
+        const nlohmann::json& get_config() const {
+            return this->config;
+        }
+
         /// \brief get all the models
         /// \return all the models in json
         nlohmann::json get_all_models(){
@@ -158,8 +163,13 @@ class model_list {
                     model_entry["model"] = model_type + ":" + size;
                     response["models"].push_back(model_entry);
                 }
-            }
-            return response;
+            }            // Append dynamically registered HuggingFace models
+            for (const auto& [hf_tag, model_info] : hf_models) {
+                nlohmann::json model_entry = model_info;
+                model_entry["name"] = hf_tag;
+                model_entry["model"] = hf_tag;
+                response["models"].push_back(model_entry);
+            }            return response;
         }
 
         /// \brief get all the models
@@ -184,6 +194,15 @@ class model_list {
                     };
                     response["models"].push_back(model_entry);
                 }
+            }
+            // Append dynamically registered HuggingFace models
+            for (const auto& [hf_tag, model_info] : hf_models) {
+                nlohmann::json model_entry = {
+                    {"name", hf_tag},
+                    {"model", hf_tag},
+                    {"details", model_info.value("details", nlohmann::json::object())}
+                };
+                response["models"].push_back(model_entry);
             }
             return response;
         }
@@ -212,6 +231,18 @@ class model_list {
                     };
                     response["data"].push_back(model_entry);
                 }
+            }
+            // Append dynamically registered HuggingFace models
+            for (const auto& [hf_tag, model_info] : hf_models) {
+                // Derive owner from "owner/repo" for owned_by field
+                std::string owner = hf_tag.substr(0, hf_tag.find('/'));
+                nlohmann::json model_entry = {
+                    {"id", hf_tag},
+                    {"object", "model"},
+                    {"created", static_cast<long long>(now)},
+                    {"owned_by", owner}
+                };
+                response["data"].push_back(model_entry);
             }
 
             return response;

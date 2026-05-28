@@ -732,7 +732,7 @@ bool WebServer::handle_request(http::request<http::string_body>& req,
 
             if (response_data.contains("error"))
             {
-                if (response_data["error"].is_object() && response_data["error"].contains("code"))
+                if (response_data["error"].is_object() && response_data["error"].contains("code") && response_data["error"]["code"].is_number_integer())
                 {
                     int code = response_data["error"]["code"].get<int>();
 

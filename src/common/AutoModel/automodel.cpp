@@ -131,7 +131,11 @@ void AutoModel::_shared_load_model(std::string model_path, json model_info, int 
     if (default_context_length != -1) {
         this->MAX_L = default_context_length;
     } else {
-        this->MAX_L = model_info["default_context_length"];
+        if (model_info.contains("default_context_length") && model_info["default_context_length"].is_number_integer()) {
+            this->MAX_L = model_info["default_context_length"].get<int>();
+        } else {
+            this->MAX_L = 2048;
+        }
     }
     
     this->is_model_loaded = true;

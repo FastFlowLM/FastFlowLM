@@ -399,7 +399,11 @@ bool RestHandler::ensure_model_loaded(const std::string& model_tag) {
         }
         
         if (this->prefill_chunk_len == -1) {
-            this->prefill_chunk_len = model_info["max_prefill_len"].get<int>();;
+            if (model_info.contains("max_prefill_len") && model_info["max_prefill_len"].is_number_integer()) {
+                this->prefill_chunk_len = model_info["max_prefill_len"].get<int>();
+            } else {
+                this->prefill_chunk_len = 4096;
+            }
         }
         current_model_tag = ensure_tag;
     }

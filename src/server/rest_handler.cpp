@@ -367,22 +367,39 @@ bool RestHandler::ensure_model_loaded(const std::string& model_tag) {
 
     std::lock_guard<std::mutex> model_lock(model_mutex);
 
+    auto clear_wake_transition = [&]() {
+        if (must_wake) {
+            std::lock_guard<std::mutex> lock(sleep_mutex);
+            sleep_transitioning = false;
+            sleep_cv.notify_all();
+        }
+    };
+
     std::string ensure_tag = model_tag;
     if (must_wake || current_model_tag != ensure_tag || auto_chat_engine == nullptr) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(500));
-        if (auto_chat_engine != nullptr) {
-            auto_chat_engine.reset();
-        }
-        std::pair<std::string, std::unique_ptr<AutoModel>> auto_model = get_auto_model(ensure_tag, this->supported_models, &this->npu_device_inst);
-        auto_chat_engine = std::move(auto_model.second);
-        ensure_tag = auto_model.first;
-        if (!downloader.is_model_downloaded(ensure_tag)) {
-            downloader.pull_model(ensure_tag);
-        }
-        auto [new_ensure_tag, model_info] = supported_models.get_model_info(ensure_tag);
-        auto_chat_engine->configure_parameter("img_pre_resize", this->img_pre_resize);
         try {
+            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+            if (auto_chat_engine != nullptr) {
+                auto_chat_engine.reset();
+            }
+            std::pair<std::string, std::unique_ptr<AutoModel>> auto_model = get_auto_model(ensure_tag, this->supported_models, &this->npu_device_inst);
+            auto_chat_engine = std::move(auto_model.second);
+            ensure_tag = auto_model.first;
+            if (!downloader.is_model_downloaded(ensure_tag)) {
+                downloader.pull_model(ensure_tag);
+            }
+            auto [new_ensure_tag, model_info] = supported_models.get_model_info(ensure_tag);
+            auto_chat_engine->configure_parameter("img_pre_resize", this->img_pre_resize);
             auto_chat_engine->load_model(supported_models.get_model_path(new_ensure_tag), model_info, ctx_length, preemption);
+
+            if (this->prefill_chunk_len == -1) {
+                if (model_info.contains("max_prefill_len") && model_info["max_prefill_len"].is_number_integer()) {
+                    this->prefill_chunk_len = model_info["max_prefill_len"].get<int>();
+                } else {
+                    this->prefill_chunk_len = 4096;
+                }
+            }
+            current_model_tag = ensure_tag;
         }
         catch (const std::exception& e) {
             header_print("ERROR", "Failed to load model: " + std::string(e.what()));
@@ -390,22 +407,18 @@ bool RestHandler::ensure_model_loaded(const std::string& model_tag) {
             this->npu_device_inst.reset();
             this->npu_device_inst = xrt::device(0);
             this->current_model_tag = "model-faker";
-            if (must_wake) {
-                std::lock_guard<std::mutex> lock(sleep_mutex);
-                sleep_transitioning = false;
-                sleep_cv.notify_all();
-            }
+            clear_wake_transition();
             return false;
         }
-        
-        if (this->prefill_chunk_len == -1) {
-            if (model_info.contains("max_prefill_len") && model_info["max_prefill_len"].is_number_integer()) {
-                this->prefill_chunk_len = model_info["max_prefill_len"].get<int>();
-            } else {
-                this->prefill_chunk_len = 4096;
-            }
+        catch (...) {
+            header_print("ERROR", "Failed to load model: unknown exception");
+            this->auto_chat_engine.reset();
+            this->npu_device_inst.reset();
+            this->npu_device_inst = xrt::device(0);
+            this->current_model_tag = "model-faker";
+            clear_wake_transition();
+            return false;
         }
-        current_model_tag = ensure_tag;
     }
 
     if (must_wake) {

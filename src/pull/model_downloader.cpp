@@ -7,8 +7,49 @@
 #include "model_downloader.hpp"
 #include "utils/utils.hpp"
 #include "download_model.hpp"
+#include <set>
 #include <sstream>
 #include <iomanip>
+#include <fstream>
+
+// ---------------------------------------------------------------------------
+// Mapping from HuggingFace config.json "model_type" to the FastFlowLM family
+// name used in model_list and all_models.hpp.
+// ---------------------------------------------------------------------------
+static const std::map<std::string, std::string> kHFModelTypeToFamily = {
+    {"qwen3_5_text",  "qwen3.5"},
+    {"qwen3_5",       "qwen3.5"},
+    {"qwen3_vl",      "qwen3vl"},
+    {"qwen3",         "qwen3"},
+    {"qwen2_vl",      "qwen2vl"},
+    {"qwen2",         "qwen2"},
+    {"llama",         "llama3"},
+    {"llama3",        "llama3"},
+    {"gemma3_text",   "gemma3-text"},
+    {"gemma3",        "gemma3"},
+    {"gemma4e",       "gemma4e"},
+    {"gpt_oss",       "gpt-oss"},
+    {"lfm2",          "lfm2"},
+    {"lfm2_5_tk",     "lfm2.5-tk"},
+    {"phi4",          "phi4"},
+    {"nanbeige4",     "nanbeige"},
+    {"nanbeige4_1",   "nanbeige"},
+};
+
+// Files that must be present in every FastFlowLM model.
+static const std::vector<std::string> kHFRequiredFiles = {
+    "config.json",
+    "tokenizer.json",
+    "tokenizer_config.json",
+    "model.q4nx",
+};
+
+// Files that are included when discovered in the repo.
+static const std::vector<std::string> kHFOptionalFiles = {
+    "chat_template.jinja",
+    "vision_weight.q4nx",
+    "audio_weight.q4nx",
+};
 
 /// \brief Constructor
 /// \param models the model list
@@ -47,6 +88,11 @@ bool ModelDownloader::is_model_downloaded(const std::string& model_tag, bool sub
 /// \param model_tag the model tag
 /// \return true if the model is compatible, false otherwise
 bool ModelDownloader::check_model_compatibility(const std::string& model_tag, bool sub_process_mode) {
+    // HF models carry flm_min_version == the model's own flm_version, so the
+    // version check would always spuriously fail for older model files.  Skip
+    // it entirely; compatibility for HF models is the user's responsibility.
+    if (supported_models.is_hf_model(model_tag)) return true;
+
     auto [new_model_tag, model_info] = supported_models.get_model_info(model_tag);
     LM_Config config;
     config.from_pretrained(this->supported_models.get_model_path(new_model_tag));
@@ -474,6 +520,20 @@ bool ModelDownloader::verify_and_clean_files(const std::string& model_tag, bool 
 
             bool is_lfs = file.contains("lfs");
             std::string oid_ref = is_lfs ? file["lfs"]["oid"] : file["oid"];
+
+            // For HF-sourced models, skip hash verification for files that
+            // are frequently regenerated or vendor-patched without changing
+            // the model content (tokenizer config, compiled weights).
+            static const std::set<std::string> kHFNoHashCheck = {
+                "tokenizer.json", "model.q4nx",
+            };
+            if (supported_models.is_hf_model(model_tag) &&
+                kHFNoHashCheck.count(filename)) {
+                if (!sub_process_mode)
+                    header_print("FLM", "Skipping hash check for " + filename + " (HF model)");
+                continue;
+            }
+
             std::string local_oid = is_lfs ? download_utils::calculate_file_sha256(local_path) : download_utils::calculate_git_blob_oid(local_path);
 
             if (local_oid == oid_ref) {
@@ -504,4 +564,204 @@ bool ModelDownloader::verify_and_clean_files(const std::string& model_tag, bool 
         any_error = true;
     }
     return !any_error;
+}
+
+// ---------------------------------------------------------------------------
+// HuggingFace direct-download support
+// ---------------------------------------------------------------------------
+
+/// \brief Return the HuggingFace hub cache root directory.
+///        Respects HF_HUB_CACHE, HUGGINGFACE_HUB_CACHE, and HF_HOME env vars
+///        in that priority order, falling back to ~/.cache/huggingface/hub.
+static std::string hf_cache_root() {
+    for (const char* env : {"HF_HUB_CACHE", "HUGGINGFACE_HUB_CACHE"}) {
+        const char* val = std::getenv(env);
+        if (val && *val) return std::string(val);
+    }
+    const char* hf_home = std::getenv("HF_HOME");
+    if (hf_home && *hf_home)
+        return std::string(hf_home) + "/hub";
+    const char* home = std::getenv("HOME");
+    if (home && *home)
+        return std::string(home) + "/.cache/huggingface/hub";
+    return ".cache/huggingface/hub"; // fallback: relative (should not happen)
+}
+
+/// \brief Register an HF model into supported_models so all normal pull/run
+///        paths can work with it.  If config.json is already present locally
+///        the HF API is not called to determine the file list; otherwise both
+///        config.json and the repo tree are fetched from HuggingFace.
+/// \param hf_repo  "owner/repo" string (e.g. "FastFlowLM/Qwen3.5-0.8B-NPU2")
+/// \param branch   branch / revision (default: "main")
+/// \return the same hf_repo string that was registered as the model tag
+std::string ModelDownloader::register_hf_model(const std::string& hf_repo,
+                                                const std::string& branch) {
+    auto slash_pos = hf_repo.find('/');
+    if (slash_pos == std::string::npos || slash_pos == 0 ||
+        slash_pos == hf_repo.size() - 1) {
+        throw std::runtime_error(
+            "Invalid HuggingFace repo format (expected owner/repo): " + hf_repo);
+    }
+
+    const std::string owner = hf_repo.substr(0, slash_pos);
+    const std::string repo  = hf_repo.substr(slash_pos + 1);
+
+    // Store the model in the standard HuggingFace hub cache layout:
+    //   {hf_cache_root}/models--{owner}--{repo}/snapshots/{branch}/
+    // This is the same layout used by huggingface-cli, so the model can be
+    // inspected and managed with standard HF tooling.
+    std::string cache_repo_name = "models--" + owner + "--" + repo;
+    std::string model_path =
+        (std::filesystem::path(hf_cache_root()) / cache_repo_name /
+         "snapshots" / branch)
+            .string();
+    std::string config_path = model_path + "/config.json";
+
+    // -----------------------------------------------------------------------
+    // Step 1: obtain config.json (local cache or remote download)
+    // -----------------------------------------------------------------------
+    nlohmann::json config;
+    if (std::filesystem::exists(config_path)) {
+        std::ifstream f(config_path);
+        config = nlohmann::json::parse(f);
+        header_print("FLM", "[HF] Using cached config.json from " + model_path);
+    } else {
+        std::filesystem::create_directories(model_path);
+        std::string config_url = "https://huggingface.co/" + hf_repo +
+                                 "/resolve/" + branch +
+                                 "/config.json?download=true";
+        header_print("FLM", "[HF] Fetching config.json for " + hf_repo + " ...");
+        if (!download_utils::download_file(config_url, config_path,
+                                           /*is_lfs=*/false, /*remote_oid=*/"")) {
+            throw std::runtime_error(
+                "Failed to download config.json from " + config_url);
+        }
+        std::ifstream f(config_path);
+        config = nlohmann::json::parse(f);
+    }
+
+    // Inject flm_model_name into config.json so lm_config can resolve the
+    // correct xclbin directory even when the snapshot path ends in a branch
+    // name ("main") rather than the repo name (e.g. "Qwen3.5-0.8B-NPU2").
+    if (!config.contains("flm_model_name") || config["flm_model_name"] != repo) {
+        config["flm_model_name"] = repo;
+        std::ofstream out_cfg(config_path);
+        out_cfg << config.dump(4) << "\n";
+    }
+
+    // -----------------------------------------------------------------------
+    // Step 2: determine FastFlowLM family from model_type in config.json
+    // -----------------------------------------------------------------------
+    std::string model_type = config.value("model_type", "");
+    auto family_it = kHFModelTypeToFamily.find(model_type);
+    if (family_it == kHFModelTypeToFamily.end()) {
+        throw std::runtime_error(
+            "Unsupported model_type \"" + model_type +
+            "\" in config.json. This model may not be compatible with "
+            "FastFlowLM.");
+    }
+    const std::string& family = family_it->second;
+
+    // FLM version embedded in the model's config.json
+    std::string flm_version = config.value("flm_version", "0.0.0");
+
+    // -----------------------------------------------------------------------
+    // Step 3: build the file list
+    //   - If all required files exist locally, scan the directory for optional
+    //     files already present so we don't need a network round-trip.
+    //   - Otherwise query the HF tree API to discover optional files.
+    // -----------------------------------------------------------------------
+    std::string file_url = "https://huggingface.co/api/models/" +
+                           hf_repo + "/tree/" + branch;
+    std::vector<std::string> files = kHFRequiredFiles;
+
+    bool all_local = true;
+    for (const auto& req : kHFRequiredFiles) {
+        if (!std::filesystem::exists(model_path + "/" + req)) {
+            all_local = false;
+            break;
+        }
+    }
+
+    if (all_local) {
+        // Offline path: discover optional files from local directory
+        for (const auto& opt : kHFOptionalFiles) {
+            if (std::filesystem::exists(model_path + "/" + opt)) {
+                files.push_back(opt);
+            }
+        }
+    } else {
+        // Online path: query HF tree API
+        header_print("FLM", "[HF] Querying file tree for " + hf_repo + " ...");
+        std::string hf_response = download_utils::download_string(file_url);
+        nlohmann::json hf_files = nlohmann::json::parse(hf_response);
+        for (const auto& opt : kHFOptionalFiles) {
+            for (const auto& f : hf_files) {
+                if (f.value("path", "") == opt) {
+                    files.push_back(opt);
+                    break;
+                }
+            }
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Step 4: derive metadata and build the synthetic model_info JSON
+    // -----------------------------------------------------------------------
+    bool has_vision = std::find(files.begin(), files.end(),
+                                "vision_weight.q4nx") != files.end();
+    bool has_audio  = std::find(files.begin(), files.end(),
+                                "audio_weight.q4nx") != files.end();
+
+    // Clamp context length to a reasonable maximum
+    int max_pos = config.value("max_position_embeddings", 32768);
+    int ctx_len  = std::min(max_pos, 32768);
+
+    nlohmann::json model_info = {
+        {"name",                repo},
+        {"hf_path",             model_path},
+        {"url",                 "https://huggingface.co/" + hf_repo +
+                                    "/resolve/" + branch},
+        {"file_url",            file_url},
+        {"flm_min_version",     flm_version},
+        {"default_context_length", ctx_len},
+        {"max_prefill_len",     4096},
+        {"vlm",                 has_vision},
+        {"asr",                 has_audio},
+        {"files",               files},
+        {"size",                0},
+        {"details", {
+            {"format",             "NPU2"},
+            {"family",             family},
+            {"think",              false},
+            {"parameter_size",     ""},
+            {"quantization_level", "Q4NX"},
+        }},
+    };
+
+    // -----------------------------------------------------------------------
+    // Step 5: register in model_list so all existing paths can use this tag
+    // -----------------------------------------------------------------------
+    supported_models.register_hf_model(hf_repo, model_info);
+    header_print("FLM", "[HF] Registered " + hf_repo +
+                        " (family: " + family + ", ctx: " +
+                        std::to_string(ctx_len) + ")");
+    return hf_repo;
+}
+
+/// \brief Download all files for an HF repo (register first, then pull).
+/// \param hf_repo          "owner/repo"
+/// \param branch           branch / revision
+/// \param force_redownload if true, re-download even if files are present
+/// \return true on success
+bool ModelDownloader::pull_hf_model(const std::string& hf_repo,
+                                    const std::string& branch,
+                                    bool force_redownload) {
+    try {
+        std::string tag = register_hf_model(hf_repo, branch);
+        return pull_model(tag, force_redownload);
+    } catch (const std::exception& e) {
+        header_print("ERROR", "[HF] " + std::string(e.what()));
+        return false;
+    }
 }

@@ -54,6 +54,13 @@ class model_list {
         /// \param tag the tag of the model
         /// \return the model info
         std::pair<std::string, nlohmann::json> get_model_info(const std::string tag) const {
+            // Check HF models first (keyed by the full "owner/repo" string)
+            {
+                auto it = hf_models.find(tag);
+                if (it != hf_models.end()) {
+                    return std::make_pair(tag, it->second);
+                }
+            }
             static std::string last_error_tag = "";
             std::string new_tag = rectify_model_tag(tag);
             bool model_found = false;
@@ -214,6 +221,13 @@ class model_list {
         /// \param tag the tag of the model
         /// \return the model path, string
         std::string get_model_path(const std::string& tag){
+            // For HF models the full absolute path is stored in "hf_path"
+            {
+                auto it = hf_models.find(tag);
+                if (it != hf_models.end()) {
+                    return it->second["hf_path"].get<std::string>();
+                }
+            }
             std::string new_tag = this->rectify_model_tag(tag);
             auto [new_tag_unused, model_info] = this->get_model_info(new_tag);
             std::string model_name = model_info["name"];
@@ -222,12 +236,26 @@ class model_list {
         }
 
         bool is_model_supported(const std::string& tag) {
-            return all_tags.find(tag) != all_tags.end();
+            return all_tags.find(tag) != all_tags.end() || hf_models.count(tag) > 0;
+        }
+
+        /// \brief Register an ad-hoc model discovered from a HuggingFace repo
+        /// \param hf_tag full "owner/repo" identifier used as the lookup key
+        /// \param model_info synthetic model info JSON built from the repo's config.json
+        void register_hf_model(const std::string& hf_tag, const nlohmann::json& model_info) {
+            hf_models[hf_tag] = model_info;
+            all_tags.insert(hf_tag);
+        }
+
+        bool is_hf_model(const std::string& tag) const {
+            return hf_models.count(tag) > 0;
         }
         
     private:
         std::string list_path;
         nlohmann::json config;
         std::string model_root_path;
+        // Dynamically registered HuggingFace models (keyed by "owner/repo")
+        std::unordered_map<std::string, nlohmann::json> hf_models;
 
 };

@@ -499,7 +499,9 @@ int main(int argc, char* argv[]) {
     }
 
     if (parsed_args.command == "run" || parsed_args.command == "serve" || parsed_args.command == "pull" || parsed_args.command == "remove" || parsed_args.command == "check" || parsed_args.command == "bench") {
-      if (parsed_args.model_tag != "model-faker" && (!availble_models.is_model_supported(parsed_args.model_tag))) {
+      // When --hf is set the model is resolved from HuggingFace at runtime;
+      // skip the static model-list check here.
+      if (!parsed_args.hf_model && parsed_args.model_tag != "model-faker" && (!availble_models.is_model_supported(parsed_args.model_tag))) {
             header_print("ERROR", "Model not found: " << parsed_args.model_tag << "; Please check with `flm list` and try again.");
             return 1;
         }
@@ -534,7 +536,9 @@ int main(int argc, char* argv[]) {
         rlim_t asr_size = 0;
         rlim_t embedding_size = 0;
 
-        if (parsed_args.model_tag != "model-faker" && !parsed_args.model_tag.empty()) {
+        if (parsed_args.model_tag != "model-faker" && !parsed_args.model_tag.empty()
+                && !parsed_args.hf_model  // HF models not yet registered at this point
+                && availble_models.is_model_supported(parsed_args.model_tag)) {
             auto [resolved_tag, model_info] = availble_models.get_model_info(parsed_args.model_tag);
             if (model_info.contains("size")) {
                 model_size = model_info["size"].get<uint64_t>();
@@ -605,11 +609,17 @@ int main(int argc, char* argv[]) {
         }
         else if (parsed_args.command == "run") {
             check_and_notify_new_version();
+            if (parsed_args.hf_model) {
+                downloader.register_hf_model(parsed_args.model_tag, parsed_args.hf_branch);
+            }
             Runner runner(availble_models, downloader, parsed_args);
             runner.run();
 
         } else if (parsed_args.command == "serve") {
             check_and_notify_new_version();
+            if (parsed_args.hf_model) {
+                downloader.register_hf_model(parsed_args.model_tag, parsed_args.hf_branch);
+            }
             // Create the server
             int port = utils::get_server_port(parsed_args.port);
             if (parsed_args.port == -1) { // User did not specify port
@@ -635,6 +645,17 @@ int main(int argc, char* argv[]) {
             // server->stop();
         }
         else if (parsed_args.command == "pull") {
+            // --hf: pull directly from a HuggingFace repo
+            if (parsed_args.hf_model) {
+                bool success = downloader.pull_hf_model(
+                    parsed_args.model_tag,
+                    parsed_args.hf_branch,
+                    parsed_args.force_redownload);
+                if (!success) {
+                    header_print("ERROR", "Failed to pull HuggingFace model: " + parsed_args.model_tag);
+                    return 1;
+                }
+            } else {
             // Check if the model is already downloaded, if true, the model will not be downloaded
             // Check if model is already downloaded
             if (!parsed_args.force_redownload && downloader.is_model_downloaded(parsed_args.model_tag)) {
@@ -657,6 +678,7 @@ int main(int argc, char* argv[]) {
                     return 1;
                 }
             }
+            } // end else (not --hf)
         }
         else if (parsed_args.command == "remove") {
             // Remove the model, this will be used to remove the model

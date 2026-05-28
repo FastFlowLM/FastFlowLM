@@ -45,6 +45,22 @@ public:
 
     void model_not_found(const std::string& model_tag);
 
+    // ---------------------------------------------------------------
+    // HuggingFace direct-download support  (--hf flag)
+    // ---------------------------------------------------------------
+
+    /// Query the HF repo, parse config.json, and register the model in
+    /// supported_models so that all existing pull/run paths work normally.
+    /// If config.json is already present locally the HF API is not called.
+    /// Returns the tag that was registered (same as hf_repo).
+    std::string register_hf_model(const std::string& hf_repo,
+                                  const std::string& branch = "main");
+
+    /// Register + download all files for an HF repo.
+    bool pull_hf_model(const std::string& hf_repo,
+                       const std::string& branch = "main",
+                       bool force_redownload = false);
+
 private:
     model_list& supported_models;
     download_utils::CurlInitializer curl_init;

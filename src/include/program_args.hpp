@@ -32,6 +32,10 @@ struct program_args_t {
 
     // for pull command
     bool force_redownload = false;
+
+    // for --hf flag: treat model_tag as a HuggingFace owner/repo
+    bool hf_model = false;
+    std::string hf_branch = "main";
     
     // for serve command
     std::string host = "127.0.0.1";

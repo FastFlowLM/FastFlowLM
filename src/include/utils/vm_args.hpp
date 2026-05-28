@@ -51,6 +51,10 @@ inline void print_help(po::options_description& general) {
     std::cout << "\tflm list" << std::endl;
     std::cout << "\tflm list --quiet" << std::endl;
     std::cout << "\tflm list --filter installed" << std::endl;
+    std::cout << "\tflm pull FastFlowLM/Qwen3.5-0.8B-NPU2 --hf" << std::endl;
+    std::cout << "\tflm run  FastFlowLM/Qwen3.5-0.8B-NPU2 --hf" << std::endl;
+    std::cout << "\tflm serve FastFlowLM/Qwen3.5-0.8B-NPU2 --hf" << std::endl;
+    std::cout << "\tflm pull FastFlowLM/Qwen3.5-0.8B-NPU2 --hf --hf-branch dev" << std::endl;
     std::cout << std::endl;
 }
 
@@ -100,7 +104,11 @@ bool parse_options(int argc, char *argv[], program_args_t& parsed_args) {
             ("preemption", po::value<bool>(&parsed_args.preemption)->default_value(false),
              "Enable preemption")
             ("prompt,i", po::value<std::string>(&parsed_args.input_file_name)->default_value(""),
-             "Direct file input");
+             "Direct file input")
+            ("hf", po::bool_switch(&parsed_args.hf_model),
+             "Treat model_tag as a HuggingFace owner/repo and download it directly")
+            ("hf-branch", po::value<std::string>(&parsed_args.hf_branch)->default_value("main"),
+             "HuggingFace branch/revision to download from (use with --hf)");
 
         // Define positional arguments
         po::positional_options_description pos_desc;
@@ -218,6 +226,18 @@ bool parse_options(int argc, char *argv[], program_args_t& parsed_args) {
                 std::cerr << "Error: Model tag is required for command '" << parsed_args.command << "'" << std::endl;
                 return false;
             }
+        }
+
+        // --hf-branch without --hf is a mistake
+        if (!vm["hf-branch"].defaulted() && !parsed_args.hf_model) {
+            std::cerr << "Error: --hf-branch requires --hf" << std::endl;
+            return false;
+        }
+
+        // When --hf is used, remove/check commands are not supported
+        if (parsed_args.hf_model && (parsed_args.command == "remove" || parsed_args.command == "check")) {
+            std::cerr << "Error: --hf is not supported with '" << parsed_args.command << "'" << std::endl;
+            return false;
         }
 
         return true;

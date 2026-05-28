@@ -77,6 +77,16 @@ class LM_Config{
             // read the json file as a string
             std::string json_str((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
             this->_json_config = nlohmann::json::parse(json_str);
+            // Allow config.json to override the path-derived model_name so that
+            // xclbin lookup works even when the snapshot directory is a branch
+            // name (e.g. "main") rather than the model repo name.
+            {
+                std::string _flm_model_name;
+                JSON_GET(_flm_model_name, this->_json_config, "flm_model_name", "", std::string);
+                if (!_flm_model_name.empty()) {
+                    this->model_name = _flm_model_name;
+                }
+            }
             JSON_GET(this->sliding_window, this->_json_config, "sliding_window", 0, u32);
             JSON_GET(this->sliding_window_pattern, this->_json_config, "sliding_window_pattern", 0, u32);
             JSON_GET(this->model_type, this->_json_config, "model_type", "", std::string);

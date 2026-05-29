@@ -206,7 +206,13 @@ bool ModelDownloader::pull_model(const std::string& model_tag, bool force_redown
 
         if (success) {
             header_print("FLM", "Model downloaded successfully!");
-            
+
+            // For HF models with bundled xclbins, install them to the
+            // standard xclbin directory so the model loader can find them.
+            if (supported_models.is_hf_model(new_model_tag)) {
+                install_hf_xclbins(new_model_tag);
+            }
+
             // Verify download
             auto final_missing = get_missing_files(new_model_tag);
             if (final_missing.empty()) {
@@ -784,6 +790,19 @@ std::string ModelDownloader::register_hf_model(const std::string& hf_repo,
                 files.push_back(opt);
             }
         }
+        // Also include any .xclbin files already present in the snapshot directory
+        try {
+            for (const auto& entry : std::filesystem::directory_iterator(model_path)) {
+                if (entry.is_regular_file()) {
+                    std::string fname = entry.path().filename().string();
+                    if (fname.size() > 7 && fname.substr(fname.size() - 7) == ".xclbin") {
+                        if (std::find(files.begin(), files.end(), fname) == files.end()) {
+                            files.push_back(fname);
+                        }
+                    }
+                }
+            }
+        } catch (...) {}
     } else {
         // Online path: query HF tree API
         header_print("FLM", "[HF] Querying file tree for " + hf_repo + " ...");
@@ -794,6 +813,15 @@ std::string ModelDownloader::register_hf_model(const std::string& hf_repo,
                 if (f.value("path", "") == opt) {
                     files.push_back(opt);
                     break;
+                }
+            }
+        }
+        // Also include any .xclbin files present in the HF repo tree
+        for (const auto& f : hf_files) {
+            std::string path = f.value("path", "");
+            if (path.size() > 7 && path.substr(path.size() - 7) == ".xclbin") {
+                if (std::find(files.begin(), files.end(), path) == files.end()) {
+                    files.push_back(path);
                 }
             }
         }
@@ -840,6 +868,8 @@ std::string ModelDownloader::register_hf_model(const std::string& hf_repo,
     header_print("FLM", "[HF] Registered " + hf_repo +
                         " (family: " + family + ", ctx: " +
                         std::to_string(ctx_len) + ")");
+    // Install any xclbins already present in the snapshot dir (idempotent)
+    install_hf_xclbins(hf_repo);
     return hf_repo;
 }
 
@@ -857,5 +887,107 @@ bool ModelDownloader::pull_hf_model(const std::string& hf_repo,
     } catch (const std::exception& e) {
         header_print("ERROR", "[HF] " + std::string(e.what()));
         return false;
+    }
+}
+
+/// \brief Install xclbin files from an HF model's snapshot directory to the
+///        standard xclbin search path expected by the model loader.
+///
+/// The model loader resolves xclbins as:
+///   {find_xclbin_path()}/xclbins/{flm_xclbin_name || flm_model_name}/
+///
+/// This mirrors that resolution so HF-bundled kernels land in the right place
+/// without the user needing to set any environment variables.
+///
+/// \param model_tag  HF model tag, e.g. "Atomic-Germ/Granite-4.1-8B-NPU2"
+void ModelDownloader::install_hf_xclbins(const std::string& model_tag) {
+    try {
+        std::string snapshot_dir = supported_models.get_model_path(model_tag);
+
+        // Collect .xclbin files in the snapshot dir
+        std::vector<std::filesystem::path> xclbins;
+        try {
+            for (const auto& entry : std::filesystem::directory_iterator(snapshot_dir)) {
+                if (entry.is_regular_file()) {
+                    std::string fname = entry.path().filename().string();
+                    if (fname.size() > 7 && fname.substr(fname.size() - 7) == ".xclbin") {
+                        xclbins.push_back(entry.path());
+                    }
+                }
+            }
+        } catch (...) {}
+
+        if (xclbins.empty()) return;
+
+        // Read config.json to determine the xclbin directory name.
+        // Mirror lm_config.hpp priority: flm_xclbin_name > flm_model_name > repo basename.
+        std::string repo = model_tag;
+        auto slash = repo.rfind('/');
+        if (slash != std::string::npos) repo = repo.substr(slash + 1);
+
+        std::string xclbin_dir_name = repo;
+        std::string config_path = snapshot_dir + "/config.json";
+        try {
+            std::ifstream cfg_file(config_path);
+            if (cfg_file.is_open()) {
+                nlohmann::json cfg = nlohmann::json::parse(cfg_file);
+                std::string xn = cfg.value("flm_xclbin_name", "");
+                std::string mn = cfg.value("flm_model_name", "");
+                if (!xn.empty())      xclbin_dir_name = xn;
+                else if (!mn.empty()) xclbin_dir_name = mn;
+            }
+        } catch (...) {}
+
+        // Locate the xclbin base directory
+        std::string xclbin_base;
+        try {
+            xclbin_base = utils::find_xclbin_path();
+        } catch (...) {
+            header_print("WARNING", "[HF] Cannot determine xclbin base dir; "
+                         "bundled xclbins are available in: " + snapshot_dir);
+            return;
+        }
+
+        // Create {xclbin_base}/xclbins/{xclbin_dir_name}/
+        std::filesystem::path target_dir =
+            std::filesystem::path(xclbin_base) / "xclbins" / xclbin_dir_name;
+        try {
+            std::filesystem::create_directories(target_dir);
+        } catch (const std::exception& e) {
+            header_print("WARNING", "[HF] Cannot create xclbin dir " +
+                         target_dir.string() + ": " + std::string(e.what()));
+            return;
+        }
+
+        // Symlink (preferred — no extra disk space) or copy each xclbin
+        bool any_installed = false;
+        for (const auto& src : xclbins) {
+            std::filesystem::path dest = target_dir / src.filename();
+            if (std::filesystem::exists(dest)) continue; // already installed
+
+            bool installed = false;
+            try {
+                std::filesystem::create_symlink(src, dest);
+                installed = true;
+            } catch (...) {
+                try {
+                    std::filesystem::copy_file(src, dest,
+                        std::filesystem::copy_options::overwrite_existing);
+                    installed = true;
+                } catch (const std::exception& e) {
+                    header_print("WARNING", "[HF] Failed to install " +
+                                 src.filename().string() + ": " + std::string(e.what()));
+                }
+            }
+            if (installed) {
+                header_print("FLM", "[HF] Installed xclbin: " + dest.string());
+                any_installed = true;
+            }
+        }
+        if (any_installed) {
+            header_print("FLM", "[HF] xclbins ready in " + target_dir.string());
+        }
+    } catch (const std::exception& e) {
+        header_print("WARNING", "[HF] xclbin install error: " + std::string(e.what()));
     }
 }

@@ -80,4 +80,8 @@ private:
     // Verify per-file integrity against HuggingFace metadata and remove any
     // corrupted files. Returns true if all files passed verification.
     bool verify_and_clean_files(const std::string& model_tag, bool sub_process_mode=0);
+
+    /// Install bundled xclbin files from HF snapshot dir to the standard xclbin location.
+    /// Mirrors lm_config.hpp xclbin path resolution. Idempotent — skips already-present files.
+    void install_hf_xclbins(const std::string& model_tag);
 }; 

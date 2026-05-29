@@ -31,6 +31,8 @@ void Llama3::load_model(std::string model_path, json model_info, int default_con
     config.top_p = 0.9;
     config.min_p = 0.1;
     config.temperature = 0.8;
+    config.rep_penalty = 1.1;
+    config.freq_penalty = 1.05;
 
     this->set_sampler(config);
     for (size_t i = 0; i < PROFILER_TYPE_NUM; i++) {

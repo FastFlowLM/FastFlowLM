@@ -959,24 +959,33 @@ void ModelDownloader::install_hf_xclbins(const std::string& model_tag) {
             return;
         }
 
-        // Symlink (preferred — no extra disk space) or copy each xclbin
+        // Symlink (preferred — no extra disk space) or copy each xclbin.
+        // Use absolute path for symlink target so it resolves correctly
+        // regardless of the working directory when the link is followed.
         bool any_installed = false;
         for (const auto& src : xclbins) {
-            std::filesystem::path dest = target_dir / src.filename();
+            std::filesystem::path abs_src = std::filesystem::absolute(src);
+            std::filesystem::path dest = target_dir / abs_src.filename();
+
+            // Remove a broken symlink so we can reinstall cleanly
+            if (std::filesystem::is_symlink(dest) &&
+                !std::filesystem::exists(dest)) {
+                std::filesystem::remove(dest);
+            }
             if (std::filesystem::exists(dest)) continue; // already installed
 
             bool installed = false;
             try {
-                std::filesystem::create_symlink(src, dest);
+                std::filesystem::create_symlink(abs_src, dest);
                 installed = true;
             } catch (...) {
                 try {
-                    std::filesystem::copy_file(src, dest,
+                    std::filesystem::copy_file(abs_src, dest,
                         std::filesystem::copy_options::overwrite_existing);
                     installed = true;
                 } catch (const std::exception& e) {
                     header_print("WARNING", "[HF] Failed to install " +
-                                 src.filename().string() + ": " + std::string(e.what()));
+                                 abs_src.filename().string() + ": " + std::string(e.what()));
                 }
             }
             if (installed) {

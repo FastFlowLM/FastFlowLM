@@ -959,6 +959,19 @@ void ModelDownloader::install_hf_xclbins(const std::string& model_tag) {
             return;
         }
 
+        // If the target directory exists but is not writable (e.g., root-owned
+        // system installation), the xclbins already present there are usable.
+        // Skip the install loop silently rather than emitting a WARNING per file.
+        {
+            auto test_path = target_dir / ".flm_write_test";
+            bool writable = false;
+            try {
+                std::ofstream test(test_path);
+                if (test.is_open()) { test.close(); std::filesystem::remove(test_path); writable = true; }
+            } catch (...) {}
+            if (!writable) return;
+        }
+
         // Symlink (preferred — no extra disk space) or copy each xclbin.
         // Use absolute path for symlink target so it resolves correctly
         // regardless of the working directory when the link is followed.

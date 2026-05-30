@@ -655,6 +655,20 @@ std::string ModelDownloader::register_hf_model(const std::string& hf_repo,
     // if the repo name does not map directly to an installed xclbin dir.
     // We do this early so the resolved value is saved into config.json.
     {
+        // 0. Flatten nested text_config into the root for multimodal models
+        //    (e.g. Gemma4 HF format stores all text-encoder params under
+        //    "text_config" rather than at the top level).  Only fill missing
+        //    keys so top-level values like model_type are never overwritten.
+        bool text_config_merged = false;
+        if (config.contains("text_config") && config["text_config"].is_object()) {
+            for (auto& [key, val] : config["text_config"].items()) {
+                if (!config.contains(key)) {
+                    config[key] = val;
+                    text_config_merged = true;
+                }
+            }
+        }
+
         // 1. If config.json already carries flm_xclbin_name, trust it.
         std::string xclbin_dir = config.value("flm_xclbin_name", "");
 
@@ -727,6 +741,22 @@ std::string ModelDownloader::register_hf_model(const std::string& hf_repo,
                             xclbin_dir = entry_name;
                             header_print("FLM", "[HF] Auto-detected xclbin dir: " +
                                          xclbin_dir + " for " + hf_repo);
+                            // Copy NPU hardware fields from the reference config so
+                            // the kernel library gets valid addresses and parameters.
+                            // These keys are set at kernel compile time and must
+                            // match the xclbin — architecture fields are left as-is.
+                            static const std::vector<std::string> kNPUFields = {
+                                "addr_qk", "addr_kv", "addr_kk",
+                                "addr_l_begin_mha", "addr_l_end_mha",
+                                "full_attn_period",
+                                "flm_version", "dtype",
+                            };
+                            for (const auto& field : kNPUFields) {
+                                if (candidate_config.contains(field) &&
+                                    !candidate_config[field].is_null()) {
+                                    config[field] = candidate_config[field];
+                                }
+                            }
                             break;
                         }
                     }
@@ -736,7 +766,8 @@ std::string ModelDownloader::register_hf_model(const std::string& hf_repo,
         }
 
         // Persist the resolved xclbin_dir and ensure flm_model_name is set.
-        bool config_changed = false;
+        // Also persist if text_config fields were merged (so lm_config reads them).
+        bool config_changed = text_config_merged;
         if (!xclbin_dir.empty() && config.value("flm_xclbin_name", "") != xclbin_dir) {
             config["flm_xclbin_name"] = xclbin_dir;
             config_changed = true;

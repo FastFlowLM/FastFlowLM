@@ -28,6 +28,8 @@ static const std::map<std::string, std::string> kHFModelTypeToFamily = {
     {"gemma3_text",   "gemma3-text"},
     {"gemma3",        "gemma3"},
     {"gemma4e",       "gemma4e"},
+    {"gemma4_text",   "gemma4e"},
+    {"gemma4",        "gemma4e"},
     {"gpt_oss",       "gpt-oss"},
     {"lfm2",          "lfm2"},
     {"lfm2_5_tk",     "lfm2.5-tk"},

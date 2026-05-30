@@ -87,7 +87,6 @@ static json normalize_messages(json messages) {
             current_msg["content"] = merged_content_array;
         }
         else if (role == "assistant") {
-            std::cout << "Removing assistant fields..." << std::endl;
             // Strip prior assistant "thinking" / reasoning fields so they are not
             // fed back into the model on subsequent turns.
             if (current_msg.contains("thinking")) {
@@ -1093,7 +1092,7 @@ void RestHandler::handle_openai_chat_completion(const json& request,
             current_messages = convert_tool_responses_gemma4(current_messages);
         }
 
-        // std::cout << "FLM current_messages: \n" << current_messages.dump(4) << std::endl;
+        std::cout << "FLM current_messages: \n" << current_messages.dump(4) << std::endl;
 
         lm_uniform_input_t uniformed_input;
         uniformed_input.messages = current_messages;

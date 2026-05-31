@@ -8,8 +8,122 @@
 
 #include "AutoModel/modeling_gemma4e.hpp"
 #include "metrices.hpp"
+#include <fstream>
+#include <sstream>
 
 namespace {
+bool read_safetensors_header(const std::string& model_path, nlohmann::json& header_json, std::string& err) {
+    const std::string q4nx_path = model_path + "/model.q4nx";
+    std::ifstream file(q4nx_path, std::ios::binary);
+    if (!file.is_open()) {
+        err = "failed to open " + q4nx_path;
+        return false;
+    }
+
+    uint64_t header_len = 0;
+    file.read(reinterpret_cast<char*>(&header_len), sizeof(header_len));
+    if (!file.good()) {
+        err = "failed to read SafeTensors header length";
+        return false;
+    }
+    if (header_len == 0 || header_len > (64ULL * 1024ULL * 1024ULL)) {
+        err = "invalid SafeTensors header length: " + std::to_string(header_len);
+        return false;
+    }
+
+    std::string header_str(header_len, '\0');
+    file.read(header_str.data(), static_cast<std::streamsize>(header_len));
+    if (!file.good()) {
+        err = "failed to read SafeTensors header bytes";
+        return false;
+    }
+
+    try {
+        header_json = nlohmann::json::parse(header_str);
+    } catch (const std::exception& ex) {
+        err = std::string("failed to parse SafeTensors header JSON: ") + ex.what();
+        return false;
+    }
+    return true;
+}
+
+bool get_tensor_shape(const nlohmann::json& header_json,
+                      const std::string& tensor_name,
+                      std::vector<size_t>& out_shape,
+                      std::string& err) {
+    if (!header_json.contains(tensor_name) || !header_json[tensor_name].is_object()) {
+        err = "missing tensor in model.q4nx: " + tensor_name;
+        return false;
+    }
+    const auto& tensor_obj = header_json[tensor_name];
+    if (!tensor_obj.contains("shape") || !tensor_obj["shape"].is_array()) {
+        err = "tensor has no valid shape: " + tensor_name;
+        return false;
+    }
+    out_shape.clear();
+    for (const auto& dim : tensor_obj["shape"]) {
+        if (!dim.is_number_unsigned()) {
+            err = "tensor shape contains non-unsigned dimension: " + tensor_name;
+            return false;
+        }
+        out_shape.push_back(dim.get<size_t>());
+    }
+    return true;
+}
+
+std::string shape_to_string(const std::vector<size_t>& shape) {
+    std::ostringstream oss;
+    oss << "[";
+    for (size_t i = 0; i < shape.size(); ++i) {
+        if (i != 0) {
+            oss << ", ";
+        }
+        oss << shape[i];
+    }
+    oss << "]";
+    return oss.str();
+}
+
+bool validate_gemma4e_q4nx_layout(const std::string& model_path, const LM_Config& cfg, std::string& err) {
+    nlohmann::json header_json;
+    if (!read_safetensors_header(model_path, header_json, err)) {
+        return false;
+    }
+
+    const size_t num_heads = static_cast<size_t>(cfg.num_attention_heads);
+    const size_t hidden_size = static_cast<size_t>(cfg.hidden_size);
+    const size_t num_kv_heads = static_cast<size_t>(cfg.num_key_value_heads);
+
+    // Gemma4e NPU kernels expect these exact core tensor layouts.
+    const std::vector<size_t> expected_inp_gate = {num_heads, hidden_size, 32};
+    const std::vector<size_t> expected_prefill = {num_kv_heads * 2, hidden_size / 256, 16384};
+    const std::vector<size_t> expected_per_layer_proj = {80, hidden_size / 10, 32};
+
+    struct TensorExpectation {
+        std::string name;
+        std::vector<size_t> expected;
+    };
+    const std::vector<TensorExpectation> checks = {
+        {"model.layers.0.inp_gate.weight", expected_inp_gate},
+        {"model.layers.0.inp_gate.weight_prefill", expected_prefill},
+        {"model.layers.0.per_layer_projection.weight", expected_per_layer_proj},
+    };
+
+    for (const auto& check : checks) {
+        std::vector<size_t> actual;
+        if (!get_tensor_shape(header_json, check.name, actual, err)) {
+            return false;
+        }
+        if (actual != check.expected) {
+            err = "incompatible tensor shape for " + check.name +
+                  ": expected " + shape_to_string(check.expected) +
+                  ", got " + shape_to_string(actual);
+            return false;
+        }
+    }
+    return true;
+}
+
 std::string trim_gemma4e_tool_value(std::string value) {
     size_t start = value.find_first_not_of(" \t\r\n");
     if (start == std::string::npos) {
@@ -415,6 +529,13 @@ Gemma4e::Gemma4e(xrt::device* npu_device_inst) : AutoModel(npu_device_inst, "Gem
 void Gemma4e::load_model(std::string model_path, json model_info, int default_context_length, bool enable_preemption) {
     
     this->_shared_load_model(model_path, model_info, default_context_length, enable_preemption);
+
+    std::string layout_error;
+    if (!validate_gemma4e_q4nx_layout(this->model_path, *this->lm_config, layout_error)) {
+        header_print("ERROR", "Gemma4e model.q4nx layout validation failed: " << layout_error);
+        header_print("ERROR", "This model.q4nx is incompatible with Gemma4e NPU kernels. Re-convert with a Gemma4e-compatible converter.");
+        exit(1);
+    }
     
     this->q4nx = std::make_unique<Q4NX>(this->model_path);
     this->lm_engine = std::make_unique<gemma4e_npu>(*this->lm_config, this->npu.get(), this->MAX_L);
@@ -426,7 +547,12 @@ void Gemma4e::load_model(std::string model_path, json model_info, int default_co
     this->setup_tokenizer(model_path);
     this->sampler.reset();
 
-    this->enable_tool = (model_info["size"] > 800000000)? true : false;
+    // HF-registered models may omit or null out size; keep this check robust.
+    long long model_size = 0;
+    if (model_info.contains("size") && model_info["size"].is_number()) {
+        model_size = model_info["size"].get<long long>();
+    }
+    this->enable_tool = (model_size > 800000000);
 
     sampler_config config;
     config.top_k = 64;

@@ -95,15 +95,99 @@ nlohmann::json AutoModel::_shared_setup_tokenizer(std::string model_path) {
         tokenizer_config["eos_token"]
     );
 
+    nlohmann::json tokenizer_json = nlohmann::json::object();
+    bool tokenizer_json_loaded = false;
+    auto find_token_id = [&](const std::string& token_text) -> int {
+        if (token_text.empty()) return -1;
+
+        if (!tokenizer_json_loaded) {
+            tokenizer_json_loaded = true;
+            #ifdef _WIN32
+            std::string tokenizer_json_path = model_path + "\\tokenizer.json";
+            #else
+            std::string tokenizer_json_path = model_path + "/tokenizer.json";
+            #endif
+            std::ifstream fs_tok(tokenizer_json_path, std::ios::in | std::ios::binary);
+            if (fs_tok.is_open()) {
+                std::string tok_data;
+                fs_tok.seekg(0, std::ios::end);
+                size_t tok_size = static_cast<size_t>(fs_tok.tellg());
+                fs_tok.seekg(0, std::ios::beg);
+                tok_data.resize(tok_size);
+                fs_tok.read(tok_data.data(), tok_size);
+                fs_tok.close();
+                try {
+                    tokenizer_json = nlohmann::json::parse(tok_data);
+                } catch (...) {
+                    tokenizer_json = nlohmann::json::object();
+                }
+            }
+        }
+
+        if (tokenizer_json.contains("added_tokens") && tokenizer_json["added_tokens"].is_array()) {
+            for (auto& t : tokenizer_json["added_tokens"]) {
+                if (!t.is_object()) continue;
+                if (!t.contains("content") || !t["content"].is_string()) continue;
+                if (t["content"].get<std::string>() != token_text) continue;
+                if (t.contains("id") && t["id"].is_number_integer()) {
+                    return t["id"].get<int>();
+                }
+            }
+        }
+
+        if (tokenizer_json.contains("model") && tokenizer_json["model"].is_object()) {
+            auto& model_obj = tokenizer_json["model"];
+            if (model_obj.contains("vocab") && model_obj["vocab"].is_object()) {
+                auto& vocab = model_obj["vocab"];
+                if (vocab.contains(token_text) && vocab[token_text].is_number_integer()) {
+                    return vocab[token_text].get<int>();
+                }
+            }
+        }
+
+        return -1;
+    };
+
     if (this->has_bos_token) {
-        this->bos_token_id = tokenizer_config["bos_token_id"].get<int>();
-    }
-    else {
+        if (tokenizer_config.contains("bos_token_id") && tokenizer_config["bos_token_id"].is_number_integer()) {
+            this->bos_token_id = tokenizer_config["bos_token_id"].get<int>();
+        } else {
+            int bos_id = find_token_id(tokenizer_config["bos_token"].get<std::string>());
+            if (bos_id >= 0) {
+                this->bos_token_id = bos_id;
+            } else {
+                header_print("WARNING", "bos_token_id missing in tokenizer_config.json and cannot be resolved from tokenizer.json; disabling BOS token");
+                this->has_bos_token = false;
+                this->bos_token_id = -1;
+            }
+        }
+    } else {
         this->bos_token_id = -1;
     }
+
     this->eos_token = tokenizer_config["eos_token"].get<std::string>();
-    for (auto& token : tokenizer_config["eos_token_id"]) {
-        this->eos_token_ids.push_back(token.get<int>());
+    this->eos_token_ids.clear();
+    if (tokenizer_config.contains("eos_token_id")) {
+        if (tokenizer_config["eos_token_id"].is_number_integer()) {
+            this->eos_token_ids.push_back(tokenizer_config["eos_token_id"].get<int>());
+        } else if (tokenizer_config["eos_token_id"].is_array()) {
+            for (auto& token : tokenizer_config["eos_token_id"]) {
+                if (token.is_number_integer()) {
+                    this->eos_token_ids.push_back(token.get<int>());
+                }
+            }
+        }
+    }
+    if (this->eos_token_ids.empty()) {
+        int eos_id = find_token_id(this->eos_token);
+        if (eos_id >= 0) {
+            this->eos_token_ids.push_back(eos_id);
+            header_print("WARNING", "eos_token_id missing in tokenizer_config.json; resolved from tokenizer.json");
+        }
+    }
+    if (this->eos_token_ids.empty()) {
+        header_print("ERROR", "Unable to resolve eos_token_id from tokenizer_config.json or tokenizer.json");
+        exit(1);
     }
     this->user_system_prompt = "";
     this->extra_context["user_system_prompt"] = this->user_system_prompt;

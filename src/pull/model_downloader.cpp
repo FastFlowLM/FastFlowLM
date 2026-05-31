@@ -533,7 +533,7 @@ bool ModelDownloader::verify_and_clean_files(const std::string& model_tag, bool 
             // are frequently regenerated or vendor-patched without changing
             // the model content (tokenizer config, compiled weights).
             static const std::set<std::string> kHFNoHashCheck = {
-                "tokenizer.json", "model.q4nx",
+                "config.json", "tokenizer.json", "model.q4nx",
             };
             if (supported_models.is_hf_model(model_tag) &&
                 kHFNoHashCheck.count(filename)) {
@@ -755,6 +755,64 @@ std::string ModelDownloader::register_hf_model(const std::string& hf_repo,
                                 if (candidate_config.contains(field) &&
                                     !candidate_config[field].is_null()) {
                                     config[field] = candidate_config[field];
+                                }
+                            }
+
+                            // Gemma4 runtime libraries also consume nested
+                            // vision/audio config keys (e.g. xclbin engine
+                            // names) directly from raw json. Preserve any
+                            // model-specific values already present, but fill
+                            // missing keys from the matched reference model.
+                            static const std::vector<std::string> kNestedRuntimeConfigs = {
+                                "vision_config", "audio_config"
+                            };
+                            for (const auto& nested_key : kNestedRuntimeConfigs) {
+                                if (!candidate_config.contains(nested_key) ||
+                                    !candidate_config[nested_key].is_object()) {
+                                    continue;
+                                }
+
+                                if (!config.contains(nested_key) ||
+                                    !config[nested_key].is_object()) {
+                                    config[nested_key] = candidate_config[nested_key];
+                                    continue;
+                                }
+
+                                for (auto& [k, v] : candidate_config[nested_key].items()) {
+                                    if (!config[nested_key].contains(k) ||
+                                        config[nested_key][k].is_null()) {
+                                        config[nested_key][k] = v;
+                                    }
+                                }
+                            }
+
+                            // Normalize a couple of scalar fields to the
+                            // reference model format expected by Gemma4e libs.
+                            if (candidate_config.contains("model_type") &&
+                                !candidate_config["model_type"].is_null()) {
+                                config["model_type"] = candidate_config["model_type"];
+                            }
+                            if (candidate_config.contains("eos_token_id") &&
+                                candidate_config["eos_token_id"].is_number_integer()) {
+                                if (!config.contains("eos_token_id") ||
+                                    !config["eos_token_id"].is_number_integer()) {
+                                    config["eos_token_id"] = candidate_config["eos_token_id"];
+                                }
+                            }
+
+                            // Backfill any remaining top-level null/missing
+                            // fields from the matched reference config. Some
+                            // runtime libraries read raw JSON values directly
+                            // and assume scalar numerics are not null.
+                            for (auto& [k, v] : candidate_config.items()) {
+                                if (v.is_null()) {
+                                    continue;
+                                }
+                                if (k.rfind("flm_", 0) == 0) {
+                                    continue;
+                                }
+                                if (!config.contains(k) || config[k].is_null()) {
+                                    config[k] = v;
                                 }
                             }
                             break;

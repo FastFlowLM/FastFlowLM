@@ -194,6 +194,28 @@ std::string detect_xclbin_base(const std::filesystem::path& model_dir,
         return s;
     };
 
+    auto compact_alnum = [](const std::string& s) -> std::string {
+        std::string out;
+        out.reserve(s.size());
+        for (unsigned char c : s) {
+            if (std::isalnum(c)) out.push_back(static_cast<char>(std::tolower(c)));
+        }
+        return out;
+    };
+
+    auto strip_variant_suffix = [](std::string s) -> std::string {
+        for (const char* sfx : {
+                "-instruct", "-thinking", "-tool", "-transcript", "-it", "-tk", "-sg"
+            }) {
+            std::string sx(sfx);
+            if (s.size() > sx.size() && s.substr(s.size() - sx.size()) == sx) {
+                s = s.substr(0, s.size() - sx.size());
+                break;
+            }
+        }
+        return s;
+    };
+
     // 2. Case-insensitive normalized name matching
     //    Check model_dir name first, then config.json model_name field
     std::vector<std::string> name_hints;
@@ -206,16 +228,38 @@ std::string detect_xclbin_base(const std::filesystem::path& model_dir,
     }
 
     std::string best_match;
-    size_t best_prefix_len = 0;
+    size_t best_score = 0;
     for (const auto& entry : std::filesystem::directory_iterator(xclbin_root)) {
         if (!entry.is_directory()) continue;
         const std::string dir_name = entry.path().filename().string();
         const std::string norm_dir = normalize(dir_name);
+        const std::string norm_dir_core = strip_variant_suffix(norm_dir);
+        const std::string compact_dir = compact_alnum(norm_dir);
+        const std::string compact_dir_core = compact_alnum(norm_dir_core);
         for (const auto& hint : name_hints) {
             const std::string norm_hint = normalize(hint);
-            // Installed dir name is a prefix of (or equal to) the model hint
-            if (norm_hint.rfind(norm_dir, 0) == 0 && norm_dir.size() > best_prefix_len) {
-                best_prefix_len = norm_dir.size();
+            const std::string compact_hint = compact_alnum(norm_hint);
+
+            // Installed dir name is a prefix of (or equal to) the model hint.
+            if (norm_hint.rfind(norm_dir, 0) == 0 && norm_dir.size() > best_score) {
+                best_score = norm_dir.size();
+                best_match = dir_name;
+            }
+
+            // Core name without variant suffix (e.g. "-it") as prefix.
+            if (norm_hint.rfind(norm_dir_core, 0) == 0 && norm_dir_core.size() > best_score) {
+                best_score = norm_dir_core.size();
+                best_match = dir_name;
+            }
+
+            // Compact alnum fallback: handles punctuation differences
+            // like "Gemma-4-E4B" vs "Gemma4-E4B".
+            if (compact_hint.rfind(compact_dir, 0) == 0 && compact_dir.size() > best_score) {
+                best_score = compact_dir.size();
+                best_match = dir_name;
+            }
+            if (compact_hint.rfind(compact_dir_core, 0) == 0 && compact_dir_core.size() > best_score) {
+                best_score = compact_dir_core.size();
                 best_match = dir_name;
             }
         }
@@ -229,6 +273,28 @@ std::string detect_xclbin_base(const std::filesystem::path& model_dir,
             if (!eff.contains(k)) eff[k] = v;
         }
     }
+    const std::string model_type = eff.value("model_type", "");
+    const int hidden_size        = eff.value("hidden_size", 0);
+    const int num_layers         = eff.value("num_hidden_layers", 0);
+
+    // Gemma4 fine-tunes can change layer count; use size token + model_type
+    // to select the correct base xclbin directory.
+    std::string hint_joined;
+    for (const auto& h : name_hints) {
+        if (!hint_joined.empty()) hint_joined += " ";
+        hint_joined += normalize(h);
+    }
+    if (model_type.rfind("gemma4", 0) == 0) {
+        if ((hint_joined.find("e4b") != std::string::npos || hidden_size == 2560) &&
+            std::filesystem::is_directory(xclbin_root + "/Gemma4-E4B-IT-NPU2")) {
+            return "Gemma4-E4B-IT-NPU2";
+        }
+        if ((hint_joined.find("e2b") != std::string::npos || hidden_size == 2048) &&
+            std::filesystem::is_directory(xclbin_root + "/Gemma4-E2B-IT-NPU2")) {
+            return "Gemma4-E2B-IT-NPU2";
+        }
+    }
+
     struct ArchEntry { std::string model_type_prefix; int hidden_size; int num_layers; std::string xclbin_dir; };
     static const std::vector<ArchEntry> arch_table = {
         // Qwen3.5 family
@@ -257,9 +323,6 @@ std::string detect_xclbin_base(const std::filesystem::path& model_dir,
         {"lfm2",       2048, 16, "LFM2.5-1.2B-NPU2"},
         {"lfm2",       2048, 24, "LFM2-2.6B-NPU2"},
     };
-    const std::string model_type = eff.value("model_type", "");
-    const int hidden_size        = eff.value("hidden_size", 0);
-    const int num_layers         = eff.value("num_hidden_layers", 0);
     for (const auto& ae : arch_table) {
         if (model_type.rfind(ae.model_type_prefix, 0) == 0 &&
             hidden_size == ae.hidden_size &&
@@ -473,11 +536,30 @@ std::string ModelDownloader::pull_hf_repo(const std::string& hf_repo_with_tag, b
             || detected_family == "lfm2.5-tk" || detected_family == "qwen3-tk";
     }();
 
+    // For HF shortcuts, derive minimum compatible FLM version from the model's
+    // own config when available. Converter outputs often omit this field; in
+    // that case keep it permissive to avoid false incompatibility rejections.
+    std::string flm_min_version = "0.0.0";
+    try {
+        std::ifstream cfg_in(model_dir / "config.json");
+        if (cfg_in.is_open()) {
+            nlohmann::json cfg_json = nlohmann::json::parse(cfg_in, nullptr, false);
+            if (!cfg_json.is_discarded() && cfg_json.contains("flm_version") && cfg_json["flm_version"].is_string()) {
+                const std::string cfg_ver = cfg_json["flm_version"].get<std::string>();
+                if (!cfg_ver.empty()) {
+                    flm_min_version = cfg_ver;
+                }
+            }
+        }
+    } catch (...) {
+        // Keep permissive default if config parsing fails.
+    }
+
     nlohmann::json model_entry = {
         {"name", model_type},
         {"url", "https://huggingface.co/" + repo_id},
         {"file_url", model_tree_url(repo_id, revision)},
-        {"flm_min_version", "0.9.0"},
+        {"flm_min_version", flm_min_version},
         {"files", downloaded_files},
         {"xclbin_dir", resolved_xclbin_dir},
         {"vlm", is_vlm_model},
@@ -555,15 +637,26 @@ bool ModelDownloader::check_model_compatibility(const std::string& model_tag, bo
     if (model_info.contains("flm_min_version") && model_info["flm_min_version"].is_string()) {
         flm_min_version = model_info["flm_min_version"].get<std::string>();
     }
-    int l_l, m_l, r_l; //left, middle, right on local version
-    int l_r, m_r, r_r; //left, middle, right on requried version
-    int l_f, m_f, r_f; //left, middle, right on flm version
+    int l_l = 0, m_l = 0, r_l = 0; //left, middle, right on local version
+    int l_r = 0, m_r = 0, r_r = 0; //left, middle, right on requried version
+    int l_f = 0, m_f = 0, r_f = 0; //left, middle, right on flm version
     sscanf(__FLM_VERSION__, "%d.%d.%d", &l_f, &m_f, &r_f);
     sscanf(flm_version.c_str(), "%d.%d.%d", &l_l, &m_l, &r_l);
     sscanf(flm_min_version.c_str(), "%d.%d.%d", &l_r, &m_r, &r_r);
     uint32_t local_version_u32 = l_l * 1000000 + m_l * 1000 + r_l;
     uint32_t required_version_u32 = l_r * 1000000 + m_r * 1000 + r_r;
     uint32_t flm_version_u32 = l_f * 1000000 + m_f * 1000 + r_f;
+
+    // Converter-generated models may omit flm_version; LM_Config defaults that
+    // to 0.0.0. Treat this as "unknown" and do not reject compatibility solely
+    // based on missing version metadata.
+    if (local_version_u32 == 0) {
+        if (!sub_process_mode) {
+            header_print("WARNING", "Model " + model_tag + " has no flm_version metadata (0.0.0); skipping strict version gate.");
+        }
+        return true;
+    }
+
     bool is_future_version = false;
     if (local_version_u32 > flm_version_u32) {
         is_future_version = true;

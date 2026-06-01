@@ -140,34 +140,56 @@ bool download_file(const std::string& url, const std::string& local_path, bool i
     std::filesystem::path path(local_path);
     std::filesystem::create_directories(path.parent_path());
 
-    FILE* fp = fopen(local_path.c_str(), "wb");
-    if (!fp) {
-        std::cerr << "Failed to open file for writing: " << local_path << std::endl;
-        curl_easy_cleanup(curl);
-        return false;
+    curl_off_t resume_from = 0;
+    bool try_resume = false;
+    if (std::filesystem::exists(local_path) && std::filesystem::is_regular_file(local_path)) {
+        resume_from = static_cast<curl_off_t>(std::filesystem::file_size(local_path));
+        try_resume = resume_from > 0;
     }
+
+    auto do_transfer = [&](bool resume) -> CURLcode {
+        const char* mode = resume ? "ab" : "wb";
+        FILE* fp = fopen(local_path.c_str(), mode);
+        if (!fp) {
+            std::cerr << "Failed to open file for writing: " << local_path << std::endl;
+            return CURLE_WRITE_ERROR;
+        }
+
+        curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_data_to_file);
+        curl_easy_setopt(curl, CURLOPT_WRITEDATA, fp);
+        curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
+        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
+        curl_easy_setopt(curl, CURLOPT_USERAGENT, "FastFlowLM/1.0");
+        curl_easy_setopt(curl, CURLOPT_TIMEOUT, 3600L); // 1 hour timeout
+        curl_easy_setopt(curl, CURLOPT_RESUME_FROM_LARGE, resume ? resume_from : 0);
+
+        // Set progress callback if provided
+        if (progress_cb) {
+            curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
+            curl_easy_setopt(curl, CURLOPT_PROGRESSFUNCTION, progress_callback);
+        }
+
+        CURLcode res = curl_easy_perform(curl);
+        fclose(fp);
+        return res;
+    };
 
     // Hide cursor before starting download
     hide_cursor();
 
-    curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_data_to_file);
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA, fp);
-    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
-    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
-    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
-    curl_easy_setopt(curl, CURLOPT_USERAGENT, "FastFlowLM/1.0");
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 3600L); // 1 hour timeout
-
-    // Set progress callback if provided
-    if (progress_cb) {
-        curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
-        curl_easy_setopt(curl, CURLOPT_PROGRESSFUNCTION, progress_callback);
+    if (try_resume) {
+        header_print("FLM", "Resuming download: " << local_path);
     }
 
-    CURLcode res = curl_easy_perform(curl);
-    
-    fclose(fp);
+    CURLcode res = do_transfer(try_resume);
+    if (res == CURLE_RANGE_ERROR && try_resume) {
+        // Some servers/CDNs may reject range requests; retry from scratch.
+        header_print("FLM", "Range resume not supported; retrying full download.");
+        res = do_transfer(false);
+    }
+
     curl_easy_cleanup(curl);
 
     // Show cursor after download completes
@@ -175,7 +197,6 @@ bool download_file(const std::string& url, const std::string& local_path, bool i
 
     if (res != CURLE_OK) {
         std::cerr << "CURL error: " << curl_easy_strerror(res) << std::endl;
-        std::filesystem::remove(local_path); // Remove partial download
         return false;
     }
 
@@ -188,6 +209,7 @@ bool download_file(const std::string& url, const std::string& local_path, bool i
     std::string local_oid = is_lfs ? calculate_file_sha256(local_path) : calculate_git_blob_oid(local_path);
     if (local_oid != remote_oid) {
         header_print("FLM", "Hash not matched!");
+        std::filesystem::remove(local_path); // Prevent reusing corrupted full files.
         show_cursor(); // Show cursor on error
         return false;
     }

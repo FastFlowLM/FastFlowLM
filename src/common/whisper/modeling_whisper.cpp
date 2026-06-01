@@ -87,9 +87,18 @@ void Whisper::setup_tokenizer(std::string model_path) {
     else {
         this->bos_token_id = -1;
     }
-    this->eos_token = tokenizer_config["eos_token"].get<std::string>();
-    for (auto& token : tokenizer_config["eos_token_id"]) {
-        this->eos_token_ids.push_back(token.get<int>());
+    if (tokenizer_config.contains("eos_token") && tokenizer_config["eos_token"].is_string()) {
+        this->eos_token = tokenizer_config["eos_token"].get<std::string>();
+    } else {
+        this->eos_token = "";
+    }
+
+    if (tokenizer_config.contains("eos_token_id") && tokenizer_config["eos_token_id"].is_array()) {
+        for (auto& token : tokenizer_config["eos_token_id"]) {
+            this->eos_token_ids.push_back(token.get<int>());
+        }
+    } else if (tokenizer_config.contains("eos_token_id") && tokenizer_config["eos_token_id"].is_number_integer()) {
+        this->eos_token_ids.push_back(tokenizer_config["eos_token_id"].get<int>());
     }
  
     this->tokenizer = std::make_unique<Tokenizer>(this->model_path);

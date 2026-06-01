@@ -85,14 +85,25 @@ nlohmann::json AutoModel::_shared_setup_tokenizer(std::string model_path) {
         tokenizer_config["chat_template"] = chat_template;
     }
     
-    if (tokenizer_config["eos_token"].is_null()) {
-        header_print("ERROR", "eos_token is null in tokenizer_config.json");
-        exit(1);
+    std::string eos_token_str;
+    if (tokenizer_config.contains("eos_token") && tokenizer_config["eos_token"].is_string()) {
+        eos_token_str = tokenizer_config["eos_token"].get<std::string>();
+    } else {
+        header_print("FLM", "Warning: eos_token is missing/null in tokenizer_config.json; using empty eos token string.");
+        eos_token_str = "";
     }
+
+    std::string bos_token_str;
+    if (this->has_bos_token && tokenizer_config.contains("bos_token") && tokenizer_config["bos_token"].is_string()) {
+        bos_token_str = tokenizer_config["bos_token"].get<std::string>();
+    } else {
+        bos_token_str = "";
+    }
+
     this->chat_tmpl = std::make_unique<minja::chat_template>(
         tokenizer_config["chat_template"],
-        this->has_bos_token ? tokenizer_config["bos_token"] : "",
-        tokenizer_config["eos_token"]
+        bos_token_str,
+        eos_token_str
     );
 
     if (this->has_bos_token) {
@@ -101,9 +112,13 @@ nlohmann::json AutoModel::_shared_setup_tokenizer(std::string model_path) {
     else {
         this->bos_token_id = -1;
     }
-    this->eos_token = tokenizer_config["eos_token"].get<std::string>();
-    for (auto& token : tokenizer_config["eos_token_id"]) {
-        this->eos_token_ids.push_back(token.get<int>());
+    this->eos_token = eos_token_str;
+    if (tokenizer_config.contains("eos_token_id") && tokenizer_config["eos_token_id"].is_array()) {
+        for (auto& token : tokenizer_config["eos_token_id"]) {
+            this->eos_token_ids.push_back(token.get<int>());
+        }
+    } else if (tokenizer_config.contains("eos_token_id") && tokenizer_config["eos_token_id"].is_number_integer()) {
+        this->eos_token_ids.push_back(tokenizer_config["eos_token_id"].get<int>());
     }
     this->user_system_prompt = "";
     this->extra_context["user_system_prompt"] = this->user_system_prompt;

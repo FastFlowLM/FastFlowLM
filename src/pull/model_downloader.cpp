@@ -57,6 +57,23 @@ std::string resolve_url(const std::string& repo, const std::string& tag, const s
     return "https://huggingface.co/" + repo + "/resolve/" + tag + "/" + file + "?download=true";
 }
 
+std::string get_remote_oid(const nlohmann::json& file_entry, bool is_lfs) {
+    if (is_lfs && file_entry.contains("lfs") && file_entry["lfs"].is_object() && file_entry["lfs"].contains("oid")) {
+        return file_entry["lfs"]["oid"].get<std::string>();
+    }
+    return file_entry.value("oid", "");
+}
+
+bool local_file_matches_oid(const std::string& local_path, bool is_lfs, const std::string& oid) {
+    if (oid.empty() || !std::filesystem::exists(local_path) || !std::filesystem::is_regular_file(local_path)) {
+        return false;
+    }
+    const std::string local_oid = is_lfs
+        ? download_utils::calculate_file_sha256(local_path)
+        : download_utils::calculate_git_blob_oid(local_path);
+    return local_oid == oid;
+}
+
 } // namespace
 
 /// \brief Constructor
@@ -109,17 +126,26 @@ std::string ModelDownloader::pull_hf_repo(const std::string& hf_repo_with_tag, b
         }
 
         const std::string local_path = (model_dir / filename).string();
-        if (!force_redownload && std::filesystem::exists(local_path) && std::filesystem::file_size(local_path) > 0) {
-            downloaded_files.push_back(filename);
-            continue;
-        }
-
         const bool is_lfs = it->contains("lfs") && (*it)["lfs"].is_object() && (*it)["lfs"].contains("oid");
-        const std::string oid = is_lfs ? (*it)["lfs"]["oid"].get<std::string>() : it->value("oid", "");
+        const std::string oid = get_remote_oid(*it, is_lfs);
+        const uint64_t remote_size = it->value("size", static_cast<uint64_t>(0));
+
+        if (!force_redownload && std::filesystem::exists(local_path) && std::filesystem::is_regular_file(local_path)) {
+            if (local_file_matches_oid(local_path, is_lfs, oid)) {
+                downloaded_files.push_back(filename);
+                continue;
+            }
+
+            const uint64_t local_size = std::filesystem::file_size(local_path);
+            if (remote_size > 0 && local_size >= remote_size) {
+                // Existing file is full-sized but stale/corrupt: restart from scratch.
+                std::filesystem::remove(local_path);
+            }
+        }
 
         downloads.push_back({
             {"file", filename},
-            {"size", it->value("size", 0)},
+            {"size", remote_size},
             {"url", resolve_url(repo_id, revision, filename)},
             {"localpath", local_path},
             {"oid", oid},
@@ -143,6 +169,7 @@ std::string ModelDownloader::pull_hf_repo(const std::string& hf_repo_with_tag, b
         {"name", model_type},
         {"url", "https://huggingface.co/" + repo_id},
         {"file_url", model_tree_url(repo_id, revision)},
+        {"flm_min_version", "0.9.0"},
         {"files", downloaded_files},
         {"vlm", true},
         {"default_context_length", 32768},
@@ -215,7 +242,10 @@ bool ModelDownloader::check_model_compatibility(const std::string& model_tag, bo
     LM_Config config;
     config.from_pretrained(this->supported_models.get_model_path(new_model_tag));
     std::string flm_version = config.flm_version;
-    std::string flm_min_version = model_info["flm_min_version"];
+    std::string flm_min_version = "0.0.0";
+    if (model_info.contains("flm_min_version") && model_info["flm_min_version"].is_string()) {
+        flm_min_version = model_info["flm_min_version"].get<std::string>();
+    }
     int l_l, m_l, r_l; //left, middle, right on local version
     int l_r, m_r, r_r; //left, middle, right on requried version
     int l_f, m_f, r_f; //left, middle, right on flm version
@@ -482,30 +512,40 @@ std::pair<nlohmann::json, float> ModelDownloader::build_download_list(const std:
 
             const auto& file = *it;
             std::string local_path = get_model_file_path(model_path, filename);
+            bool is_lfs = file.contains("lfs") && file["lfs"].is_object() && file["lfs"].contains("oid");
+            std::string oid = get_remote_oid(file, is_lfs);
+            uint64_t remote_size = file.value("size", static_cast<uint64_t>(0));
 
-            if (!file_exists(local_path)) {
-                std::string url;
-                if (std::string(base_url).find("resolve") != std::string::npos) { // resolve provided , may from a specific branch
-                    url = base_url + "/" + filename + "?download=true";
+            if (file_exists(local_path)) {
+                if (local_file_matches_oid(local_path, is_lfs, oid)) {
+                    continue;
                 }
-                else {
-                    url = base_url + "/resolve/main/" + filename + "?download=true";
-                }
-                bool is_lfs = file.contains("lfs");
-                std::string oid = is_lfs ? file["lfs"]["oid"] : file["oid"];
-                float file_size = static_cast<float>(file["size"]) / 1024 / 1024;
-                sum_file_size += file_size;
 
-                nlohmann::json entry = {
-                    {"file", filename},
-                    {"size", file_size},
-                    {"url", url},
-                    {"localpath", local_path},
-                    {"oid", oid},
-                    {"is_lfs", is_lfs},
-                };
-                downloads.push_back(entry);
+                uint64_t local_size = std::filesystem::file_size(local_path);
+                if (remote_size > 0 && local_size >= remote_size) {
+                    std::filesystem::remove(local_path);
+                }
             }
+
+            std::string url;
+            if (std::string(base_url).find("resolve") != std::string::npos) { // resolve provided , may from a specific branch
+                url = base_url + "/" + filename + "?download=true";
+            }
+            else {
+                url = base_url + "/resolve/main/" + filename + "?download=true";
+            }
+            float file_size = static_cast<float>(remote_size) / 1024 / 1024;
+            sum_file_size += file_size;
+
+            nlohmann::json entry = {
+                {"file", filename},
+                {"size", file_size},
+                {"url", url},
+                {"localpath", local_path},
+                {"oid", oid},
+                {"is_lfs", is_lfs},
+            };
+            downloads.push_back(entry);
 
         }
     } 

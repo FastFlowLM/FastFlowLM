@@ -74,6 +74,82 @@ bool local_file_matches_oid(const std::string& local_path, bool is_lfs, const st
     return local_oid == oid;
 }
 
+/// \brief Try to find a compatible installed xclbin directory for a model.
+/// Resolution order:
+///   1. Explicit "flm_xclbin_dir" field in the model's config.json
+///   2. "model_name" field in config.json prefix-matched against installed dirs
+///   3. Architecture fingerprint table (model_type + hidden_size + num_hidden_layers)
+/// Returns the matching installed directory name, or "" if none found.
+std::string detect_xclbin_base(const std::filesystem::path& model_dir,
+                                const std::string& xclbin_root) {
+    nlohmann::json config;
+    {
+        std::ifstream f(model_dir / "config.json");
+        if (f.is_open()) {
+            try { config = nlohmann::json::parse(f); } catch (...) {}
+        }
+    }
+
+    // 1. Explicit override
+    if (config.contains("flm_xclbin_dir") && config["flm_xclbin_dir"].is_string()) {
+        return config["flm_xclbin_dir"].get<std::string>();
+    }
+
+    // 2. Match model_name against installed xclbin dirs (strips org prefix)
+    if (config.contains("model_name") && config["model_name"].is_string()) {
+        std::string mn = config["model_name"].get<std::string>();
+        auto slash = mn.rfind('/');
+        if (slash != std::string::npos) mn = mn.substr(slash + 1);
+        if (!mn.empty() && std::filesystem::is_directory(xclbin_root)) {
+            for (const auto& entry : std::filesystem::directory_iterator(xclbin_root)) {
+                if (!entry.is_directory()) continue;
+                const std::string dir_name = entry.path().filename().string();
+                if (dir_name.rfind(mn, 0) == 0) { // starts with base model name
+                    return dir_name;
+                }
+            }
+        }
+    }
+
+    // 3. Architecture fingerprint table
+    // Promote text_config to root for matching
+    nlohmann::json eff = config;
+    if (eff.contains("text_config") && eff["text_config"].is_object()) {
+        for (auto& [k, v] : eff["text_config"].items()) {
+            if (!eff.contains(k)) eff[k] = v;
+        }
+    }
+    struct ArchEntry { std::string model_type_prefix; int hidden_size; int num_layers; std::string xclbin_dir; };
+    static const std::vector<ArchEntry> arch_table = {
+        // Qwen3.5 family
+        {"qwen3_5", 4096, 32, "Qwen3.5-9B-NPU2"},
+        {"qwen3_5", 2560, 36, "Qwen3.5-4B-NPU2"},
+        {"qwen3_5", 1536, 28, "Qwen3.5-2B-NPU2"},
+        {"qwen3_5",  896, 24, "Qwen3.5-0.8B-NPU2"},
+        // Qwen3 family
+        {"qwen3",   4096, 36, "Qwen3-8B-NPU2"},
+        {"qwen3",   2048, 36, "Qwen3-4B-NPU2"},
+        {"qwen3",   1536, 28, "Qwen3-1.7B-NPU2"},
+        {"qwen3",    896, 28, "Qwen3-0.6B-NPU2"},
+        // Llama family
+        {"llama",   4096, 32, "Llama-3.2-3B-NPU2"},
+        {"llama",   4096, 32, "Llama-3.1-8B-NPU2"},
+    };
+    const std::string model_type = eff.value("model_type", "");
+    const int hidden_size        = eff.value("hidden_size", 0);
+    const int num_layers         = eff.value("num_hidden_layers", 0);
+    for (const auto& ae : arch_table) {
+        if (model_type.rfind(ae.model_type_prefix, 0) == 0 &&
+            hidden_size == ae.hidden_size &&
+            num_layers  == ae.num_layers) {
+            if (std::filesystem::is_directory(xclbin_root + "/" + ae.xclbin_dir)) {
+                return ae.xclbin_dir;
+            }
+        }
+    }
+    return "";
+}
+
 } // namespace
 
 /// \brief Constructor
@@ -115,26 +191,44 @@ std::string ModelDownloader::pull_hf_repo(const std::string& hf_repo_with_tag, b
         throw std::runtime_error("failed to parse Hugging Face repo tree for " + hf_repo_with_tag);
     }
 
-    nlohmann::json downloads = nlohmann::json::array();
-    std::vector<std::string> downloaded_files;
+    // Collect matching repo-tree entries, then sort by size so small files
+    // are verified/downloaded first and large .q4nx files are last.
+    struct FileEntry {
+        std::string filename;
+        nlohmann::json tree_entry;
+        uint64_t size;
+    };
+    std::vector<FileEntry> file_entries;
     for (const auto& filename : required_files) {
         auto it = std::find_if(repo_tree.begin(), repo_tree.end(), [&](const nlohmann::json& entry) {
             return entry.contains("path") && entry["path"] == filename;
         });
-        if (it == repo_tree.end()) {
-            continue;
-        }
+        if (it == repo_tree.end()) continue;
+        file_entries.push_back({filename, *it, it->value("size", static_cast<uint64_t>(0))});
+    }
+    std::stable_sort(file_entries.begin(), file_entries.end(),
+        [](const FileEntry& a, const FileEntry& b) { return a.size < b.size; });
+
+    nlohmann::json downloads = nlohmann::json::array();
+    std::vector<std::string> downloaded_files;
+    for (const auto& fe : file_entries) {
+        const std::string& filename = fe.filename;
+        const auto& tree_it = fe.tree_entry;
 
         const std::string local_path = (model_dir / filename).string();
-        const bool is_lfs = it->contains("lfs") && (*it)["lfs"].is_object() && (*it)["lfs"].contains("oid");
-        const std::string oid = get_remote_oid(*it, is_lfs);
-        const uint64_t remote_size = it->value("size", static_cast<uint64_t>(0));
+        const bool is_lfs = tree_it.contains("lfs") && tree_it["lfs"].is_object() && tree_it["lfs"].contains("oid");
+        const std::string oid = get_remote_oid(tree_it, is_lfs);
+        const uint64_t remote_size = fe.size;
 
         if (!force_redownload && std::filesystem::exists(local_path) && std::filesystem::is_regular_file(local_path)) {
+            header_print("FLM", "Checking local file: " + filename);
             if (local_file_matches_oid(local_path, is_lfs, oid)) {
+                header_print("FLM", "Unchanged: " + filename);
                 downloaded_files.push_back(filename);
                 continue;
             }
+
+            header_print("FLM", "Changed/corrupt, will re-download: " + filename);
 
             const uint64_t local_size = std::filesystem::file_size(local_path);
             if (remote_size > 0 && local_size >= remote_size) {
@@ -151,7 +245,7 @@ std::string ModelDownloader::pull_hf_repo(const std::string& hf_repo_with_tag, b
             {"oid", oid},
             {"is_lfs", is_lfs}
         });
-    }
+    } // end file_entries loop
 
     if (!downloads.empty() && !download_utils::download_multiple_files(downloads)) {
         throw std::runtime_error("failed to download Hugging Face files for " + hf_repo_with_tag);
@@ -165,12 +259,78 @@ std::string ModelDownloader::pull_hf_repo(const std::string& hf_repo_with_tag, b
         throw std::runtime_error("no downloadable FastFlowLM artifact files found in " + hf_repo_with_tag);
     }
 
+    // ---- xclbin setup -------------------------------------------------
+    // Case 1: repo ships its own xclbins (entries like "xclbins/attn.xclbin")
+    std::string xclbin_root;
+    try { xclbin_root = utils::find_xclbin_path() + "/xclbins"; } catch (...) {}
+
+    std::string resolved_xclbin_dir; // will be stored in registry
+    if (!xclbin_root.empty()) {
+        const std::string model_xclbin_dir = xclbin_root + "/" + model_type;
+
+        // Collect any xclbin files the repo ships
+        nlohmann::json xclbin_downloads = nlohmann::json::array();
+        for (const auto& entry : repo_tree) {
+            if (!entry.contains("path")) continue;
+            const std::string path = entry["path"].get<std::string>();
+            if (path.rfind("xclbins/", 0) == 0 && path.size() > 8 &&
+                path.substr(path.size() - 7) == ".xclbin") {
+                const std::string fname = std::filesystem::path(path).filename().string();
+                const std::string local_path = model_xclbin_dir + "/" + fname;
+                const bool is_lfs = entry.contains("lfs") && entry["lfs"].is_object() && entry["lfs"].contains("oid");
+                const std::string oid = get_remote_oid(entry, is_lfs);
+                if (!std::filesystem::exists(local_path) || !local_file_matches_oid(local_path, is_lfs, oid)) {
+                    xclbin_downloads.push_back({
+                        {"file", path},
+                        {"size", entry.value("size", static_cast<uint64_t>(0))},
+                        {"url", resolve_url(repo_id, revision, path)},
+                        {"localpath", local_path},
+                        {"oid", oid},
+                        {"is_lfs", is_lfs}
+                    });
+                }
+            }
+        }
+        if (!xclbin_downloads.empty()) {
+            std::filesystem::create_directories(model_xclbin_dir);
+            if (!download_utils::download_multiple_files(xclbin_downloads)) {
+                header_print("FLM", "Warning: some xclbin files failed to download for " + model_type);
+            } else {
+                header_print("FLM", "xclbins installed for " + model_type);
+            }
+            resolved_xclbin_dir = model_type;
+        }
+
+        // Case 2: fine-tune — create a symlink to the base model's xclbin dir
+        if (resolved_xclbin_dir.empty() && !std::filesystem::exists(model_xclbin_dir)) {
+            const std::string base = detect_xclbin_base(model_dir, xclbin_root);
+            if (!base.empty()) {
+                try {
+                    // Relative symlink: xclbins/<model_type> → <base>
+                    std::filesystem::create_directory_symlink(base, model_xclbin_dir);
+                    header_print("FLM", "xclbins linked: " + model_type + " → " + base);
+                    resolved_xclbin_dir = base;
+                } catch (const std::exception& e) {
+                    header_print("FLM", "Warning: could not create xclbin symlink: " + std::string(e.what()));
+                }
+            } else {
+                header_print("FLM", "Warning: no compatible installed xclbin directory found for " + model_type
+                             + ". Add \"flm_xclbin_dir\" to config.json to specify one explicitly.");
+            }
+        } else if (resolved_xclbin_dir.empty()) {
+            // xclbin dir already exists (previously linked or installed)
+            resolved_xclbin_dir = model_type;
+        }
+    }
+    // -------------------------------------------------------------------
+
     nlohmann::json model_entry = {
         {"name", model_type},
         {"url", "https://huggingface.co/" + repo_id},
         {"file_url", model_tree_url(repo_id, revision)},
         {"flm_min_version", "0.9.0"},
         {"files", downloaded_files},
+        {"xclbin_dir", resolved_xclbin_dir},
         {"vlm", true},
         {"default_context_length", 32768},
         {"max_prefill_len", 4096},
@@ -498,28 +658,34 @@ std::pair<nlohmann::json, float> ModelDownloader::build_download_list(const std:
         std::string hf_response = download_utils::download_string(file_url);
         nlohmann::json hf_model_infos = nlohmann::json::parse(hf_response);
 
+        // Collect + sort by size (small files first, large .q4nx last)
+        struct FileEntry2 { std::string filename; nlohmann::json info; uint64_t size; };
+        std::vector<FileEntry2> sorted_files;
         for (const auto& filename : model_files) {
-            auto it = std::find_if(
-                hf_model_infos.begin(),
-                hf_model_infos.end(),
-                [&](const nlohmann::json& f) {
-                    return f["path"] == filename;
-                }
-            );
-            if (it == hf_model_infos.end()) {
-                continue;
-            }
+            auto it = std::find_if(hf_model_infos.begin(), hf_model_infos.end(),
+                [&](const nlohmann::json& f) { return f["path"] == filename; });
+            if (it == hf_model_infos.end()) continue;
+            sorted_files.push_back({filename, *it, it->value("size", static_cast<uint64_t>(0))});
+        }
+        std::stable_sort(sorted_files.begin(), sorted_files.end(),
+            [](const FileEntry2& a, const FileEntry2& b) { return a.size < b.size; });
 
-            const auto& file = *it;
+        for (const auto& fe : sorted_files) {
+            const std::string& filename = fe.filename;
+            const auto& file = fe.info;
             std::string local_path = get_model_file_path(model_path, filename);
             bool is_lfs = file.contains("lfs") && file["lfs"].is_object() && file["lfs"].contains("oid");
             std::string oid = get_remote_oid(file, is_lfs);
-            uint64_t remote_size = file.value("size", static_cast<uint64_t>(0));
+            uint64_t remote_size = fe.size;
 
             if (file_exists(local_path)) {
+                header_print("FLM", "Checking local file: " + filename);
                 if (local_file_matches_oid(local_path, is_lfs, oid)) {
+                    header_print("FLM", "Unchanged: " + filename);
                     continue;
                 }
+
+                header_print("FLM", "Changed/corrupt, will re-download: " + filename);
 
                 uint64_t local_size = std::filesystem::file_size(local_path);
                 if (remote_size > 0 && local_size >= remote_size) {

@@ -77,6 +77,15 @@ class LM_Config{
             // read the json file as a string
             std::string json_str((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
             this->_json_config = nlohmann::json::parse(json_str);
+            // Some models (e.g. qwen3_5) nest text fields under "text_config".
+            // Promote those keys to root so all JSON_GET calls below work unchanged.
+            if (this->_json_config.contains("text_config") && this->_json_config["text_config"].is_object()) {
+                for (auto& [k, v] : this->_json_config["text_config"].items()) {
+                    if (!this->_json_config.contains(k)) {
+                        this->_json_config[k] = v;
+                    }
+                }
+            }
             JSON_GET(this->sliding_window, this->_json_config, "sliding_window", 0, u32);
             JSON_GET(this->sliding_window_pattern, this->_json_config, "sliding_window_pattern", 0, u32);
             JSON_GET(this->model_type, this->_json_config, "model_type", "", std::string);

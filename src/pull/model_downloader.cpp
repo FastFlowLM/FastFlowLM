@@ -73,8 +73,9 @@ std::string ModelDownloader::pull_hf_repo(const std::string& hf_repo_with_tag, b
     const std::string tag_key = make_registry_tag(spec.tag);
     const std::string model_type = repo_basename(repo_id);
 
-    const std::string models_root = utils::get_models_directory();
-    const std::filesystem::path model_dir = std::filesystem::path(models_root) / model_type;
+    const std::filesystem::path model_root = std::filesystem::path(utils::get_models_directory()) / "models";
+    const std::filesystem::path model_dir = model_root / model_type;
+    std::filesystem::create_directories(model_root);
     std::filesystem::create_directories(model_dir);
 
     const std::vector<std::string> required_files = {
@@ -113,13 +114,16 @@ std::string ModelDownloader::pull_hf_repo(const std::string& hf_repo_with_tag, b
             continue;
         }
 
+        const bool is_lfs = it->contains("lfs") && (*it)["lfs"].is_object() && (*it)["lfs"].contains("oid");
+        const std::string oid = is_lfs ? (*it)["lfs"]["oid"].get<std::string>() : it->value("oid", "");
+
         downloads.push_back({
             {"file", filename},
             {"size", it->value("size", 0)},
             {"url", resolve_url(repo_id, revision, filename)},
             {"localpath", local_path},
-            {"oid", it->value("oid", "")},
-            {"is_lfs", it->contains("lfs")}
+            {"oid", oid},
+            {"is_lfs", is_lfs}
         });
     }
 
@@ -135,35 +139,44 @@ std::string ModelDownloader::pull_hf_repo(const std::string& hf_repo_with_tag, b
         throw std::runtime_error("no downloadable FastFlowLM artifact files found in " + hf_repo_with_tag);
     }
 
-    nlohmann::json cfg = {
-        {"model_path", "models"},
-        {"models", {
-            {model_type, {
-                {tag_key, {
-                    {"name", model_type},
-                    {"url", "https://huggingface.co/" + repo_id},
-                    {"file_url", model_tree_url(repo_id, revision)},
-                    {"files", downloaded_files},
-                    {"vlm", true},
-                    {"default_context_length", 32768},
-                    {"max_prefill_len", 4096},
-                    {"details", {
-                        {"format", "NPU2"},
-                        {"family", "qwen3.5"},
-                        {"think", true},
-                        {"parameter_size", "9B"},
-                        {"quantization_level", "Q4_1"}
-                    }},
-                    {"label", {"vision", "reasoning", "tool-calling"}},
-                    {"footprint", 8.94}
-                }}
-            }}
-        }}
+    nlohmann::json model_entry = {
+        {"name", model_type},
+        {"url", "https://huggingface.co/" + repo_id},
+        {"file_url", model_tree_url(repo_id, revision)},
+        {"files", downloaded_files},
+        {"vlm", true},
+        {"default_context_length", 32768},
+        {"max_prefill_len", 4096},
+        {"details", {
+            {"format", "NPU2"},
+            {"family", "qwen3.5"},
+            {"think", true},
+            {"parameter_size", "9B"},
+            {"quantization_level", "Q4_1"}
+        }},
+        {"label", {"vision", "reasoning", "tool-calling"}},
+        {"footprint", 8.94}
     };
 
-    std::filesystem::path overlay_path = std::filesystem::path(models_root) / "hf_model_list.json";
+    std::filesystem::path overlay_path = model_root / "hf_model_list.json";
+    nlohmann::json overlay_json;
+    if (std::filesystem::exists(overlay_path)) {
+        std::ifstream overlay_in(overlay_path);
+        overlay_json = nlohmann::json::parse(overlay_in, nullptr, false);
+    }
+    if (overlay_json.is_discarded() || !overlay_json.is_object()) {
+        overlay_json = nlohmann::json::object();
+    }
+    if (!overlay_json.contains("models") || !overlay_json["models"].is_object()) {
+        overlay_json["models"] = nlohmann::json::object();
+    }
+    if (!overlay_json["models"].contains(model_type) || !overlay_json["models"][model_type].is_object()) {
+        overlay_json["models"][model_type] = nlohmann::json::object();
+    }
+    overlay_json["models"][model_type][tag_key] = model_entry;
+
     std::ofstream overlay_file(overlay_path);
-    overlay_file << cfg.dump(4) << std::endl;
+    overlay_file << overlay_json.dump(4) << std::endl;
 
     return model_type + ":" + tag_key;
 }

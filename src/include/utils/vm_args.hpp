@@ -17,6 +17,23 @@ namespace arg_utils {
 
 namespace po = boost::program_options;
 
+inline std::vector<std::string> normalize_argv_for_hf_repo(int argc, char* argv[]) {
+    std::vector<std::string> normalized;
+    normalized.reserve(static_cast<size_t>(argc));
+    for (int i = 0; i < argc; ++i) {
+        std::string token = argv[i];
+        if (token == "-hf" || token == "--hf-repo") {
+            token = "--hf";
+        } else if (token.rfind("-hf=", 0) == 0) {
+            token = "--hf=" + token.substr(4);
+        } else if (token.rfind("--hf-repo=", 0) == 0) {
+            token = "--hf=" + token.substr(10);
+        }
+        normalized.push_back(token);
+    }
+    return normalized;
+}
+
 inline void print_help(po::options_description& general) {
     std::cout << "Usage: flm <command> [options] [model_tag]" << std::endl;
     std::cout << std::endl;
@@ -24,6 +41,7 @@ inline void print_help(po::options_description& general) {
     std::cout << "  run <model_tag>     - Run the model interactively" << std::endl;
     std::cout << "  serve <model_tag>   - Start the  server" << std::endl;
     std::cout << "  pull <model_tag>    - Download model files if not present" << std::endl;
+    std::cout << "  hf <repo[:tag]>     - Download and register a Hugging Face repo" << std::endl;
     std::cout << "  remove <model_tag>  - Remove a model" << std::endl;
     std::cout << "  check <model_tag>   - Check a model" << std::endl;
     std::cout << "  list                - List all available models" << std::endl;
@@ -62,6 +80,13 @@ inline void print_help(po::options_description& general) {
 /// \return true if parsing was successful, false otherwise
 bool parse_options(int argc, char *argv[], program_args_t& parsed_args) {
     try {
+        auto normalized_argv = normalize_argv_for_hf_repo(argc, argv);
+        std::vector<char*> normalized_argv_ptrs;
+        normalized_argv_ptrs.reserve(normalized_argv.size());
+        for (auto& token : normalized_argv) {
+            normalized_argv_ptrs.push_back(token.data());
+        }
+
         // Define the command line options
         po::options_description general("Allowed options");
         general.add_options()
@@ -79,6 +104,8 @@ bool parse_options(int argc, char *argv[], program_args_t& parsed_args) {
              "Set the server port number (for serve command)")
             ("force", po::bool_switch(&parsed_args.force_redownload),
              "Force re-download even if model exists (for pull command)")
+            ("hf", po::value<std::string>(&parsed_args.hf_repo)->default_value(""),
+             "Hugging Face repo shortcut, format <user>/<model>[:tag]")
             ("filter", po::value<std::string>(&parsed_args.list_filter)->default_value("all"),
              "Show models: all | installed | not-installed")
             ("quiet", po::bool_switch(&parsed_args.sub_process_mode),
@@ -119,7 +146,7 @@ bool parse_options(int argc, char *argv[], program_args_t& parsed_args) {
 
         // Parse command line
         po::variables_map vm;
-        po::store(po::command_line_parser(argc, argv)
+        po::store(po::command_line_parser(static_cast<int>(normalized_argv_ptrs.size()), normalized_argv_ptrs.data())
                   .options(all_options)
                   .positional(pos_desc)
                   .run(), vm);

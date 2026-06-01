@@ -480,6 +480,15 @@ int main(int argc, char* argv[]) {
     // Get the models directory from environment variable or default
     std::string models_dir = utils::get_models_directory();
 
+    if (!parsed_args.hf_repo.empty() && (parsed_args.command == "run" || parsed_args.command == "serve" || parsed_args.command == "pull" || parsed_args.command == "check" || parsed_args.command == "bench")) {
+        try {
+            parsed_args.model_tag = ModelDownloader::pull_hf_repo(parsed_args.hf_repo, parsed_args.force_redownload);
+        } catch (const std::exception& e) {
+            header_print("ERROR", "Failed to prepare Hugging Face repo: " + std::string(e.what()));
+            return 1;
+        }
+    }
+
     
     model_list availble_models(config_path, models_dir);
     

@@ -162,7 +162,7 @@ bool AutoModel::_shared_insert(chat_meta_info_t& meta_info, std::vector<int>& to
     // prefix check for tokens and token history to see if we can skip some tokens
     const size_t idx = this->token_history.size();
     size_t skip_count = 0;
-    for (size_t i = 0; i < idx; i++) {
+    for (size_t i = 0; i < idx && i < tokens.size(); i++) {
         if (tokens[i] == this->token_history[i]) {
             skip_count++;
         } 

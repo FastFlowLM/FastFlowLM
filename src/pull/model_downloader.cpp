@@ -7,14 +7,165 @@
 #include "model_downloader.hpp"
 #include "utils/utils.hpp"
 #include "download_model.hpp"
+#include <algorithm>
+#include <cctype>
 #include <sstream>
 #include <iomanip>
+#include <sstream>
+
+namespace {
+struct HfRepoSpec {
+    std::string repo;
+    std::string tag;
+};
+
+HfRepoSpec parse_hf_repo_spec(const std::string& spec) {
+    HfRepoSpec parsed;
+    auto colon = spec.rfind(':');
+    if (colon == std::string::npos) {
+        parsed.repo = spec;
+        parsed.tag = "main";
+        return parsed;
+    }
+    parsed.repo = spec.substr(0, colon);
+    parsed.tag = spec.substr(colon + 1);
+    if (parsed.tag.empty()) {
+        parsed.tag = "main";
+    }
+    return parsed;
+}
+
+std::string repo_basename(const std::string& repo) {
+    auto slash = repo.rfind('/');
+    return slash == std::string::npos ? repo : repo.substr(slash + 1);
+}
+
+std::string make_registry_tag(const std::string& tag) {
+    std::string out = tag;
+    std::transform(out.begin(), out.end(), out.begin(), [](unsigned char c) {
+        if (c == ' ' || c == '-') return '_';
+        return static_cast<char>(std::tolower(c));
+    });
+    return out.empty() ? std::string("default") : out;
+}
+
+std::string model_tree_url(const std::string& repo, const std::string& tag) {
+    return "https://huggingface.co/api/models/" + repo + "/tree/" + tag;
+}
+
+std::string resolve_url(const std::string& repo, const std::string& tag, const std::string& file) {
+    return "https://huggingface.co/" + repo + "/resolve/" + tag + "/" + file + "?download=true";
+}
+
+} // namespace
 
 /// \brief Constructor
 /// \param models the model list
 /// \return the model downloader
 ModelDownloader::ModelDownloader(model_list& models) 
     : supported_models(models), curl_init() {
+}
+
+std::string ModelDownloader::pull_hf_repo(const std::string& hf_repo_with_tag, bool force_redownload) {
+    const auto spec = parse_hf_repo_spec(hf_repo_with_tag);
+    const std::string repo_id = spec.repo;
+    const std::string revision = spec.tag;
+    const std::string tag_key = make_registry_tag(spec.tag);
+    const std::string model_type = repo_basename(repo_id);
+
+    const std::string models_root = utils::get_models_directory();
+    const std::filesystem::path model_dir = std::filesystem::path(models_root) / model_type;
+    std::filesystem::create_directories(model_dir);
+
+    const std::vector<std::string> required_files = {
+        "config.json",
+        "model.q4nx",
+        "tokenizer.json",
+        "tokenizer_config.json",
+        "chat_template.jinja",
+        "vision_weight.q4nx",
+        "audio_weight.q4nx"
+    };
+
+    const std::string tree_json = download_utils::download_string(model_tree_url(repo_id, revision));
+    if (tree_json.empty()) {
+        throw std::runtime_error("failed to query Hugging Face repo tree for " + hf_repo_with_tag);
+    }
+
+    const nlohmann::json repo_tree = nlohmann::json::parse(tree_json, nullptr, false);
+    if (repo_tree.is_discarded() || !repo_tree.is_array()) {
+        throw std::runtime_error("failed to parse Hugging Face repo tree for " + hf_repo_with_tag);
+    }
+
+    nlohmann::json downloads = nlohmann::json::array();
+    std::vector<std::string> downloaded_files;
+    for (const auto& filename : required_files) {
+        auto it = std::find_if(repo_tree.begin(), repo_tree.end(), [&](const nlohmann::json& entry) {
+            return entry.contains("path") && entry["path"] == filename;
+        });
+        if (it == repo_tree.end()) {
+            continue;
+        }
+
+        const std::string local_path = (model_dir / filename).string();
+        if (!force_redownload && std::filesystem::exists(local_path) && std::filesystem::file_size(local_path) > 0) {
+            downloaded_files.push_back(filename);
+            continue;
+        }
+
+        downloads.push_back({
+            {"file", filename},
+            {"size", it->value("size", 0)},
+            {"url", resolve_url(repo_id, revision, filename)},
+            {"localpath", local_path},
+            {"oid", it->value("oid", "")},
+            {"is_lfs", it->contains("lfs")}
+        });
+    }
+
+    if (!downloads.empty() && !download_utils::download_multiple_files(downloads)) {
+        throw std::runtime_error("failed to download Hugging Face files for " + hf_repo_with_tag);
+    }
+
+    for (const auto& item : downloads) {
+        downloaded_files.push_back(item["file"].get<std::string>());
+    }
+
+    if (downloaded_files.empty()) {
+        throw std::runtime_error("no downloadable FastFlowLM artifact files found in " + hf_repo_with_tag);
+    }
+
+    nlohmann::json cfg = {
+        {"model_path", "models"},
+        {"models", {
+            {model_type, {
+                {tag_key, {
+                    {"name", model_type},
+                    {"url", "https://huggingface.co/" + repo_id},
+                    {"file_url", model_tree_url(repo_id, revision)},
+                    {"files", downloaded_files},
+                    {"vlm", true},
+                    {"default_context_length", 32768},
+                    {"max_prefill_len", 4096},
+                    {"details", {
+                        {"format", "NPU2"},
+                        {"family", "qwen3.5"},
+                        {"think", true},
+                        {"parameter_size", "9B"},
+                        {"quantization_level", "Q4_1"}
+                    }},
+                    {"label", {"vision", "reasoning", "tool-calling"}},
+                    {"footprint", 8.94}
+                }}
+            }}
+        }}
+    };
+
+    std::filesystem::path overlay_path = std::filesystem::path(models_root) / "hf_model_list.json";
+    std::ofstream overlay_file(overlay_path);
+    overlay_file << cfg.dump(4) << std::endl;
+
+    return model_type + ":" + tag_key;
 }
 
 /// \brief Check if the model is downloaded

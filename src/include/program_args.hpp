@@ -13,6 +13,7 @@ struct program_args_t {
     // common commands
     std::string command = "version";
     std::string model_tag = "model-faker";
+    std::string hf_repo = "";
     std::string power_mode = "performance";
     bool preemption = false;
     bool asr = false;

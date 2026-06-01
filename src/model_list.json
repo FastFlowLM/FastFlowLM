@@ -131,7 +131,40 @@
                 ],
                 "footprint": 9.1
             }
-        },        
+        },
+        "darwin-opus": {
+            "9b":{
+                "name": "Darwin-Opus-9B-NPU2",
+                "url": "https://huggingface.co/Atomic-Germ/Darwin-Opus-9B-NPU2/resolve/test_chat_template",
+                "file_url": "https://huggingface.co/api/models/Atomic-Germ/Darwin-Opus-9B-NPU2/tree/test_chat_template",
+                "size": 9000000000,
+                "flm_min_version": "0.9.43",
+                "files": [
+                    "config.json",
+                    "model.q4nx",
+                    "tokenizer.json",
+                    "tokenizer_config.json",
+                    "vision_weight.q4nx",
+                    "chat_template.jinja"
+                ],
+                "vlm": true,
+                "default_context_length": 32768,
+                "max_prefill_len": 4096,
+                "details": {
+                    "format": "NPU2",
+                    "family": "qwen3.5",
+                    "think": true,
+                    "parameter_size": "9B",
+                    "quantization_level": "Q4_1"
+                },
+                "label": [
+                    "vision",
+                    "reasoning",
+                    "tool-calling"
+                ],
+                "footprint": 8.94
+            }
+        },
         "qwen3.5": {
             "0.8b": {
                 "name": "Qwen3.5-0.8B-NPU2",

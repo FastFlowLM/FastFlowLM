@@ -18,6 +18,10 @@
 class ModelDownloader {
 public:
     ModelDownloader(model_list& models);
+
+    // Download and register a Hugging Face repo shortcut (repo[:tag]) into the local models cache.
+    // Returns the registered model tag on success.
+    static std::string pull_hf_repo(const std::string& hf_repo_with_tag, bool force_redownload = false);
     
     // Check if model is already downloaded.
     // When fast_check is true, only the local presence + version compatibility

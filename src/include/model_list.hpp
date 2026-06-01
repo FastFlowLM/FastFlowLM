@@ -13,6 +13,7 @@
 #include <any>
 #include <unordered_set>
 #include <filesystem>
+#include <algorithm>
 #include "utils/utils.hpp"
 
 /// \note This class is used to manage the model list.
@@ -39,6 +40,8 @@ class model_list {
             std::filesystem::path root_path = std::filesystem::path(exe_dir) / relative_model_path;
             this->model_root_path = root_path.string();
             config_file.close();
+
+            merge_overlay_models();
 
             // Populate all_tags set
             for (const auto& [model_type, sizes] : this->config["models"].items()) {
@@ -224,10 +227,40 @@ class model_list {
         bool is_model_supported(const std::string& tag) {
             return all_tags.find(tag) != all_tags.end();
         }
+
+        std::string get_model_root_path() const {
+            return this->model_root_path;
+        }
         
     private:
         std::string list_path;
         nlohmann::json config;
         std::string model_root_path;
+
+        void merge_overlay_models() {
+            std::filesystem::path overlay_path = std::filesystem::path(this->model_root_path) / "hf_model_list.json";
+            if (!std::filesystem::exists(overlay_path)) {
+                return;
+            }
+
+            std::ifstream overlay_file(overlay_path);
+            if (!overlay_file.is_open()) {
+                return;
+            }
+
+            nlohmann::json overlay = nlohmann::json::parse(overlay_file, nullptr, false);
+            if (overlay.is_discarded() || !overlay.contains("models") || !overlay["models"].is_object()) {
+                return;
+            }
+
+            for (auto& [model_type, sizes] : overlay["models"].items()) {
+                if (!this->config["models"].contains(model_type)) {
+                    this->config["models"][model_type] = nlohmann::json::object();
+                }
+                for (auto& [size, model_info] : sizes.items()) {
+                    this->config["models"][model_type][size] = model_info;
+                }
+            }
+        }
 
 };

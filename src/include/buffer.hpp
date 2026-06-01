@@ -130,7 +130,7 @@ public:
             throw std::runtime_error("Invalid size for bytes allocation");
         }
         size_t alignment = 1024 * 1024;
-        int padded_size = (size + alignment - 1) / alignment * alignment; // 4KB alignment, , (xrt::ext::bo::access_mode)(xrt::ext::bo::access_mode::read_write | xrt::ext::bo::access_mode::process)
+        size_t padded_size = (size + alignment - 1) / alignment * alignment; // 4KB alignment, , (xrt::ext::bo::access_mode)(xrt::ext::bo::access_mode::read_write | xrt::ext::bo::access_mode::process)
 
         try {
             owned_bo_ = std::make_unique<xrt::ext::bo>(device, padded_size);

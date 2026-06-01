@@ -74,10 +74,89 @@ bool local_file_matches_oid(const std::string& local_path, bool is_lfs, const st
     return local_oid == oid;
 }
 
+/// \brief Detect the FLM dispatch family string from a downloaded model directory.
+/// Uses the model_type field from config.json (with text_config promotion) plus
+/// name-based hints for families that share a single model_type (e.g. all Llama
+/// derivatives, Nanbeige, DeepSeek; LFM2 vs LFM2.5-TK; Gemma3 vs Gemma3-Text).
+std::string detect_model_family(const std::filesystem::path& model_dir,
+                                 const std::string& model_name_hint) {
+    nlohmann::json config;
+    {
+        std::ifstream f(model_dir / "config.json");
+        if (f.is_open()) {
+            try { config = nlohmann::json::parse(f); } catch (...) {}
+        }
+    }
+    // Promote text_config so nested fields are accessible
+    if (config.contains("text_config") && config["text_config"].is_object()) {
+        for (auto& [k, v] : config["text_config"].items()) {
+            if (!config.contains(k)) config[k] = v;
+        }
+    }
+
+    const std::string model_type = config.value("model_type", "");
+    const bool has_vision_weight = config.value("vision_model_weight", "") != "";
+    const bool has_vision_file   = std::filesystem::exists(model_dir / "vision_weight.q4nx");
+    const bool is_vlm            = has_vision_weight || has_vision_file || config.contains("vision_config");
+
+    // Lower-case hint for substring matching
+    std::string hint = model_name_hint;
+    std::transform(hint.begin(), hint.end(), hint.begin(), ::tolower);
+    auto has = [&](const std::string& s) { return hint.find(s) != std::string::npos; };
+    auto mt  = [&](const std::string& prefix) {
+        return model_type.rfind(prefix, 0) == 0 || model_type == prefix;
+    };
+
+    if (mt("qwen3_5") || mt("qwen3.5"))         return "qwen3.5";
+    if (mt("qwen3_vl") || mt("qwen3vl"))         return "qwen3vl";
+    if (mt("qwen3")) {
+        if (is_vlm)                              return "qwen3vl";
+        if (has("thinking") || has("-tk"))        return "qwen3-tk";
+        if (has("instruct")  || has("-it"))       return "qwen3-it";
+                                                  return "qwen3";
+    }
+    if (mt("qwen2_5_vl") || mt("qwen2vl"))       return "qwen2vl";
+    if (mt("qwen2")) {
+        if (is_vlm)                              return "qwen2vl";
+                                                  return "qwen2";
+    }
+    if (mt("gemma4"))                             return "gemma4e";
+    if (mt("gemma3")) {
+        if (has("embed"))                         return "embed-gemma";
+        if (is_vlm)                              return "gemma3";
+        // Larger gemma3 models (medgemma, translategemma, etc.) are VLMs but
+        // vision_weight may not be present until fully downloaded; treat any
+        // named variant that matches known VLM names as gemma3.
+        if (has("medgemma") || has("translategemma") || has("gemma3-4b") ||
+            has("gemma3_4b") || has("gemma4"))    return "gemma3";
+                                                  return "gemma3-text";
+    }
+    if (mt("llama")) {
+        if (has("nanbeige"))                      return "nanbeige";
+        if (has("deepseek")) {
+            if (has("0528"))                      return "deepseek-r1-0528";
+                                                  return "deepseek-r1";
+        }
+                                                  return "llama3";
+    }
+    if (mt("lfm2") || mt("lfm")) {
+        if (has("thinking") || has("-tk") || has("2.5"))  return "lfm2.5-tk";
+                                                          return "lfm2";
+    }
+    if (mt("phi"))                                return "phi4";
+    if (mt("nanbeige"))                           return "nanbeige";
+    if (mt("gpt_oss") || mt("gpt-oss"))           return "gpt-oss";
+    if (mt("whisper"))                            return "whisper-v3";
+
+    return ""; // unknown
+}
+
 /// \brief Try to find a compatible installed xclbin directory for a model.
 /// Resolution order:
 ///   1. Explicit "flm_xclbin_dir" field in the model's config.json
-///   2. "model_name" field in config.json prefix-matched against installed dirs
+///   2. Case-insensitive normalized name matching: strip "-NPU2"/"-NPU1" suffix,
+///      then check if any installed dir name is a prefix of the model dir name
+///      (covers fine-tunes that extend the base model name, e.g. medgemma-4b-it)
 ///   3. Architecture fingerprint table (model_type + hidden_size + num_hidden_layers)
 /// Returns the matching installed directory name, or "" if none found.
 std::string detect_xclbin_base(const std::filesystem::path& model_dir,
@@ -95,24 +174,55 @@ std::string detect_xclbin_base(const std::filesystem::path& model_dir,
         return config["flm_xclbin_dir"].get<std::string>();
     }
 
-    // 2. Match model_name against installed xclbin dirs (strips org prefix)
+    if (!std::filesystem::is_directory(xclbin_root)) return "";
+
+    // Helper: normalize a name for fuzzy matching
+    //   - lowercase, replace '.' and '_' with '-'
+    //   - strip trailing "-npu2", "-npu1", "-npu" suffixes
+    auto normalize = [](std::string s) -> std::string {
+        std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) {
+            if (c == '.' || c == '_') return '-';
+            return static_cast<char>(std::tolower(c));
+        });
+        for (const char* sfx : {"-npu2", "-npu1", "-npu"}) {
+            std::string sx(sfx);
+            if (s.size() > sx.size() && s.substr(s.size() - sx.size()) == sx) {
+                s = s.substr(0, s.size() - sx.size());
+                break;
+            }
+        }
+        return s;
+    };
+
+    // 2. Case-insensitive normalized name matching
+    //    Check model_dir name first, then config.json model_name field
+    std::vector<std::string> name_hints;
+    name_hints.push_back(model_dir.filename().string());
     if (config.contains("model_name") && config["model_name"].is_string()) {
         std::string mn = config["model_name"].get<std::string>();
         auto slash = mn.rfind('/');
         if (slash != std::string::npos) mn = mn.substr(slash + 1);
-        if (!mn.empty() && std::filesystem::is_directory(xclbin_root)) {
-            for (const auto& entry : std::filesystem::directory_iterator(xclbin_root)) {
-                if (!entry.is_directory()) continue;
-                const std::string dir_name = entry.path().filename().string();
-                if (dir_name.rfind(mn, 0) == 0) { // starts with base model name
-                    return dir_name;
-                }
+        if (!mn.empty()) name_hints.push_back(mn);
+    }
+
+    std::string best_match;
+    size_t best_prefix_len = 0;
+    for (const auto& entry : std::filesystem::directory_iterator(xclbin_root)) {
+        if (!entry.is_directory()) continue;
+        const std::string dir_name = entry.path().filename().string();
+        const std::string norm_dir = normalize(dir_name);
+        for (const auto& hint : name_hints) {
+            const std::string norm_hint = normalize(hint);
+            // Installed dir name is a prefix of (or equal to) the model hint
+            if (norm_hint.rfind(norm_dir, 0) == 0 && norm_dir.size() > best_prefix_len) {
+                best_prefix_len = norm_dir.size();
+                best_match = dir_name;
             }
         }
     }
+    if (!best_match.empty()) return best_match;
 
     // 3. Architecture fingerprint table
-    // Promote text_config to root for matching
     nlohmann::json eff = config;
     if (eff.contains("text_config") && eff["text_config"].is_object()) {
         for (auto& [k, v] : eff["text_config"].items()) {
@@ -122,18 +232,30 @@ std::string detect_xclbin_base(const std::filesystem::path& model_dir,
     struct ArchEntry { std::string model_type_prefix; int hidden_size; int num_layers; std::string xclbin_dir; };
     static const std::vector<ArchEntry> arch_table = {
         // Qwen3.5 family
-        {"qwen3_5", 4096, 32, "Qwen3.5-9B-NPU2"},
-        {"qwen3_5", 2560, 36, "Qwen3.5-4B-NPU2"},
-        {"qwen3_5", 1536, 28, "Qwen3.5-2B-NPU2"},
-        {"qwen3_5",  896, 24, "Qwen3.5-0.8B-NPU2"},
+        {"qwen3_5",    4096, 32, "Qwen3.5-9B-NPU2"},
+        {"qwen3_5",    2560, 36, "Qwen3.5-4B-NPU2"},
+        {"qwen3_5",    1536, 28, "Qwen3.5-2B-NPU2"},
+        {"qwen3_5",     896, 24, "Qwen3.5-0.8B-NPU2"},
         // Qwen3 family
-        {"qwen3",   4096, 36, "Qwen3-8B-NPU2"},
-        {"qwen3",   2048, 36, "Qwen3-4B-NPU2"},
-        {"qwen3",   1536, 28, "Qwen3-1.7B-NPU2"},
-        {"qwen3",    896, 28, "Qwen3-0.6B-NPU2"},
-        // Llama family
-        {"llama",   4096, 32, "Llama-3.2-3B-NPU2"},
-        {"llama",   4096, 32, "Llama-3.1-8B-NPU2"},
+        {"qwen3",      4096, 36, "Qwen3-8B-NPU2"},
+        {"qwen3",      2048, 36, "Qwen3-4B-NPU2"},
+        {"qwen3",      1536, 28, "Qwen3-1.7B-NPU2"},
+        {"qwen3",       896, 28, "Qwen3-0.6B-NPU2"},
+        // Qwen2 / Qwen2.5 family
+        {"qwen2",      2048, 36, "Qwen2.5-3B-Instruct-NPU2"},
+        {"qwen2_5_vl", 2048, 36, "Qwen2.5-VL-3B-Instruct-NPU2"},
+        // Llama family (name-based disambiguation preferred; fallback to first match)
+        {"llama",      4096, 32, "Llama-3.1-8B-NPU2"},
+        {"llama",      2048, 28, "Llama-3.2-3B-NPU2"},
+        {"llama",      2048, 16, "Llama-3.2-1B-NPU2"},
+        {"llama",      2560, 32, "Nanbeige4.1-3B-NPU2"},
+        // Gemma3 / Gemma4 family
+        {"gemma4",     2560, 34, "Gemma4-E4B-IT-NPU2"},
+        {"gemma3",     2560, 34, "Medgemma-4B-NPU2"},
+        {"gemma3",      768, 18, "Gemma3-1B-NPU2"},
+        // LFM family
+        {"lfm2",       2048, 16, "LFM2.5-1.2B-NPU2"},
+        {"lfm2",       2048, 24, "LFM2-2.6B-NPU2"},
     };
     const std::string model_type = eff.value("model_type", "");
     const int hidden_size        = eff.value("hidden_size", 0);
@@ -324,6 +446,33 @@ std::string ModelDownloader::pull_hf_repo(const std::string& hf_repo_with_tag, b
     }
     // -------------------------------------------------------------------
 
+    // Detect model family from the downloaded config.json
+    const std::string detected_family = detect_model_family(model_dir, model_type);
+    if (detected_family.empty()) {
+        header_print("FLM", "Warning: could not determine model family for " + model_type
+                     + ". Add \"flm_family\" to config.json to specify one explicitly.");
+    } else {
+        header_print("FLM", "Detected model family: " + detected_family);
+    }
+
+    // Extract parameter size hint from model_type name (e.g. "9B", "4B")
+    std::string param_size = "?";
+    {
+        std::string mt_upper = model_type;
+        std::transform(mt_upper.begin(), mt_upper.end(), mt_upper.begin(), ::toupper);
+        for (const char* sz : {"0.5B","0.6B","0.8B","1B","1.2B","1.5B","1.7B","2B","2.6B","3B","4B","7B","8B","9B","11B","14B","20B","27B","32B","70B"}) {
+            if (mt_upper.find(sz) != std::string::npos) { param_size = sz; break; }
+        }
+    }
+
+    const bool is_vlm_model = std::filesystem::exists(model_dir / "vision_weight.q4nx");
+    const bool is_think     = [&]() {
+        std::string h = model_type; std::transform(h.begin(),h.end(),h.begin(),::tolower);
+        return h.find("thinking") != std::string::npos || h.find("-tk") != std::string::npos
+            || detected_family == "deepseek-r1" || detected_family == "deepseek-r1-0528"
+            || detected_family == "lfm2.5-tk" || detected_family == "qwen3-tk";
+    }();
+
     nlohmann::json model_entry = {
         {"name", model_type},
         {"url", "https://huggingface.co/" + repo_id},
@@ -331,18 +480,18 @@ std::string ModelDownloader::pull_hf_repo(const std::string& hf_repo_with_tag, b
         {"flm_min_version", "0.9.0"},
         {"files", downloaded_files},
         {"xclbin_dir", resolved_xclbin_dir},
-        {"vlm", true},
+        {"vlm", is_vlm_model},
         {"default_context_length", 32768},
         {"max_prefill_len", 4096},
         {"details", {
             {"format", "NPU2"},
-            {"family", "qwen3.5"},
-            {"think", true},
-            {"parameter_size", "9B"},
+            {"family", detected_family.empty() ? "qwen3.5" : detected_family},
+            {"think", is_think},
+            {"parameter_size", param_size},
             {"quantization_level", "Q4_1"}
         }},
-        {"label", {"vision", "reasoning", "tool-calling"}},
-        {"footprint", 8.94}
+        {"label", nlohmann::json::array()},
+        {"footprint", 0.0}
     };
 
     std::filesystem::path overlay_path = model_root / "hf_model_list.json";

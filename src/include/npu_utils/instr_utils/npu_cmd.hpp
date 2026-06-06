@@ -7,6 +7,7 @@
 #define __NPU_CMD_HPP__
 
 #include <stdlib.h>
+#include <climits>
 #include <iostream>
 #include <string>
 #include <fstream>
@@ -82,6 +83,8 @@ inline void instr_print(int line_number, uint32_t word, std::string msg){
 ///@note The class is used to print the command, convert the command to the npu format and dump the command to the buffer
 ///@warning The class is not used directly, but is used as a base class for all npu commands
 struct npu_cmd{
+    virtual ~npu_cmd() = default;
+
     ///@brief print the command
     ///@param bd the buffer to dump the command
     ///@param line_number the line number of the command

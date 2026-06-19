@@ -187,6 +187,7 @@ target_link_libraries(flm PUBLIC
     phi4_npu
     nanbeige_npu
     dequant
+    dequant_new
     gemm
     lm_head
     mha

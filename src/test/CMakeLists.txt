@@ -110,6 +110,7 @@ function(add_npu_test TARGET_NAME OUTPUT_SUBDIR)
         q4_npu_eXpress
         lm_head
         dequant
+        dequant_new
         gemm
         mha
         tokenizers_cpp

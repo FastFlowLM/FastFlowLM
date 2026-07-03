@@ -72,7 +72,7 @@ jobs:
       - name: Upgrade Rust toolchain
         run: |
           apt-get update
-          apt-get install -y --no-install-recommends curl ca-certificates
+          apt-get install -y --no-install-recommends curl ca-certificates zip
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
             sh -s -- -y --profile minimal --default-toolchain stable
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH

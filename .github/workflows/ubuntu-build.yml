@@ -140,7 +140,7 @@ jobs:
           cp -r src/xclbins "$dist/"
           cp src/model_list.json "$dist/"
 
-          zip_name="fastflowlm_${DEB_VERSION}_${DISTRO}${DISTRO_VERSION}_amd64.zip"
+          zip_name="flm-portable-${DISTRO}${DISTRO_VERSION}-${DEB_VERSION}_amd64.zip"
           cd "$dist"
           zip -r "../${zip_name}" .
           cd ..
@@ -149,8 +149,8 @@ jobs:
       - name: Upload portable zip artifact
         uses: actions/upload-artifact@v4
         with:
-          name: flm-${{ matrix.distro }}${{ matrix.version }}-${{ steps.short_sha.outputs.sha }}-zip
-          path: ./fastflowlm_${{ steps.get_version.outputs.deb_version }}_${{ matrix.distro }}${{ matrix.version }}_amd64.zip
+          name: flm-portable-${{ matrix.distro }}${{ matrix.version }}-${{ steps.short_sha.outputs.sha }}
+          path: ./flm-portable-${{ matrix.distro }}${{ matrix.version }}-${{ steps.get_version.outputs.deb_version }}_amd64.zip
           if-no-files-found: error
 
   release:

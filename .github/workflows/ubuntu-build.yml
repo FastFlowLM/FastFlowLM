@@ -74,7 +74,7 @@ jobs:
       - name: Upgrade Rust toolchain
         run: |
           apt-get update
-          apt-get install -y --no-install-recommends curl ca-certificates zip
+          apt-get install -y --no-install-recommends curl ca-certificates zip patchelf
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
             sh -s -- -y --profile minimal --default-toolchain stable
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
@@ -119,17 +119,17 @@ jobs:
             | tar -x -C "$staging"
 
           # The real binary lives at /opt/fastflowlm/bin/flm; /usr/bin/flm is just a symlink
-          cp "$staging/opt/fastflowlm/bin/flm" "$dist/flm.bin"
-          chmod +x "$dist/flm.bin"
-
-          # Wrapper script so bundled .so files are found via LD_LIBRARY_PATH
-          printf '#!/bin/sh\nDIR="$(cd "$(dirname "$0")" && pwd)"\nexport LD_LIBRARY_PATH="$DIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"\nexec "$DIR/flm.bin" "$@"\n' > "$dist/flm"
+          cp "$staging/opt/fastflowlm/bin/flm" "$dist/flm"
           chmod +x "$dist/flm"
 
-          # Bundle .so files from the deb (opt/fastflowlm/lib/) flat into dist
+          # Bundle .so files from the deb into lib/
+          mkdir -p "$dist/lib"
           if ls "$staging/opt/fastflowlm/lib/"*.so* 1>/dev/null 2>&1; then
-            cp "$staging/opt/fastflowlm/lib/"*.so* "$dist/"
+            cp "$staging/opt/fastflowlm/lib/"*.so* "$dist/lib/"
           fi
+
+          # Patch RPATH so the binary finds lib/ relative to itself at runtime
+          patchelf --set-rpath '$ORIGIN/lib' "$dist/flm"
 
           # Bundle runtime assets
           cp -r src/xclbins "$dist/"

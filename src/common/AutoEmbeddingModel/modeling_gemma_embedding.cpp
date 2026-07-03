@@ -18,6 +18,11 @@ void Gemma_Embedding::load_model(std::string model_path, json model_info, bool e
 }
 
 std::vector<float> Gemma_Embedding::embed(std::string& text, embedding_task_type_t task_type) {
+    size_t dummy_prompt_tokens;
+    return this->embed_with_usage(text, task_type, dummy_prompt_tokens);
+}
+
+std::vector<float> Gemma_Embedding::embed_with_usage(std::string& text, embedding_task_type_t task_type, size_t& prompt_tokens) {
     std::string task_prefix = this->_get_task_prefix(task_type);
     std::string full_text = "<bos>" + task_prefix + text + "<eos>";
     std::vector<int> tokens = this->tokenizer->encode(full_text);
@@ -26,10 +31,11 @@ std::vector<float> Gemma_Embedding::embed(std::string& text, embedding_task_type
         tokens.resize(2048);
         tokens[2047] = 1;
     }
+    prompt_tokens = tokens.size();
     
     buffer<bf16> y = this->embedding_model_impl->embed(tokens);
     std::vector<float> result(y.size());
-    for (int i = 0; i < y.size(); i++) {
+    for (size_t i = 0; i < y.size(); i++) {
         result[i] = static_cast<float>(y[i]);
     }
     return result;

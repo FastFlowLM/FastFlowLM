@@ -82,6 +82,23 @@ public:
 	
 	virtual void load_model(std::string model_path, json model_info, bool enable_preemption) {}
 	virtual std::vector<float> embed(std::string& text, embedding_task_type_t task_type) = 0;
+
+	/// \brief Embed the text and return prompt token count
+	/// \param text the text
+	/// \param task_type the task type
+	/// \param prompt_tokens [out] output variable to store the count of tokens processed
+	/// \return the embedding result vector
+	/// \note Subclasses should override this method to perform single-pass tokenization
+	/// and ensure model-specific formatting (e.g. prefixes/suffixes) is accounted for.
+	/// Default fallback implementation will tokenise raw text twice.
+	virtual std::vector<float> embed_with_usage(std::string& text, embedding_task_type_t task_type, size_t& prompt_tokens) {
+		if (tokenizer) {
+			prompt_tokens = tokenizer->encode(text).size();
+		} else {
+			prompt_tokens = 0;
+		}
+		return embed(text, task_type);
+	}
 };
 
 

@@ -122,8 +122,13 @@ jobs:
           cp "$staging/opt/fastflowlm/bin/flm" "$dist/flm"
           chmod +x "$dist/flm"
 
-          # Bundle .so files from the deb into lib/
+          # Bundle .so files into lib/
           mkdir -p "$dist/lib"
+          # Pre-built vendor libs from src/lib/
+          if ls src/lib/*.so* 1>/dev/null 2>&1; then
+            cp src/lib/*.so* "$dist/lib/"
+          fi
+          # Any additional .so files installed by cmake into the deb
           if ls "$staging/opt/fastflowlm/lib/"*.so* 1>/dev/null 2>&1; then
             cp "$staging/opt/fastflowlm/lib/"*.so* "$dist/lib/"
           fi

@@ -52,6 +52,8 @@ jobs:
           VERSION=$(git describe --tags --always)
           # Strip leading 'v' for Debian version compatibility
           DEB_VERSION=$(echo "${VERSION}" | sed 's/^v//')
+          # Debian versions must start with a digit; prefix bare SHAs with 0.0.0+git
+          echo "${DEB_VERSION}" | grep -q '^[0-9]' || DEB_VERSION="0.0.0+git${DEB_VERSION}"
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
           echo "deb_version=${DEB_VERSION}" >> $GITHUB_OUTPUT
 

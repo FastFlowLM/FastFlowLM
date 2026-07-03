@@ -96,6 +96,41 @@ jobs:
           path: ./fastflowlm_${{ steps.get_version.outputs.deb_version }}_${{ matrix.distro }}${{ matrix.version }}_amd64.deb
           if-no-files-found: error
 
+      - name: Create portable zip
+        working-directory: ${{ github.workspace }}
+        env:
+          DEB_VERSION: ${{ steps.get_version.outputs.deb_version }}
+          DISTRO: ${{ matrix.distro }}
+          DISTRO_VERSION: ${{ matrix.version }}
+        run: |
+          set -euo pipefail
+          dist="dist"
+          rm -rf "$dist"
+          mkdir -p "$dist"
+
+          # Extract the binary from the deb package
+          dpkg-deb --fsys-tarfile "./fastflowlm_${DEB_VERSION}_${DISTRO}${DISTRO_VERSION}_amd64.deb" \
+            | tar -x --wildcards './usr/bin/flm' -O > "$dist/flm"
+          chmod +x "$dist/flm"
+
+          # Bundle runtime assets (same set as Windows)
+          cp -r src/xclbins "$dist/"
+          cp src/model_list.json "$dist/"
+          cp src/lib/*.so* "$dist/" 2>/dev/null || true
+
+          zip_name="fastflowlm_${DEB_VERSION}_${DISTRO}${DISTRO_VERSION}_amd64.zip"
+          cd "$dist"
+          zip -r "../${zip_name}" .
+          cd ..
+          ls -lah "${zip_name}"
+
+      - name: Upload portable zip artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: flm-${{ matrix.distro }}${{ matrix.version }}-${{ steps.short_sha.outputs.sha }}-zip
+          path: ./fastflowlm_${{ steps.get_version.outputs.deb_version }}_${{ matrix.distro }}${{ matrix.version }}_amd64.zip
+          if-no-files-found: error
+
   release:
     permissions:
       contents: write
@@ -120,10 +155,18 @@ jobs:
           path: debs
           pattern: '*-deb'
 
+      - name: Download all zip artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: zips
+          pattern: '*-zip'
+
       - name: Upload Binaries to Release
         uses: svenstaro/upload-release-action@v2
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           tag: ${{ github.ref }}
           file_glob: true
-          file: debs/*/*.deb
+          file: |
+            debs/*/*.deb
+            zips/*/*.zip

@@ -111,15 +111,29 @@ jobs:
           rm -rf "$dist"
           mkdir -p "$dist"
 
-          # Extract the binary from the deb package
+          # Extract all installed files from the deb into a staging area
+          staging="staging"
+          rm -rf "$staging"
+          mkdir -p "$staging"
           dpkg-deb --fsys-tarfile "./fastflowlm_${DEB_VERSION}_${DISTRO}${DISTRO_VERSION}_amd64.deb" \
-            | tar -x --wildcards './usr/bin/flm' -O > "$dist/flm"
+            | tar -x -C "$staging"
+
+          # The real binary lives at /opt/fastflowlm/bin/flm; /usr/bin/flm is just a symlink
+          cp "$staging/opt/fastflowlm/bin/flm" "$dist/flm.bin"
+          chmod +x "$dist/flm.bin"
+
+          # Wrapper script so bundled .so files are found via LD_LIBRARY_PATH
+          printf '#!/bin/sh\nDIR="$(cd "$(dirname "$0")" && pwd)"\nexport LD_LIBRARY_PATH="$DIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"\nexec "$DIR/flm.bin" "$@"\n' > "$dist/flm"
           chmod +x "$dist/flm"
 
-          # Bundle runtime assets (same set as Windows)
+          # Bundle .so files from the deb (opt/fastflowlm/lib/) flat into dist
+          if ls "$staging/opt/fastflowlm/lib/"*.so* 1>/dev/null 2>&1; then
+            cp "$staging/opt/fastflowlm/lib/"*.so* "$dist/"
+          fi
+
+          # Bundle runtime assets
           cp -r src/xclbins "$dist/"
           cp src/model_list.json "$dist/"
-          cp src/lib/*.so* "$dist/" 2>/dev/null || true
 
           zip_name="fastflowlm_${DEB_VERSION}_${DISTRO}${DISTRO_VERSION}_amd64.zip"
           cd "$dist"

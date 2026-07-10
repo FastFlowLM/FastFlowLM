@@ -181,7 +181,7 @@ If `flm validate` passes but `flm run` fails with `No such device with index '0'
 
 #### Advanced Build Options
 
-**Portable Build with Bundled XRT/FFmpeg**
+**Portable Build (Bundled XRT, Static FFmpeg)**
 
 To build a portable distribution that bundles XRT and statically links FFmpeg (no system XRT required):
 
@@ -192,7 +192,9 @@ cmake --build build -j$(nproc)
 DESTDIR=$PWD/build/install cmake --install build
 ```
 
-This builds FFmpeg and zlib statically, and uses system XRT if present—otherwise it automatically fetches and builds XRT (v2.21.75) and the XDNA driver from source. The bundled libraries are placed in `lib/` with `$ORIGIN` RPATH, so the resulting `flm` binary is self-contained and runs on machines without a system XRT install.
+This builds FFmpeg and zlib statically, and uses system XRT if present—otherwise it automatically fetches and builds XRT (v2.21.75) from source. Bundled shared libraries (XRT, FFTW) are placed in `lib/` with `$ORIGIN` RPATH, so the resulting `flm` binary runs on machines without a system XRT install.
+
+> **Note:** The XDNA userspace plugin (`libxrt_driver_xdna.so.2`) is *not* built by this preset—it must be provided by your system (e.g. the `libxrt-npu2` package). It is bundled into `lib/` only when present on the build machine; otherwise install it on the target. `patchelf` is also needed for RPATH patching; if it is missing the build succeeds but the step is skipped.
 
 ---
 

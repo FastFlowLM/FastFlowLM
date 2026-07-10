@@ -71,13 +71,17 @@ FastFlowLM can be built as a portable distribution with XRT bundled and FFmpeg s
 # Use the linux-portable preset
 cmake --preset linux-portable
 cmake --build build -j$(nproc)
+# The portable layout (lib/ bundling + wrapper) is produced at install time
+DESTDIR=$PWD/build/install cmake --install build
 ```
 
 This will:
 1. Check if XRT is installed via pkg-config
 2. If not found, automatically fetch XRT (v2.21.75) from source and build it
 3. Build FFmpeg (v7.1) and zlib as static libraries
-4. Bundle the shared libraries into `lib/` with `$ORIGIN` RPATH
+4. On install, bundle the shared libraries into `lib/` with `$ORIGIN` RPATH (requires `patchelf`)
+
+> **Note:** The `cmake --install` step is what bundles the shared libraries into `lib/` and installs the wrapper. Without it you get a plain build, not the self-contained distribution.
 
 **What gets statically linked:**
 - ✅ FFmpeg (libavformat, libavcodec, libavutil, libswscale, libswresample)
@@ -86,9 +90,9 @@ This will:
 **What gets bundled (dynamic, in `lib/`):**
 - XRT (Xilinx Runtime)
 - FFTW (libfftw3)
+- XDNA driver plugin (`libxrt_driver_xdna.so.2`) — **only if present on the build machine**; it is not built by this preset and must be provided by your system (e.g. `libxrt-npu2`)
 
-**What remains dynamic:**
-- XDNA driver plugin (runtime plugin - see below)
+**What remains dynamic (from the target system):**
 - Model-specific libraries (llama_npu, qwen_npu, etc.)
 - System libraries (libc, libm, etc.)
 
@@ -98,6 +102,7 @@ This will:
 # Enable portable build manually
 cmake --preset linux-default -DFLM_PORTABLE_BUILD=ON
 cmake --build build -j$(nproc)
+DESTDIR=$PWD/build/install cmake --install build
 ```
 
 **Customizing source versions:**

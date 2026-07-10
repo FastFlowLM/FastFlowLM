@@ -150,9 +150,11 @@ cmake --build build -j$(nproc)
 DESTDIR=$PWD/build/install cmake --install build
 ```
 
-This builds FFmpeg and zlib statically and uses system XRT if present, otherwise it fetches and builds XRT (v2.21.75) plus the XDNA driver from source. Bundled libraries land in `lib/` with `$ORIGIN` RPATH, producing a `flm` binary you can relocate and run without installing XRT system-wide.
+This builds FFmpeg and zlib statically and uses system XRT if present, otherwise it fetches and builds XRT (v2.21.75) from source. Bundled shared libraries (XRT, FFTW) land in `lib/` with `$ORIGIN` RPATH, producing a `flm` binary you can relocate and run without installing XRT system-wide.
 
-`patchelf` is required for this preset (`sudo apt install patchelf`).
+> **Note:** The XDNA userspace plugin (`libxrt_driver_xdna.so.2`) is *not* built by this preset—it must come from your system (e.g. the `libxrt-npu2` package). When present on the build machine it is bundled into `lib/`; otherwise you must provide it on the target machine.
+
+Install `patchelf` (`sudo apt install patchelf`) so the bundled libraries get their `$ORIGIN` RPATH set. Without it the build still succeeds, but RPATH patching is skipped and the bundled libraries may not resolve when relocated.
 
 ---
 

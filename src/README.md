@@ -61,29 +61,31 @@ cmake --build build --target check_dependencies
 
 **Note:** Some custom libraries (XRT, NPU libraries) may still require DLLs if static versions aren't available.
 
-### Static Build (Portable Binary)
+### Portable Build (Self-Contained Binary)
 
-FastFlowLM can be built as a portable static binary with XRT and FFmpeg bundled in. This eliminates the need for system dependencies and creates a truly self-contained executable.
+FastFlowLM can be built as a portable distribution with XRT bundled and FFmpeg statically linked. This eliminates the need for system dependencies and creates a self-contained executable.
 
-**Simple static build:**
+**Simple portable build:**
 
 ```bash
-# Use the linux-static preset
-cmake --preset linux-static
+# Use the linux-portable preset
+cmake --preset linux-portable
 cmake --build build -j$(nproc)
 ```
 
 This will:
-1. Check if XRT and FFmpeg are installed via pkg-config
-2. If not found, automatically fetch from source:
-   - XRT (v2.21.75)
-   - FFmpeg (v7.1)
-3. Build both as static libraries
-4. Link them into the flm binary
+1. Check if XRT is installed via pkg-config
+2. If not found, automatically fetch XRT (v2.21.75) from source and build it
+3. Build FFmpeg (v7.1) and zlib as static libraries
+4. Bundle the shared libraries into `lib/` with `$ORIGIN` RPATH
 
 **What gets statically linked:**
-- ✅ XRT (Xilinx Runtime)
 - ✅ FFmpeg (libavformat, libavcodec, libavutil, libswscale, libswresample)
+- ✅ zlib
+
+**What gets bundled (dynamic, in `lib/`):**
+- XRT (Xilinx Runtime)
+- FFTW (libfftw3)
 
 **What remains dynamic:**
 - XDNA driver plugin (runtime plugin - see below)
@@ -93,15 +95,15 @@ This will:
 **Manual options:**
 
 ```bash
-# Enable static build manually
-cmake --preset linux-default -DFLM_STATIC_BUILD=ON
+# Enable portable build manually
+cmake --preset linux-default -DFLM_PORTABLE_BUILD=ON
 cmake --build build -j$(nproc)
 ```
 
 **Customizing source versions:**
 
 ```bash
-cmake --preset linux-static \
+cmake --preset linux-portable \
   -DXRT_GIT_TAG=2.21.75 \
   -DFFMPEG_GIT_TAG=n7.1
 cmake --build build -j$(nproc)

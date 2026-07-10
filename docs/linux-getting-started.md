@@ -139,6 +139,21 @@ In short: if 1.1 firmware breaks probing on stock 6.19, do not keep forcing the 
    sudo cmake --install .
    ```
 
+### Portable Build
+
+To build a self-contained distribution that bundles XRT and statically links FFmpeg—so it runs on machines without a system XRT install—use the `linux-portable` preset:
+
+```sh
+cd src
+cmake --preset linux-portable
+cmake --build build -j$(nproc)
+DESTDIR=$PWD/build/install cmake --install build
+```
+
+This builds FFmpeg and zlib statically and uses system XRT if present, otherwise it fetches and builds XRT (v2.21.75) plus the XDNA driver from source. Bundled libraries land in `lib/` with `$ORIGIN` RPATH, producing a `flm` binary you can relocate and run without installing XRT system-wide.
+
+`patchelf` is required for this preset (`sudo apt install patchelf`).
+
 ---
 
 ## Validating NPU Setup

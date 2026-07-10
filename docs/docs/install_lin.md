@@ -181,18 +181,18 @@ If `flm validate` passes but `flm run` fails with `No such device with index '0'
 
 #### Advanced Build Options
 
-**Static Build with Bundled XRT/XDNA**
+**Portable Build with Bundled XRT/FFmpeg**
 
-To build a fully static binary that bundles XRT and XDNA driver (no system XRT required):
+To build a portable distribution that bundles XRT and statically links FFmpeg (no system XRT required):
 
 ```sh
 cd src
-cmake --preset linux-static
+cmake --preset linux-portable
 cmake --build build -j$(nproc)
-sudo cmake --install build
+DESTDIR=$PWD/build/install cmake --install build
 ```
 
-This will automatically fetch and build XRT (v2.21.75) and XDNA driver from source if not found on your system. The resulting binary is fully self-contained and more portable.
+This builds FFmpeg and zlib statically, and uses system XRT if present—otherwise it automatically fetches and builds XRT (v2.21.75) and the XDNA driver from source. The bundled libraries are placed in `lib/` with `$ORIGIN` RPATH, so the resulting `flm` binary is self-contained and runs on machines without a system XRT install.
 
 ---
 

@@ -49,7 +49,7 @@ sections:
         role: "Co-Founder"
         image: "/assets/kenqingyang.png"
         bio: |
-          Distinguished Engineering Professor · University of Rhode Island. With more than 30 years of experience in computer architecture and parallel processing, he is a serial entrepreneur who has successfully built four high-tech startups rooted in his research innovations—including VeloBit (acquired by Western Digital) and DapuStor (currently in the IPO process). 
+          Distinguished Engineering Professor · University of Rhode Island. With more than 30 years of experience in computer architecture and parallel processing, he is a serial entrepreneur who has successfully built four high-tech startups rooted in his research innovations—including VeloBit (acquired by Western Digital) and DapuStor (now publicly listed following its IPO). 
         links:
           - label: "URI profile"
             url: "https://web.uri.edu/ecbe/meet/qing-ken-yang/"

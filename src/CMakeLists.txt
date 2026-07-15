@@ -110,6 +110,7 @@ else()
         set(XRT_REPO_DIR ${xrt_source_SOURCE_DIR})  # Root of XRT repo
         set(XRT_BUILD_DIR ${xrt_source_BINARY_DIR})
         set(XRT_INCLUDE_DIRS ${XRT_REPO_DIR}/src/runtime_src/core/include)
+        set(XRT_FOUND TRUE)  # Mark XRT as found for include path logic
 
         message(STATUS "XRT fetched successfully")
         message(STATUS "  XRT repo dir: ${XRT_REPO_DIR}")
@@ -170,6 +171,10 @@ else()
                 --enable-avutil
                 --enable-swscale
                 --enable-swresample
+                --disable-vaapi
+                --disable-libdrm
+                --disable-bzlib
+                --disable-lzma
             WORKING_DIRECTORY ${FFMPEG_BUILD_DIR}
             RESULT_VARIABLE FFMPEG_CONFIGURE_RESULT
             OUTPUT_FILE ${FFMPEG_BUILD_DIR}/configure.log
@@ -317,10 +322,13 @@ if(NOT WIN32)
         pkg_check_modules(SWSCALE_PKG libswscale)
         pkg_check_modules(SWRESAMPLE_PKG libswresample)
     endif()
-    find_path(READLINE_INCLUDE_DIR readline/readline.h)
-    find_library(READLINE_LIBRARY readline)
-    find_library(READLINE_TINFO_LIBRARY tinfo)
-    find_library(READLINE_NCURSES_LIBRARY ncurses)
+    # Skip readline for portable builds to avoid GPL dependency
+    if(NOT FLM_PORTABLE_BUILD)
+        find_path(READLINE_INCLUDE_DIR readline/readline.h)
+        find_library(READLINE_LIBRARY readline)
+        find_library(READLINE_TINFO_LIBRARY tinfo)
+        find_library(READLINE_NCURSES_LIBRARY ncurses)
+    endif()
 endif()
 
 # ———————————————————————————————————————————————
@@ -466,7 +474,6 @@ if(FFMPEG_BUILT_FROM_SOURCE)
         ${FFMPEG_LIBRARY_DIRS}/libswscale.a
         ${FFMPEG_LIBRARY_DIRS}/libswresample.a
         ${ZLIB_LIB}
-        drm
     )
     message(STATUS "Linking static FFmpeg libraries")
 else()
@@ -496,6 +503,8 @@ else()
 
     target_compile_options(flm PUBLIC -mavx -mavx2)
 
+    # For portable builds, link FFTW dynamically (bundled at install time)
+    # For non-portable, use pkg-config if available
     if(FFTW3_PKG_FOUND)
         target_include_directories(flm PUBLIC ${FFTW3_PKG_INCLUDE_DIRS})
         target_link_libraries(flm PUBLIC ${FFTW3_PKG_LIBRARIES})

@@ -24,7 +24,6 @@ std::string calculate_file_sha256(const std::string& file_path) {
     if (!file.is_open()) {
         return ""; 
     }
-
     std::vector<unsigned char> hash(picosha2::k_digest_size);
     picosha2::hash256(file, hash.begin(), hash.end());
     return picosha2::bytes_to_hex_string(hash.begin(), hash.end());
@@ -36,16 +35,27 @@ std::string calculate_git_blob_oid(const std::string& file_path) {
         return "";
     }
     file.seekg(0, std::ios::end);
-    size_t size = file.tellg();
+    if (!file) {
+        return "";
+    }
+
+    std::streampos end_pos = file.tellg();
+    if (end_pos == std::streampos(-1)) {
+        return "";
+    }
+
+    size_t size = static_cast<size_t>(end_pos);
+    file.clear();
     file.seekg(0, std::ios::beg);
+    if (!file) {
+        return "";
+    }
 
-    std::ostringstream oss;
-    oss << "blob " << size << '\0';  // Git blob header
-    oss << file.rdbuf();             
-
-    std::string blob_data = oss.str();
+    std::string header = "blob " + std::to_string(size) + '\0';
     SHA1 sha1;
-    sha1.update(blob_data);
+    sha1.update(header);
+    // Update SHA1 directly from the file stream (reads from current position to EOF)
+    sha1.update(file);
     return sha1.final();
 }
 
@@ -186,6 +196,7 @@ bool download_file(const std::string& url, const std::string& local_path, bool i
 
     header_print("FLM", "Checking Hash...");
     std::string local_oid = is_lfs ? calculate_file_sha256(local_path) : calculate_git_blob_oid(local_path);
+
     if (local_oid != remote_oid) {
         header_print("FLM", "Hash not matched!");
         show_cursor(); // Show cursor on error

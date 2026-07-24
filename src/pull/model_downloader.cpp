@@ -48,9 +48,21 @@ bool ModelDownloader::is_model_downloaded(const std::string& model_tag, bool sub
 /// \return true if the model is compatible, false otherwise
 bool ModelDownloader::check_model_compatibility(const std::string& model_tag, bool sub_process_mode) {
     auto [new_model_tag, model_info] = supported_models.get_model_info(model_tag);
-    LM_Config config;
-    config.from_pretrained(this->supported_models.get_model_path(new_model_tag));
-    std::string flm_version = config.flm_version;
+    // A compatibility check only needs flm_version. Going through
+    // LM_Config::from_pretrained also runs the decoder-LM shape asserts
+    // (hidden_size > 0, intermediate_size > 0, ...), which abort on non-LM
+    // configs such as Whisper, whose HuggingFace config.json carries
+    // d_model rather than hidden_size. Read flm_version directly so the
+    // version check stays model-type agnostic and never trips those asserts.
+    // See https://github.com/FastFlowLM/FastFlowLM/issues/545
+    std::string model_path = this->supported_models.get_model_path(new_model_tag);
+    std::ifstream config_file(model_path + "/config.json");
+    if (!config_file.is_open()) {
+        std::cerr << "Failed to open file: " << model_path << std::endl;
+        exit(1);
+    }
+    nlohmann::json model_config = nlohmann::json::parse(config_file);
+    std::string flm_version = model_config.value("flm_version", "0.0.0");
     std::string flm_min_version = model_info["flm_min_version"];
     int l_l, m_l, r_l; //left, middle, right on local version
     int l_r, m_r, r_r; //left, middle, right on requried version

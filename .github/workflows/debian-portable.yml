@@ -69,6 +69,10 @@ jobs:
         mv install/opt/fastflowlm/flm-wrapper.sh install/opt/fastflowlm/flm
         chmod +x install/opt/fastflowlm/flm
 
+        # Strip debug symbols to reduce binary size (111MB → 33MB)
+        # --strip-debug removes debug info while keeping stack trace capability
+        strip --strip-debug install/opt/fastflowlm/flm-real
+
     - name: Create portable tarball
       env:
         VERSION: ${{ steps.get_version.outputs.version }}

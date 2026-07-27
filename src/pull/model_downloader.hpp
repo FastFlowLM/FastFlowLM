@@ -27,7 +27,7 @@ public:
     bool is_model_downloaded(const std::string& model_tag, bool sub_process_mode=0, bool fast_check=false);
     
     // Download model files if not present
-    bool pull_model(const std::string& model_tag, bool force_redownload = false);
+    bool pull_model(const std::string& model_tag, bool use_modelscope = false, bool force_redownload = false);
     
     // Get list of missing files for a model
     std::vector<std::string> get_missing_files(const std::string& model_tag);

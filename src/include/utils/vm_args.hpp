@@ -79,6 +79,8 @@ bool parse_options(int argc, char *argv[], program_args_t& parsed_args) {
              "Set the server port number (for serve command)")
             ("force", po::bool_switch(&parsed_args.force_redownload),
              "Force re-download even if model exists (for pull command)")
+            ("modelscope", po::value<bool>(&parsed_args.modelscope)->default_value(false)->implicit_value(true),
+             "Download models held on ModelScope")
             ("filter", po::value<std::string>(&parsed_args.list_filter)->default_value("all"),
              "Show models: all | installed | not-installed")
             ("quiet", po::bool_switch(&parsed_args.sub_process_mode),
@@ -197,6 +199,10 @@ bool parse_options(int argc, char *argv[], program_args_t& parsed_args) {
             parsed_args.model_tag = vm["model_tag"].as<std::string>();
         }
 
+
+        // if (vm.count("modelscope")) {
+        //     parsed_args.modelscope = vm["modelscope"].as<bool>();
+        // }
 
         // Note: serve command allows empty model_tag (will use default)
 

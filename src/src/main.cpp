@@ -661,7 +661,7 @@ int main(int argc, char* argv[]) {
                 }
             } else {
                 // Download the model, this will be used to download the model
-                bool success = downloader.pull_model(parsed_args.model_tag, parsed_args.force_redownload);
+                bool success = downloader.pull_model(parsed_args.model_tag, parsed_args.modelscope, parsed_args.force_redownload);
                 if (!success) {
                     header_print("ERROR", "Failed to pull model: " + parsed_args.model_tag);
                     return 1;

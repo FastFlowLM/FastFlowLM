@@ -87,12 +87,12 @@ bool ModelDownloader::check_model_compatibility(const std::string& model_tag, bo
 /// \param model_tag the model tag
 /// \param force_redownload true if the model should be downloaded even if it is already downloaded
 /// \return true if the model is downloaded, false otherwise
-bool ModelDownloader::pull_model(const std::string& model_tag, bool force_redownload) {
+bool ModelDownloader::pull_model(const std::string& model_tag, bool use_modelscope, bool force_redownload) {
     try {
         // Get model info
         auto [new_model_tag, model_info] = supported_models.get_model_info(model_tag);
         std::string model_name = model_info["name"];
-        std::string base_url = model_info["url"];
+        std::string base_url = use_modelscope ? model_info["ms_url"] : model_info["url"];
         
         header_print("FLM", "Model: " + new_model_tag);
         header_print("FLM", "Name: " + model_name);

@@ -93,7 +93,9 @@ bool ModelDownloader::pull_model(const std::string& model_tag, bool use_modelsco
         auto [new_model_tag, model_info] = supported_models.get_model_info(model_tag);
         std::string model_name = model_info["name"];
         std::string base_url = use_modelscope ? model_info["ms_url"] : model_info["url"];
+        std::string model_server = use_modelscope ? "ModelScope" : "HuggingFace";
         
+        header_print("FLM", "Pulling model from " + model_server + "...");
         header_print("FLM", "Model: " + new_model_tag);
         header_print("FLM", "Name: " + model_name);
         

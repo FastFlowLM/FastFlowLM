@@ -96,6 +96,7 @@ Source: "libfftw3l-3.dll"; DestDir: "{app}"; Flags: ignoreversion
 Source: "logo.ico"; DestDir: "{app}"; Flags: ignoreversion
 
 Source: "model_list.json"; DestDir: "{app}"; Flags: ignoreversion
+Source: "model_info.json"; DestDir: "{app}"; Flags: ignoreversion
 
 ; xclbins directory - recursively include all files
 Source: "..\xclbins\*"; DestDir: "{app}\xclbins"; Flags: ignoreversion recursesubdirs createallsubdirs

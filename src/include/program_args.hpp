@@ -33,6 +33,9 @@ struct program_args_t {
     // for pull command
     bool force_redownload = false;
     
+    // for download related command
+    bool modelscope = false;
+
     // for serve command
     std::string host = "127.0.0.1";
     size_t max_socket_connections = 10;

@@ -368,6 +368,9 @@ inline std::string path_join(fileName&&... args){
 ///@return path to model_list.json
 std::string find_model_list();
 
+std::string find_model_info();
+
+
 ///@brief get the path to the xclbin directory
 ///@return path to the xclbin directory
 std::string find_xclbin_path();

@@ -12,5 +12,6 @@ copy "..\lib\*.dll" "."
 REM Copy model_list.json from root
 echo Copying model_list.json...
 copy "..\model_list.json" "model_list.json"
+copy "..\model_info.json" "model_info.json"
 
 echo Done!

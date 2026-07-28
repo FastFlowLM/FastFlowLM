@@ -48,6 +48,7 @@ class Runner {
         void run();
     private:
         std::string tag;
+        bool modelscope;
         int prefill_chunk_len;
         bool asr;
         bool asr_supported;

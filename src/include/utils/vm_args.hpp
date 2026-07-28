@@ -36,8 +36,10 @@ inline void print_help(po::options_description& general) {
     std::cout << "Examples:" << std::endl;
     std::cout << "\tflm run llama3.2:1b" << std::endl;
     std::cout << "\tflm run llama3.2:1b --asr 1" << std::endl;
+    std::cout << "\tflm run llama3.2:1b --modelscope 1" << std::endl;
     std::cout << "\tflm serve llama3.2:1b --pmode balanced" << std::endl;
     std::cout << "\tflm pull llama3.2:1b --force" << std::endl;
+    std::cout << "\tflm pull llama3.2:1b --modelscope 1" << std::endl;
     std::cout << "\tflm check llama3.2:1b" << std::endl;
     std::cout << "\tflm serve llama3.2:1b --ctx-len 8192" << std::endl;
     std::cout << "\tflm serve llama3.2:1b --prefill-chunk-len 8192" << std::endl;
@@ -47,6 +49,7 @@ inline void print_help(po::options_description& general) {
     std::cout << "\tflm serve llama3.2:1b --cors 0" << std::endl;
     std::cout << "\tflm serve llama3.2:1b --asr 1" << std::endl;
     std::cout << "\tflm serve llama3.2:1b --embed 1" << std::endl;
+    std::cout << "\tflm serve llama3.2:1b --modelscope 1" << std::endl;
     std::cout << "\tflm serve qwen3vl-it:4b --img-pre-resize 1" << std::endl;
     std::cout << "\tflm list" << std::endl;
     std::cout << "\tflm list --quiet" << std::endl;
@@ -79,6 +82,8 @@ bool parse_options(int argc, char *argv[], program_args_t& parsed_args) {
              "Set the server port number (for serve command)")
             ("force", po::bool_switch(&parsed_args.force_redownload),
              "Force re-download even if model exists (for pull command)")
+            ("modelscope", po::value<bool>(&parsed_args.modelscope)->default_value(false)->implicit_value(true),
+             "Download models hosted on ModelScope")
             ("filter", po::value<std::string>(&parsed_args.list_filter)->default_value("all"),
              "Show models: all | installed | not-installed")
             ("quiet", po::bool_switch(&parsed_args.sub_process_mode),
@@ -197,6 +202,10 @@ bool parse_options(int argc, char *argv[], program_args_t& parsed_args) {
             parsed_args.model_tag = vm["model_tag"].as<std::string>();
         }
 
+
+        // if (vm.count("modelscope")) {
+        //     parsed_args.modelscope = vm["modelscope"].as<bool>();
+        // }
 
         // Note: serve command allows empty model_tag (will use default)
 

@@ -37,7 +37,7 @@ std::map<std::string, runner_cmd_t> cmd_map = {
 /// \param downloader - the downloader for the models
 /// \param tag - the tag of the model to load
 Runner::Runner(model_list& supported_models, ModelDownloader& downloader, program_args_t& args)
-    : supported_models(supported_models), downloader(downloader), tag(args.model_tag), asr(args.asr), embed(args.embed), img_pre_resize(args.img_pre_resize), preemption(args.preemption) {
+    : supported_models(supported_models), downloader(downloader), tag(args.model_tag), modelscope(args.modelscope), asr(args.asr), embed(args.embed), img_pre_resize(args.img_pre_resize), preemption(args.preemption) {
 
     this->npu_device_inst = xrt::device(0);
 
@@ -57,7 +57,7 @@ Runner::Runner(model_list& supported_models, ModelDownloader& downloader, progra
     this->tag = auto_model.first;
 
     if (!this->downloader.is_model_downloaded(this->tag)) {
-        this->downloader.pull_model(this->tag);
+        this->downloader.pull_model(this->tag, this->modelscope);
     }
     auto [new_tag, model_info] = this->supported_models.get_model_info(this->tag);
     this->asr_supported = model_info.contains("asr") && model_info["asr"];
@@ -100,7 +100,7 @@ Runner::Runner(model_list& supported_models, ModelDownloader& downloader, progra
             header_print("FLM", "The loaded model does not support ASR. Loading default Whisper model for ASR...");
             std::string whisper_tag = "whisper-v3:turbo";
             if (!this->downloader.is_model_downloaded(whisper_tag)) {
-                this->downloader.pull_model(whisper_tag);
+                this->downloader.pull_model(whisper_tag, this->modelscope);
             }
             this->whisper_engine = std::make_unique<Whisper>(&this->npu_device_inst);
             auto [new_whisper_tag, whisper_model_info] = this->supported_models.get_model_info(whisper_tag);
@@ -241,7 +241,7 @@ void Runner::run() {
             }
             else if (first_token == "/pull") {
                 std::string model_name = input_list[1];
-                this->downloader.pull_model(model_name);
+                this->downloader.pull_model(model_name, this->modelscope);
             }
         } else {
             // This is a regular message, not a command
@@ -415,7 +415,7 @@ void Runner::cmd_load(std::vector<std::string>& input_list) {
         this->tag = model_name;
 
         if (!this->downloader.is_model_downloaded(this->tag)) {
-            this->downloader.pull_model(this->tag);
+            this->downloader.pull_model(this->tag, this->modelscope);
         }
         auto_chat_engine.reset();
         if(model_name=="gpt-oss:20b")

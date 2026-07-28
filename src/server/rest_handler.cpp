@@ -322,7 +322,7 @@ static json convert_tool_responses_gemma4(json messages) {
 
 ///@return the rest handler
 RestHandler::RestHandler(model_list& models, ModelDownloader& downloader, program_args_t& args)
-    : supported_models(models), downloader(downloader), default_model_tag(args.model_tag), current_model_tag(""), asr(args.asr), embed(args.embed), img_pre_resize(args.img_pre_resize), preemption(args.preemption){
+    : supported_models(models), downloader(downloader), default_model_tag(args.model_tag), current_model_tag(""), modelscope(args.modelscope), asr(args.asr), embed(args.embed), img_pre_resize(args.img_pre_resize), preemption(args.preemption){
     this->npu_device_inst = xrt::device(0);
 
     if (args.ctx_length != -1) {
@@ -388,7 +388,7 @@ bool RestHandler::ensure_model_loaded(const std::string& model_tag) {
         auto_chat_engine = std::move(auto_model.second);
         ensure_tag = auto_model.first;
         if (!downloader.is_model_downloaded(ensure_tag)) {
-            downloader.pull_model(ensure_tag);
+            downloader.pull_model(ensure_tag, this->modelscope);
         }
         auto [new_ensure_tag, model_info] = supported_models.get_model_info(ensure_tag);
         auto_chat_engine->configure_parameter("img_pre_resize", this->img_pre_resize);
@@ -418,7 +418,7 @@ void RestHandler::ensure_asr_model_loaded(const std::string& model_tag) {
 #ifndef FASTFLOWLM_LINUX_LIMITED_MODELS
     std::string ensure_tag = model_tag;
     if (!downloader.is_model_downloaded(ensure_tag)) {
-        downloader.pull_model(ensure_tag);
+        downloader.pull_model(ensure_tag, modelscope);
     }
     this->whisper_engine = std::make_unique<Whisper>(&this->npu_device_inst);
     auto [new_ensure_tag, whisper_model_info] = this->supported_models.get_model_info(ensure_tag);
@@ -441,7 +441,7 @@ void RestHandler::ensure_embed_model_loaded(const std::string& model_tag) {
 #ifndef FASTFLOWLM_LINUX_LIMITED_MODELS
     std::string ensure_tag = model_tag;
     if (!this->downloader.is_model_downloaded(ensure_tag)) {
-        this->downloader.pull_model(ensure_tag);
+        this->downloader.pull_model(ensure_tag, this->modelscope);
     }
     auto [embedding_model_tag, auto_embedding_engine] = get_auto_embedding_model(ensure_tag, &this->npu_device_inst);
     this->auto_embedding_engine = std::move(auto_embedding_engine);

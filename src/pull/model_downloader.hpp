@@ -27,7 +27,7 @@ public:
     bool is_model_downloaded(const std::string& model_tag, bool sub_process_mode=0, bool fast_check=false);
     
     // Download model files if not present
-    bool pull_model(const std::string& model_tag, bool force_redownload = false);
+    bool pull_model(const std::string& model_tag, bool use_modelscope = false, bool force_redownload = false);
     
     // Get list of missing files for a model
     std::vector<std::string> get_missing_files(const std::string& model_tag);
@@ -38,7 +38,7 @@ public:
     // Remove a model and all its files
     bool remove_model(const std::string& model_tag, bool sub_process_mode=0);
     
-    bool check_model(const std::string& model_tag, bool sub_process_mode=0);
+    bool check_model(const std::string& model_tag, bool use_modelscope=0, bool sub_process_mode=0);
 
     // Get download progress callback
     std::function<void(size_t, size_t)> get_progress_callback();
@@ -56,12 +56,12 @@ private:
     std::string get_model_file_path(const std::string& model_path, const std::string& filename);
     
     // Build download URLs for model files
-    std::pair<nlohmann::json, float> build_download_list(const std::string& model_tag);
+    std::pair<nlohmann::json, float> build_download_list(const std::string& model_tag, bool modelscope=0);
 
     // bool check_model_compatibility(const std::string& model_tag);
     bool check_model_compatibility(const std::string& model_tag, bool sub_process_mode=0);
 
     // Verify per-file integrity against HuggingFace metadata and remove any
     // corrupted files. Returns true if all files passed verification.
-    bool verify_and_clean_files(const std::string& model_tag, bool sub_process_mode=0);
+    bool verify_and_clean_files(const std::string& model_tag, bool use_modelscope=0, bool sub_process_mode=0);
 }; 

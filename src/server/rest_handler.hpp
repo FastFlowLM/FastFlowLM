@@ -125,6 +125,7 @@ private:
     ModelDownloader& downloader;
     std::string current_model_tag;
     std::string default_model_tag;
+    bool modelscope;
     bool asr;
     bool embed;
     int prefill_chunk_len;

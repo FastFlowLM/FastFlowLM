@@ -673,7 +673,7 @@ int main(int argc, char* argv[]) {
             downloader.remove_model(parsed_args.model_tag);
         }
         else if (parsed_args.command == "check") {
-            downloader.check_model(parsed_args.model_tag);
+            downloader.check_model(parsed_args.model_tag, parsed_args.modelscope);
         }
         else if (parsed_args.command == "list") {
             // List the models, this will be used to list the models

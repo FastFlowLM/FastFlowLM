@@ -9,6 +9,7 @@
 #include "download_model.hpp"
 #include <sstream>
 #include <iomanip>
+#include <fstream>
 
 /// \brief Constructor
 /// \param models the model list
@@ -92,7 +93,6 @@ bool ModelDownloader::pull_model(const std::string& model_tag, bool use_modelsco
         // Get model info
         auto [new_model_tag, model_info] = supported_models.get_model_info(model_tag);
         std::string model_name = model_info["name"];
-        std::string base_url = use_modelscope ? model_info["ms_url"] : model_info["url"];
         std::string model_server = use_modelscope ? "ModelScope" : "HuggingFace";
         
         header_print("FLM", "Pulling model from " + model_server + "...");
@@ -138,7 +138,7 @@ bool ModelDownloader::pull_model(const std::string& model_tag, bool use_modelsco
         }
         
         // Build download list
-        auto download_list = build_download_list(new_model_tag);
+        auto download_list = build_download_list(new_model_tag, use_modelscope);
         auto downloads = download_list.first;
         float sum_fize_size = download_list.second;
         if (downloads.empty()) {
@@ -286,14 +286,14 @@ std::string ModelDownloader::get_model_file_path(const std::string& model_path, 
 /// \brief Build the download list
 /// \param model_tag the model tag
 /// \return the download list
-std::pair<nlohmann::json, float> ModelDownloader::build_download_list(const std::string& model_tag) {
+std::pair<nlohmann::json, float> ModelDownloader::build_download_list(const std::string& model_tag, bool modelscope) {
     
     nlohmann::json downloads = nlohmann::json::array();
     float sum_file_size = 0;
 
     try {
         auto [new_model_tag, model_info] = supported_models.get_model_info(model_tag);
-        std::string base_url = model_info["url"];
+        std::string base_url = modelscope ? model_info["ms_url"] : model_info["url"];
         std::string model_name = model_info["name"];
         std::string file_url = model_info["file_url"];
         std::vector<std::string> model_files = model_info["files"];
@@ -302,9 +302,18 @@ std::pair<nlohmann::json, float> ModelDownloader::build_download_list(const std:
         std::string model_path = supported_models.get_model_path(new_model_tag);
         std::filesystem::create_directories(model_path);
         
+        nlohmann::json hf_model_infos;
         // GET HF api/models
-        std::string hf_response = download_utils::download_string(file_url);
-        nlohmann::json hf_model_infos = nlohmann::json::parse(hf_response);
+        if (modelscope == 0) {
+            std::string hf_response = download_utils::download_string(file_url);
+            hf_model_infos = nlohmann::json::parse(hf_response);
+        }
+        else {
+            std::string model_info_path = utils::find_model_info();
+            std::ifstream model_info_file(model_info_path);
+            nlohmann::json model_info_json = nlohmann::json::parse(model_info_file);
+            hf_model_infos = model_info_json.at(new_model_tag);
+        }
 
         for (const auto& filename : model_files) {
             auto it = std::find_if(
@@ -329,6 +338,7 @@ std::pair<nlohmann::json, float> ModelDownloader::build_download_list(const std:
                 else {
                     url = base_url + "/resolve/main/" + filename + "?download=true";
                 }
+                header_print("URL", url);
                 bool is_lfs = file.contains("lfs");
                 std::string oid = is_lfs ? file["lfs"]["oid"] : file["oid"];
                 float file_size = static_cast<float>(file["size"]) / 1024 / 1024;
@@ -410,7 +420,7 @@ bool ModelDownloader::remove_model(const std::string& model_tag, bool sub_proces
 /// \brief Check hash of model files
 /// \param model_tag the model tag
 /// \return true if all files are present and compatible, false otherwise
-bool ModelDownloader::check_model(const std::string& model_tag, bool sub_process_mode) {
+bool ModelDownloader::check_model(const std::string& model_tag, bool use_modelscope, bool sub_process_mode) {
     auto [new_model_tag, model_info] = supported_models.get_model_info(model_tag);
     header_print("FLM", "Checking model: " + new_model_tag + "...\n");
 
@@ -420,7 +430,7 @@ bool ModelDownloader::check_model(const std::string& model_tag, bool sub_process
         return true;
     }
     else {
-        bool ok = verify_and_clean_files(new_model_tag, sub_process_mode);
+        bool ok = verify_and_clean_files(new_model_tag, use_modelscope, sub_process_mode);
         if (!ok) {
             header_print("FLM", "Model check completed with errors. Please use `flm pull " + new_model_tag + "` to re-download corrupted files.");
         }
@@ -436,7 +446,7 @@ bool ModelDownloader::check_model(const std::string& model_tag, bool sub_process
 /// \param model_tag the model tag
 /// \param sub_process_mode if true, suppress informational logging
 /// \return true if all files passed verification, false otherwise
-bool ModelDownloader::verify_and_clean_files(const std::string& model_tag, bool sub_process_mode) {
+bool ModelDownloader::verify_and_clean_files(const std::string& model_tag, bool use_modelscope, bool sub_process_mode) {
     bool any_error = false;
     try {
         auto [new_model_tag, model_info] = supported_models.get_model_info(model_tag);
@@ -444,9 +454,18 @@ bool ModelDownloader::verify_and_clean_files(const std::string& model_tag, bool 
         std::string model_path = supported_models.get_model_path(new_model_tag);
         std::string file_url = model_info["file_url"];
 
+        nlohmann::json hf_model_infos;
         // GET HF api/models
-        std::string hf_response = download_utils::download_string(file_url);
-        nlohmann::json hf_model_infos = nlohmann::json::parse(hf_response);
+        if (use_modelscope == 0) {
+            std::string hf_response = download_utils::download_string(file_url);
+            hf_model_infos = nlohmann::json::parse(hf_response);
+        }
+        else {
+            std::string model_info_path = utils::find_model_info();
+            std::ifstream model_info_file(model_info_path);
+            nlohmann::json model_info_json = nlohmann::json::parse(model_info_file);
+            hf_model_infos = model_info_json.at(new_model_tag);
+        }
 
         for (const auto& filename : model_files) {
             if (!sub_process_mode) {

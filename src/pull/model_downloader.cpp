@@ -338,7 +338,7 @@ std::pair<nlohmann::json, float> ModelDownloader::build_download_list(const std:
                 else {
                     url = base_url + "/resolve/main/" + filename + "?download=true";
                 }
-                header_print("URL", url);
+                // header_print("URL", url);
                 bool is_lfs = file.contains("lfs");
                 std::string oid = is_lfs ? file["lfs"]["oid"] : file["oid"];
                 float file_size = static_cast<float>(file["size"]) / 1024 / 1024;

@@ -777,6 +777,7 @@ if(FLM_PORTABLE_BUILD)
     # Install everything flatly - renaming happens during packaging
     install(TARGETS flm RUNTIME DESTINATION .)
     install(FILES model_list.json DESTINATION .)
+    install(FILES model_info.json DESTINATION .)
     install(DIRECTORY xclbins DESTINATION .)
     install(FILES "${CMAKE_BINARY_DIR}/flm-wrapper.sh" DESTINATION . RENAME flm-wrapper.sh)
 else()
@@ -786,6 +787,7 @@ else()
         BUNDLE DESTINATION .
     )
     install(FILES model_list.json DESTINATION share/flm)
+    install(FILES model_info.json DESTINATION share/flm)
     install(DIRECTORY xclbins DESTINATION share/flm)
 endif()
 

@@ -80,7 +80,7 @@ jobs:
           lib/ \
           xclbins/ \
           model_list.json \
-          model_info.json \
+          model_info.json
         echo "Created tarball with symlinks preserved"
         tar tzf $GITHUB_WORKSPACE/fastflowlm_${VERSION}_linux.tar.gz | grep libxrt
 

@@ -5,6 +5,7 @@
 /// \version 0.9.24
 /// \note This class for curl download
 #include "download_model.hpp"
+#include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <filesystem>
@@ -51,6 +52,9 @@ std::string calculate_git_blob_oid(const std::string& file_path) {
 
 // Global variable to track if progress bar was shown
 static bool g_progress_bar_shown = false;
+
+// Global variable to store the Authorization header if HF_TOKEN exists
+struct curl_slist* auth_header = nullptr;
 
 /// \brief Hide the cursor
 void hide_cursor() {
@@ -120,6 +124,21 @@ int progress_callback(void* clientp, double dltotal, double dlnow, double ultota
     return 0;
 }
 
+/// \brief populate the curl request with an authorization header
+/// \param curl the CURL client to use
+void populate_auth_header(CURL* curl){
+    std::string auth_val = "";
+	if (auth_header == nullptr) {
+		const char* hf_token = std::getenv("HF_TOKEN");
+        if (hf_token && strlen(hf_token)) {
+            auth_val = "Authorization: Bearer " + std::string(hf_token);
+            auth_header = curl_slist_append(auth_header, auth_val.c_str());
+        }
+    }
+	if (auth_header)
+        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, auth_header);
+}
+
 /// \brief Download a file from URL to a local file
 /// \param url the URL to download from
 /// \param local_path the local path to save the file
@@ -135,6 +154,7 @@ bool download_file(const std::string& url, const std::string& local_path, bool i
         std::cerr << "Failed to initialize CURL" << std::endl;
         return false;
     }
+	populate_auth_header(curl);
 
     // Create directory if it doesn't exist
     std::filesystem::path path(local_path);
@@ -228,6 +248,7 @@ std::string download_string(const std::string& url) {
 
     std::string response;
     
+	populate_auth_header(curl);
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_data_to_string);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);

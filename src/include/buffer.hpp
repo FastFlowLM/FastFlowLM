@@ -137,15 +137,6 @@ public:
         catch (const std::exception& e) {
             throw std::runtime_error(std::string("Failed to allocate xrt::ext::bo: ") + e.what());
         }
-        
-        // uint64_t bo_address = reinterpret_cast<uintptr_t>(owned_bo_->map<uint8_t*>());
-        // while ( ((bo_address & 0xF0000000) == 0x60000000) ||
-        //     ((bo_address & 0xF0000000) == 0x70000000) ) {
-                
-        //     owned_bo_ = std::make_unique<xrt::ext::bo>(device, padded_size);
-        //     //header_print("info", "Re-allocating proj_weights for layer " + std::to_string(i) + " to avoid address in 0x60000000 - 0x7FFFFFFF, new address: " + std::to_string(reinterpret_cast<uintptr_t>(proj_weights[i].data())));
-        //     bo_address = reinterpret_cast<uintptr_t>(owned_bo_->map<uint8_t*>());
-        // }
 
         data_ = owned_bo_->map<uint8_t*>();
         bo_ = owned_bo_.get();

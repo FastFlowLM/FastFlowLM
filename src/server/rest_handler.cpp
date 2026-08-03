@@ -1101,7 +1101,7 @@ void RestHandler::handle_openai_chat_completion(const json& request,
                 meta_info.restore_allowed = true;
                 header_print("FLM", "Use cached prompt!");
                 header_print("FLM", "Matched " + std::to_string(cache_info.matched_rounds) +
-                    " out of " + std::to_string(cache_info.total_rounds) + " rounds (" +
+                    " out of " + std::to_string(cache_info.total_rounds) + " messages (" +
                     std::to_string(cache_info.total_rounds - cache_info.matched_rounds) + " new to prefill).");
             }
             else {

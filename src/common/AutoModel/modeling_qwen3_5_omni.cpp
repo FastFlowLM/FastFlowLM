@@ -75,13 +75,13 @@ void Qwen3_5_Omni::load_model(std::string model_path, json model_info, int defau
     this->lm_config->from_pretrained(this->model_path);
 
     // The omni thinker vocab lives in thinker_config.text_config, so the
-    // top-level "vocab_size" is 0. Resolve it here so every downstream reader
-    // (set_sampler, set_topk, ...) sees the real vocab instead of 0.
+    // top-level "vocab_size" is 0. Republish it at the top level so every
+    // downstream reader (set_sampler, set_topk, ...) sees the real vocab.
     {
-        const auto& jc = this->lm_config->_json_config;
+        auto& jc = this->lm_config->_json_config;
         if (jc.contains("thinker_config") && jc["thinker_config"].contains("text_config")) {
-            this->lm_config->vocab_size =
-                json_u32(jc["thinker_config"]["text_config"], "vocab_size", this->lm_config->vocab_size);
+            jc["vocab_size"] =
+                json_u32(jc["thinker_config"]["text_config"], "vocab_size", this->lm_config->get("vocab_size"));
         }
     }
 
@@ -694,7 +694,7 @@ buffer<bf16> Qwen3_5_Omni::say(std::string wav_out_path) {
 
 void Qwen3_5_Omni::set_sampler(sampler_config& sampler_config) {
     if (this->sampler != nullptr) this->sampler.reset();
-    this->sampler = std::make_unique<Sampler>((int)this->lm_config->vocab_size, sampler_config);
+    this->sampler = std::make_unique<Sampler>((int)this->lm_config->get("vocab_size"), sampler_config);
 }
 
 void Qwen3_5_Omni::clear_context() {

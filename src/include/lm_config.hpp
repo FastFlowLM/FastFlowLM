@@ -11,52 +11,70 @@
 #include "nlohmann/json.hpp"
 #include <filesystem>
 
+/// \brief read one parameter out of a config json
+/// \note Same semantics as JSON_GET (missing OR null falls back to the default),
+///       in expression form. Plain nlohmann .value() throws on a null, and real
+///       configs do carry nulls (e.g. "sliding_window": null on qwen3).
+template <typename T>
+inline T cfg_get(const nlohmann::json& jc, const char* key, T default_value){
+    if (jc.contains(key) && !jc[key].is_null()){
+        return T(jc[key]);
+    }
+    return default_value;
+}
+
 /// \brief LM_Config class
+/// \note Model parameters are NOT cached as members. Everything comes from the
+///       model's config.json, so every consumer reads what it needs straight out
+///       of _json_config with JSON_GET. from_pretrained() only locates the file
+///       and normalizes it, so that all readers share one canonical key set.
+/// \note This class is passed by value across the FLM_DLL boundary. Its layout
+///       must stay identical to FLM_DLL/include/lm_config.hpp.
 class LM_Config{
     public:
         std::string model_path;
         std::string model_name;
-        std::string model_type;
-        u32 head_dim;
-        u32 hidden_size;
-        std::string hidden_act;
-        u32 intermediate_size;
-        u32 num_attention_heads;
-        u32 num_hidden_layers;
-        u32 num_key_value_heads;
-        u32 linear_conv_kernel_dim;
-        u32 linear_key_head_dim;
-        u32 linear_num_key_heads;
-        u32 linear_num_value_heads;
-        u32 linear_value_head_dim;
-        u32 pretraining_tp;
-        f32 rms_norm_eps;
-        f32 rope_theta;
-        u32 vocab_size;
-        u32 sliding_window;
-        u32 sliding_window_pattern;
-        u32 addr_qk;
-        u32 addr_kv;
-        u32 addr_l_begin_mha;
-        u32 addr_l_end_mha;
-        u32 addr_kk;
-        std::string flm_version;
         std::string exec_path;
-
-        //vision specific
-        std::string vision_model_weight;
-        nlohmann::json _vision_config;
-        std::string audio_model_weight;        
-        nlohmann::json _audio_config;        
-        bool is_vlm;
-        bool is_audio;
-
+        std::string flm_version;
 
         nlohmann::json _json_config;
+
+        /// \brief read one model parameter out of config.json
+        /// \note Defaults to u32 because most parameters are dimensions:
+        ///       config.get("head_dim"), config.get<f32>("rms_norm_eps", 0.0f),
+        ///       config.get<std::string>("vision_model_weight", "").
+        template <typename T = u32>
+        T get(const char* key, T default_value = T(0)) const {
+            return cfg_get<T>(this->_json_config, key, default_value);
+        }
+
+        /// \brief read a nested config object (vision_config, audio_config, ...)
+        /// \return the sub-object, or an empty object when absent/null
+        const nlohmann::json& sub(const char* key) const {
+            static const nlohmann::json empty = nlohmann::json::object();
+            if (this->_json_config.contains(key) && !this->_json_config[key].is_null()){
+                return this->_json_config[key];
+            }
+            return empty;
+        }
 
         /// \brief from pretrained
         /// \param model_name the model name
         void from_pretrained(std::string model_name){
+            this->_resolve_paths(model_name);
+            this->_load_json();
+            this->_normalize_multi_modal();
+            JSON_GET(this->flm_version, this->_json_config, "flm_version", "0.0.0", std::string);
+        }
+
+        std::string _str(){
+            return this->_str_from(this->_json_config);
+        }
+        LM_Config(){}
+
+    protected:
+        /// \brief resolve model_path / model_name / exec_path
+        void _resolve_paths(const std::string& model_name){
             // #define DEV_BUILD
             #ifdef DEV_BUILD
             #ifdef __WINDOWS__
@@ -69,86 +87,87 @@ class LM_Config{
             #endif
             this->model_path = model_name;
             this->model_name = std::filesystem::path(model_name).filename().string();
+        }
+
+        /// \brief read model_path/config.json into _json_config
+        void _load_json(){
             std::ifstream file(this->model_path + "/config.json");
             if (!file.is_open()){
-                std::cerr << "Failed to open file: " << model_name << std::endl;
+                std::cerr << "Failed to open file: " << this->model_path << std::endl;
                 exit(1);
             }
             // read the json file as a string
             std::string json_str((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
             this->_json_config = nlohmann::json::parse(json_str);
-            JSON_GET(this->sliding_window, this->_json_config, "sliding_window", 0, u32);
-            JSON_GET(this->sliding_window_pattern, this->_json_config, "sliding_window_pattern", 0, u32);
-            JSON_GET(this->model_type, this->_json_config, "model_type", "", std::string);
-            JSON_GET(this->head_dim, this->_json_config, "head_dim", 0, u32);
-            JSON_GET(this->hidden_size, this->_json_config, "hidden_size", 0, u32);
-            JSON_GET(this->hidden_act, this->_json_config, "hidden_act", "", std::string);
-            JSON_GET(this->intermediate_size, this->_json_config, "intermediate_size", 0, u32);
-            JSON_GET(this->num_attention_heads, this->_json_config, "num_attention_heads", 0, u32);
-            JSON_GET(this->linear_conv_kernel_dim, this->_json_config, "linear_conv_kernel_dim", 0, u32);
-            JSON_GET(this->linear_key_head_dim, this->_json_config, "linear_key_head_dim", 0, u32);
-            JSON_GET(this->linear_num_key_heads, this->_json_config, "linear_num_key_heads", 0, u32);
-            JSON_GET(this->linear_num_value_heads, this->_json_config, "linear_num_value_heads", 0, u32);
-            JSON_GET(this->linear_value_head_dim, this->_json_config, "linear_value_head_dim", 0, u32);
-            
-            JSON_GET(this->num_hidden_layers, this->_json_config, "num_hidden_layers", 0, u32);
-            JSON_GET(this->num_key_value_heads, this->_json_config, "num_key_value_heads", 0, u32);
-            JSON_GET(this->pretraining_tp, this->_json_config, "pretraining_tp", 0, u32);
-            JSON_GET(this->rms_norm_eps, this->_json_config, "rms_norm_eps", 0.0, f32);
-            JSON_GET(this->rope_theta, this->_json_config, "rope_theta", 0.0, f32);
-            JSON_GET(this->vocab_size, this->_json_config, "vocab_size", 0, u32);
-            JSON_GET(this->addr_qk, this->_json_config, "addr_qk", 0, u32);
-            JSON_GET(this->addr_kv, this->_json_config, "addr_kv", 0, u32);
-            JSON_GET(this->addr_l_begin_mha, this->_json_config, "addr_l_begin_mha", 0, u32);
-            JSON_GET(this->addr_l_end_mha, this->_json_config, "addr_l_end_mha", 0, u32);
-            JSON_GET(this->addr_kk, this->_json_config, "addr_kk", 0, u32);
-
-
-            // config for vision
-            {
-                JSON_GET(this->vision_model_weight, this->_json_config, "vision_model_weight", "", std::string);
-                JSON_GET(this->_vision_config, this->_json_config, "vision_config", nlohmann::json::object(), nlohmann::json);
-                JSON_GET(this->_audio_config, this->_json_config, "audio_config", nlohmann::json::object(), nlohmann::json);
-                JSON_GET(this->audio_model_weight, this->_json_config, "audio_model_weight", "", std::string);
-
-            }
-            this->is_vlm = this->vision_model_weight != "";
-            this->is_audio = this->audio_model_weight != "";
-
-
-            JSON_GET(this->flm_version, this->_json_config, "flm_version", "0.0.0", std::string);
-      
-            this->vision_model_weight = this->model_path + "/" + this->vision_model_weight;
-            this->audio_model_weight = this->model_path + "/" + this->audio_model_weight;
         }
-        std::string _str(){
+
+        /// \brief turn the relative weight names into full paths and publish the
+        ///        derived is_vlm / is_audio flags, so consumers can read them
+        ///        from json like every other parameter.
+        void _normalize_multi_modal(){
+            std::string vision_model_weight;
+            std::string audio_model_weight;
+            JSON_GET(vision_model_weight, this->_json_config, "vision_model_weight", "", std::string);
+            JSON_GET(audio_model_weight, this->_json_config, "audio_model_weight", "", std::string);
+
+            this->_json_config["is_vlm"] = !vision_model_weight.empty();
+            this->_json_config["is_audio"] = !audio_model_weight.empty();
+            if (!vision_model_weight.empty()){
+                this->_json_config["vision_model_weight"] = this->model_path + "/" + vision_model_weight;
+            }
+            if (!audio_model_weight.empty()){
+                this->_json_config["audio_model_weight"] = this->model_path + "/" + audio_model_weight;
+            }
+        }
+
+        /// \brief shared pretty printer, reads everything from the normalized json
+        std::string _str_from(const nlohmann::json& jc){
+            u32 head_dim, hidden_size, intermediate_size;
+            u32 num_attention_heads, num_hidden_layers, num_key_value_heads;
+            u32 pretraining_tp, sliding_window, sliding_window_pattern;
+            f32 rms_norm_eps;
+            std::string hidden_act, vision_model_weight;
+            bool is_vlm;
+            JSON_GET(head_dim, jc, "head_dim", 0, u32);
+            JSON_GET(hidden_size, jc, "hidden_size", 0, u32);
+            JSON_GET(hidden_act, jc, "hidden_act", "", std::string);
+            JSON_GET(intermediate_size, jc, "intermediate_size", 0, u32);
+            JSON_GET(num_attention_heads, jc, "num_attention_heads", 0, u32);
+            JSON_GET(num_hidden_layers, jc, "num_hidden_layers", 0, u32);
+            JSON_GET(num_key_value_heads, jc, "num_key_value_heads", 0, u32);
+            JSON_GET(pretraining_tp, jc, "pretraining_tp", 0, u32);
+            JSON_GET(rms_norm_eps, jc, "rms_norm_eps", 0.0, f32);
+            JSON_GET(sliding_window, jc, "sliding_window", 0, u32);
+            JSON_GET(sliding_window_pattern, jc, "sliding_window_pattern", 0, u32);
+            JSON_GET(is_vlm, jc, "is_vlm", false, bool);
+            JSON_GET(vision_model_weight, jc, "vision_model_weight", "", std::string);
+
             std::stringstream ss;
             ss << "  Model: "  << std::endl;
             ss << "    model_name:             " << this->model_name << std::endl;
             ss << "    compatible_flm_version: >= " << this->flm_version << std::endl;
-            ss << "    head_dim:               " << this->head_dim << std::endl;
-            ss << "    hidden_size:            " << this->hidden_size << std::endl;
-            if (this->hidden_act != ""){
-                ss << "    hidden_act:             " << this->hidden_act << std::endl;
+            ss << "    head_dim:               " << head_dim << std::endl;
+            ss << "    hidden_size:            " << hidden_size << std::endl;
+            if (hidden_act != ""){
+                ss << "    hidden_act:             " << hidden_act << std::endl;
             }
-            ss << "    intermediate_size:      " << this->intermediate_size << std::endl;
-            ss << "    num_attention_heads:    " << this->num_attention_heads << std::endl;
-            ss << "    num_hidden_layers:      " << this->num_hidden_layers << std::endl;
-            ss << "    num_key_value_heads:    " << this->num_key_value_heads << std::endl;
-            ss << "    pretraining_tp:         " << this->pretraining_tp << std::endl;
-            ss << "    rms_norm_eps:           " << this->rms_norm_eps << std::endl;
-            if (this->sliding_window > 0){
-                ss << "    sliding_window:         " << this->sliding_window << std::endl;
-                ss << "    sliding_window_pattern: " << this->sliding_window_pattern << std::endl;
+            ss << "    intermediate_size:      " << intermediate_size << std::endl;
+            ss << "    num_attention_heads:    " << num_attention_heads << std::endl;
+            ss << "    num_hidden_layers:      " << num_hidden_layers << std::endl;
+            ss << "    num_key_value_heads:    " << num_key_value_heads << std::endl;
+            ss << "    pretraining_tp:         " << pretraining_tp << std::endl;
+            ss << "    rms_norm_eps:           " << rms_norm_eps << std::endl;
+            if (sliding_window > 0){
+                ss << "    sliding_window:         " << sliding_window << std::endl;
+                ss << "    sliding_window_pattern: " << sliding_window_pattern << std::endl;
             }
 
-            if(this->is_vlm){
+            if (is_vlm){
                 ss << "  Vision: "  << std::endl;
-                ss << "    vision_model_weight:    " << this->vision_model_weight << std::endl;
+                ss << "    vision_model_weight:    " << vision_model_weight << std::endl;
             }
             return ss.str();
         }
-        LM_Config(){}
 };
 
 class Whisper_Config : public LM_Config{
@@ -156,73 +175,26 @@ public:
     /// \brief from pretrained
     /// \param model_name the model name
     void from_pretrained(std::string model_name){
-        this->model_path = model_name;
-        #ifdef DEV_BUILD
-        #ifdef __WINDOWS__
-            this->exec_path = "..\\..\\..\\";
-        #else
-            this->exec_path = "../../../";
-        #endif
-        #else
-            this->exec_path = utils::find_xclbin_path();
-        #endif
-        this->model_name = std::filesystem::path(model_name).filename().string();
-        std::ifstream file(model_name + "/config.json");
-        if (!file.is_open()){
-            std::cerr << "Failed to open file: " << model_name << std::endl;
-            exit(1);
-        }
-        // read the json file as a string
-        std::string json_str((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-        this->_json_config = nlohmann::json::parse(json_str);
-        JSON_GET(this->sliding_window, this->_json_config, "sliding_window", 0, u32);
-        JSON_GET(this->sliding_window_pattern, this->_json_config, "sliding_window_pattern", 0, u32);
-        JSON_GET(this->model_type, this->_json_config, "model_type", "", std::string);
-        JSON_GET(this->head_dim, this->_json_config, "head_dim", 0, u32);
-        JSON_GET(this->hidden_size, this->_json_config, "d_model", 0, u32);
-        JSON_GET(this->hidden_act, this->_json_config, "hidden_act", "", std::string);
-        JSON_GET(this->intermediate_size, this->_json_config, "decoder_ffn_dim", 0, u32);
-        JSON_GET(this->num_attention_heads, this->_json_config, "num_attention_heads", 0, u32);
-        JSON_GET(this->num_hidden_layers, this->_json_config, "num_hidden_layers", 0, u32);
-        JSON_GET(this->num_key_value_heads, this->_json_config, "num_key_value_heads", 0, u32);
-        JSON_GET(this->pretraining_tp, this->_json_config, "pretraining_tp", 0, u32);
-        JSON_GET(this->rms_norm_eps, this->_json_config, "rms_norm_eps", 0.0, f32);
-        JSON_GET(this->rope_theta, this->_json_config, "rope_theta", 0.0, f32);
-        JSON_GET(this->vocab_size, this->_json_config, "vocab_size", 0, u32);
-        JSON_GET(this->addr_qk, this->_json_config, "addr_qk", 0, u32);
-        JSON_GET(this->addr_kv, this->_json_config, "addr_kv", 0, u32);
-        JSON_GET(this->addr_l_begin_mha, this->_json_config, "addr_l_begin_mha", 0, u32);
-        JSON_GET(this->addr_l_end_mha, this->_json_config, "addr_l_end_mha", 0, u32);
-        JSON_GET(this->addr_kk, this->_json_config, "addr_kk", 0, u32);
+        this->_resolve_paths(model_name);
+        this->_load_json();
 
-        this->is_vlm = false;
-        this->vocab_size = (this->vocab_size + 31) / 32 * 32;
+        // whisper spells the common dimensions differently; republish them under
+        // the canonical keys so downstream readers stay model agnostic.
+        u32 hidden_size, intermediate_size, vocab_size;
+        JSON_GET(hidden_size, this->_json_config, "d_model", 0, u32);
+        JSON_GET(intermediate_size, this->_json_config, "decoder_ffn_dim", 0, u32);
+        JSON_GET(vocab_size, this->_json_config, "vocab_size", 0, u32);
+        this->_json_config["hidden_size"] = hidden_size;
+        this->_json_config["intermediate_size"] = intermediate_size;
+        this->_json_config["vocab_size"] = (vocab_size + 31) / 32 * 32;
+
+        this->_json_config["is_vlm"] = false;
+        this->_json_config["is_audio"] = false;
 
         JSON_GET(this->flm_version, this->_json_config, "flm_version", "0.0.0", std::string);
-        
-        this->vision_model_weight = this->model_path + "/" + this->vision_model_weight;
     }
     std::string _str(){
-        std::stringstream ss;
-        ss << "  Model: "  << std::endl;
-        ss << "    model_name:             " << this->model_name << std::endl;
-        ss << "    compatible_flm_version: >= " << this->flm_version << std::endl;
-        ss << "    head_dim:               " << this->head_dim << std::endl;
-        ss << "    hidden_size:            " << this->hidden_size << std::endl;
-        if (this->hidden_act != ""){
-            ss << "    hidden_act:             " << this->hidden_act << std::endl;
-        }
-        ss << "    intermediate_size:      " << this->intermediate_size << std::endl;
-        ss << "    num_attention_heads:    " << this->num_attention_heads << std::endl;
-        ss << "    num_hidden_layers:      " << this->num_hidden_layers << std::endl;
-        ss << "    num_key_value_heads:    " << this->num_key_value_heads << std::endl;
-        ss << "    pretraining_tp:         " << this->pretraining_tp << std::endl;
-        ss << "    rms_norm_eps:           " << this->rms_norm_eps << std::endl;
-        if (this->sliding_window > 0){
-            ss << "    sliding_window:         " << this->sliding_window << std::endl;
-            ss << "    sliding_window_pattern: " << this->sliding_window_pattern << std::endl;
-        }
-        return ss.str();
+        return this->_str_from(this->_json_config);
     }
     Whisper_Config(){}
 };

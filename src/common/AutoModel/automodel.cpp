@@ -483,7 +483,7 @@ void AutoModel::set_sampler(sampler_config& sampler_config) {
     if (this->sampler != nullptr) {
         this->sampler.reset();
     }
-    this->sampler = std::make_unique<Sampler>(this->lm_config->vocab_size, sampler_config);
+    this->sampler = std::make_unique<Sampler>(this->lm_config->get("vocab_size"), sampler_config);
 }
 
 /// \brief Set the max length
@@ -575,9 +575,9 @@ void AutoModel::set_topk(int topk) {
         header_print("WARNING", "Top-k must be greater than 0");
         return;
     }
-    if (topk > this->lm_config->vocab_size) {
-        header_print("WARNING", "Top-k is greater than vocab size, set to vocab size: " << this->lm_config->vocab_size);
-        topk = this->lm_config->vocab_size;
+    if (topk > this->lm_config->get("vocab_size")) {
+        header_print("WARNING", "Top-k is greater than vocab size, set to vocab size: " << this->lm_config->get("vocab_size"));
+        topk = this->lm_config->get("vocab_size");
     }
     
     this->sampler->top_k = topk;

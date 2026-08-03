@@ -178,45 +178,45 @@ public:
 
     inline void load_vision_preprocess_parameters(LM_Config& config){
         // Note: this should be called by Impl:: constructor
-        GEMMA4E_VISION_MAX_POSITION_EMBEDDINGS = config._vision_config.value("GEMMA4E_VISION_MAX_POSITION_EMBEDDINGS", -1);
-        GEMMA4E_VISION_NUM_HIDDEN_LAYERS   = config._vision_config.value("GEMMA4E_VISION_NUM_HIDDEN_LAYERS", -1);
-        GEMMA4E_VISION_NUM_ATTENTION_HEADS = config._vision_config.value("GEMMA4E_VISION_NUM_ATTENTION_HEADS", -1);
-        GEMMA4E_VISION_HIDDEN_SIZE         = config._vision_config.value("GEMMA4E_VISION_HIDDEN_SIZE", -1);
-        GEMMA4E_VISION_INTERMEDIATE_SIZE   = config._vision_config.value("GEMMA4E_VISION_INTERMEDIATE_SIZE", -1);
-        GEMMA4E_VISION_HEAD_DIM            = config._vision_config.value("GEMMA4E_VISION_HEAD_DIM", -1);
-        GEMMA4E_VISION_PATCH_SIZE          = config._vision_config.value("GEMMA4E_VISION_PATCH_SIZE", -1);
-        GEMMA4E_ROPE_THETA                 = config._vision_config.value("GEMMA4E_ROPE_THETA", -1.0f);
-        GEMMA4E_POOLING_KERNEL_SIZE        = config._vision_config.value("GEMMA4E_POOLING_KERNEL_SIZE", -1);
-        GEMMA4E_POSITION_EMBEDDING_SIZE    = config._vision_config.value("GEMMA4E_POSITION_EMBEDDING_SIZE", -1);
-        GEMMA4E_VISION_IMAGE_OUTPUT_SIZE   = config._vision_config.value("GEMMA4E_VISION_IMAGE_OUTPUT_SIZE", -1);
-        GEMMA4E_VISION_RESCALE_FACTOR      = config._vision_config.value("GEMMA4E_VISION_RESCALE_FACTOR", -1.0f);
-        GEMMA4E_VISION_IMAGE_MEAN          = config._vision_config.value("GEMMA4E_VISION_IMAGE_MEAN", -1.0f);
-        GEMMA4E_VISION_IMAGE_STD           = config._vision_config.value("GEMMA4E_VISION_IMAGE_STD", -1.0f);
+        GEMMA4E_VISION_MAX_POSITION_EMBEDDINGS = config.sub("vision_config").value("GEMMA4E_VISION_MAX_POSITION_EMBEDDINGS", -1);
+        GEMMA4E_VISION_NUM_HIDDEN_LAYERS   = config.sub("vision_config").value("GEMMA4E_VISION_NUM_HIDDEN_LAYERS", -1);
+        GEMMA4E_VISION_NUM_ATTENTION_HEADS = config.sub("vision_config").value("GEMMA4E_VISION_NUM_ATTENTION_HEADS", -1);
+        GEMMA4E_VISION_HIDDEN_SIZE         = config.sub("vision_config").value("GEMMA4E_VISION_HIDDEN_SIZE", -1);
+        GEMMA4E_VISION_INTERMEDIATE_SIZE   = config.sub("vision_config").value("GEMMA4E_VISION_INTERMEDIATE_SIZE", -1);
+        GEMMA4E_VISION_HEAD_DIM            = config.sub("vision_config").value("GEMMA4E_VISION_HEAD_DIM", -1);
+        GEMMA4E_VISION_PATCH_SIZE          = config.sub("vision_config").value("GEMMA4E_VISION_PATCH_SIZE", -1);
+        GEMMA4E_ROPE_THETA                 = config.sub("vision_config").value("GEMMA4E_ROPE_THETA", -1.0f);
+        GEMMA4E_POOLING_KERNEL_SIZE        = config.sub("vision_config").value("GEMMA4E_POOLING_KERNEL_SIZE", -1);
+        GEMMA4E_POSITION_EMBEDDING_SIZE    = config.sub("vision_config").value("GEMMA4E_POSITION_EMBEDDING_SIZE", -1);
+        GEMMA4E_VISION_IMAGE_OUTPUT_SIZE   = config.sub("vision_config").value("GEMMA4E_VISION_IMAGE_OUTPUT_SIZE", -1);
+        GEMMA4E_VISION_RESCALE_FACTOR      = config.sub("vision_config").value("GEMMA4E_VISION_RESCALE_FACTOR", -1.0f);
+        GEMMA4E_VISION_IMAGE_MEAN          = config.sub("vision_config").value("GEMMA4E_VISION_IMAGE_MEAN", -1.0f);
+        GEMMA4E_VISION_IMAGE_STD           = config.sub("vision_config").value("GEMMA4E_VISION_IMAGE_STD", -1.0f);
     }
 
     inline void load_audio_preprocess_parameters(LM_Config& config){
-        Audio_MM_TILE_M = config._audio_config.value("Audio_MM_TILE_M", 128);
-        Audio_MM_TILE_K = config._audio_config.value("Audio_MM_TILE_K", 512);
-        Audio_MM_TILE_N = config._audio_config.value("Audio_MM_TILE_N", 64);
-        Gemma4E_Audio_resample_rate = config._audio_config.value("Gemma4E_Audio_audio_resample_rate", -1);
-        Gemma4E_Audio_gradient_clipping = config._audio_config.value("Gemma4E_Audio_gradient_clipping", -1.0f);
-        Gemma4E_Audio_Multimodal_Output_SIZE = config._audio_config.value("Gemma4E_Audio_Multimodal_Output_SIZE", -1);
-        Gemma4E_Audio_language_projection_output_size = config._audio_config.value("Gemma4E_Audio_language_projection_output_size", -1);
-        Gemma4E_Audio_HIDDEN_SIZE = config._audio_config.value("Gemma4E_Audio_HIDDEN_SIZE", -1);
-        Gemma4E_Audio_INTERMEDIATE_SIZE = config._audio_config.value("Gemma4E_Audio_INTERMEDIATE_SIZE", -1);
-        Gemma4E_Audio_attention_chunk_size = config._audio_config.value("Gemma4E_Audio_attention_chunk_size", -1);
-        Gemma4E_Audio_attention_context_left = config._audio_config.value("Gemma4E_Audio_attention_context_left", -1);
-        Gemma4E_Audio_attention_context_right = config._audio_config.value("Gemma4E_Audio_attention_context_right", -1);
-        Gemma4E_Audio_num_attention_heads = config._audio_config.value("Gemma4E_Audio_num_attention_heads", -1);
-        Gemma4E_Audio_num_attention_layers = config._audio_config.value("Gemma4E_Audio_num_attention_layers", -1);
-        Gemma4E_Audio_conv1d_kernel_size = config._audio_config.value("Gemma4E_Audio_conv1d_kernel_size", -1);
-        Gemma4E_Audio_conv1d_stride = config._audio_config.value("Gemma4E_Audio_conv1d_stride", -1);
-        Gemma4E_Audio_conv2d_kernel_size = config._audio_config.value("Gemma4E_conv2d_kernel_size", -1);
-        Gemma4E_Audio_conv2d_Stride = config._audio_config.value("Gemma4E_conv2d_Stride", -1);
-        Gemma4e_Audio_conv2d_Padding = config._audio_config.value("Gemma4e_conv2d_Padding", -1);
-        Gemma4E_Audio_subsampling_conv_channels_0 = config._audio_config.value("Gemma4E_Audio_subsampling_conv_channels_0", -1);
-        Gemma4E_Audio_subsampling_conv_channels_1 = config._audio_config.value("Gemma4E_Audio_subsampling_conv_channels_1", -1);
-        Gemma4E_Audio_attention_softcap = config._audio_config.value("Gemma4E_Audio_attention_softcap", -1.0f);
+        Audio_MM_TILE_M = config.sub("audio_config").value("Audio_MM_TILE_M", 128);
+        Audio_MM_TILE_K = config.sub("audio_config").value("Audio_MM_TILE_K", 512);
+        Audio_MM_TILE_N = config.sub("audio_config").value("Audio_MM_TILE_N", 64);
+        Gemma4E_Audio_resample_rate = config.sub("audio_config").value("Gemma4E_Audio_audio_resample_rate", -1);
+        Gemma4E_Audio_gradient_clipping = config.sub("audio_config").value("Gemma4E_Audio_gradient_clipping", -1.0f);
+        Gemma4E_Audio_Multimodal_Output_SIZE = config.sub("audio_config").value("Gemma4E_Audio_Multimodal_Output_SIZE", -1);
+        Gemma4E_Audio_language_projection_output_size = config.sub("audio_config").value("Gemma4E_Audio_language_projection_output_size", -1);
+        Gemma4E_Audio_HIDDEN_SIZE = config.sub("audio_config").value("Gemma4E_Audio_HIDDEN_SIZE", -1);
+        Gemma4E_Audio_INTERMEDIATE_SIZE = config.sub("audio_config").value("Gemma4E_Audio_INTERMEDIATE_SIZE", -1);
+        Gemma4E_Audio_attention_chunk_size = config.sub("audio_config").value("Gemma4E_Audio_attention_chunk_size", -1);
+        Gemma4E_Audio_attention_context_left = config.sub("audio_config").value("Gemma4E_Audio_attention_context_left", -1);
+        Gemma4E_Audio_attention_context_right = config.sub("audio_config").value("Gemma4E_Audio_attention_context_right", -1);
+        Gemma4E_Audio_num_attention_heads = config.sub("audio_config").value("Gemma4E_Audio_num_attention_heads", -1);
+        Gemma4E_Audio_num_attention_layers = config.sub("audio_config").value("Gemma4E_Audio_num_attention_layers", -1);
+        Gemma4E_Audio_conv1d_kernel_size = config.sub("audio_config").value("Gemma4E_Audio_conv1d_kernel_size", -1);
+        Gemma4E_Audio_conv1d_stride = config.sub("audio_config").value("Gemma4E_Audio_conv1d_stride", -1);
+        Gemma4E_Audio_conv2d_kernel_size = config.sub("audio_config").value("Gemma4E_conv2d_kernel_size", -1);
+        Gemma4E_Audio_conv2d_Stride = config.sub("audio_config").value("Gemma4E_conv2d_Stride", -1);
+        Gemma4e_Audio_conv2d_Padding = config.sub("audio_config").value("Gemma4e_conv2d_Padding", -1);
+        Gemma4E_Audio_subsampling_conv_channels_0 = config.sub("audio_config").value("Gemma4E_Audio_subsampling_conv_channels_0", -1);
+        Gemma4E_Audio_subsampling_conv_channels_1 = config.sub("audio_config").value("Gemma4E_Audio_subsampling_conv_channels_1", -1);
+        Gemma4E_Audio_attention_softcap = config.sub("audio_config").value("Gemma4E_Audio_attention_softcap", -1.0f);
     }
 
 private:

@@ -1,0 +1,36 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(g++ -std=c++20 -fsyntax-only -DUSEAVX2=1 -D__WINDOWS__ -DDISABLE_ABI_CHECK=1 -DDEV_BUILD -I include test/qwen3_5_omni_npu/test.cpp)",
+      "Read(//scratch/alfxu/FastFlowLM_IRON/FLM_DLL/**)",
+      "Read(//scratch/alfxu/FastFlowLM_IRON/**)",
+      "Bash(nm -DC /scratch/alfxu/FastFlowLM/src/lib/libqwen3_5_omni_npu.so)",
+      "Bash(cd /scratch/alfxu/FastFlowLM_IRON/FLM_DLL; echo \"=== qwen3_5_omni_npu.cpp \\(public wrapper\\) ===\"; wc -l detail/qwen3_5_omni/qwen3_5_omni_npu.cpp; echo; grep -n \"prefill\\\\|payload\\\\|image_soft\\\\|soft_token\\\\|forward\\\\|say\\\\|image_payload\\\\|audio_payload\\\\|num_soft\\\\|image_token\\\\|248\\\\|preprocess\" detail/qwen3_5_omni/qwen3_5_omni_npu.cpp | head -60)",
+      "Read(//scratch/alfxu/FastFlowLM_IRON/FLM_DLL/detail/qwen3_5_omni/**)",
+      "Bash(cd /scratch/alfxu/FastFlowLM_IRON/FLM_DLL; echo \"=== thinker hpp ===\"; sed -n '1,80p' detail/qwen3_5_omni/qwen3_5_omni_thinker/qwen3_5_omni_thinker.hpp 2>/dev/null; echo \"=== grep patch constants in omni thinker/image embed ===\"; grep -rn \"PATCH_SIZE\\\\|MERGE_SIZE\\\\|SHORTEST_EDGE\\\\|LONGEST_EDGE\\\\|TEMPORAL\\\\|RESCALE\\\\|IMAGE_MEAN\\\\|IMAGE_STD\\\\|soft_token\\\\|image_soft\\\\|248\" detail/qwen3_5_omni/ include/models/qwen3_5_omni/ 2>/dev/null | grep -iv \"//\" | head -40)",
+      "Bash(cd /scratch/alfxu/FastFlowLM_IRON/FLM_DLL; echo \"=== image embed hpp ===\"; cat detail/qwen3_5_omni/qwen3_5_omni_thinker/qwen3_5_omni_image_embed/qwen3_5_omni_image_embed.hpp 2>/dev/null | head -80; echo \"=== vision_config in LM_Config / omni ===\"; grep -rn \"vision_config\\\\|_vision_config\\\\|PATCH_SIZE\\\\|patch_size\\\\|merge_size\\\\|temporal\\\\|shortest\\\\|longest\\\\|image_mean\\\\|image_std\\\\|rescale\" detail/qwen3_5_omni/ 2>/dev/null | head -40)",
+      "Bash(cd /scratch/alfxu/FastFlowLM; echo \"=== LM_Config public members ===\"; grep -n \"_json_config\\\\|_vision_config\\\\|from_pretrained\\\\|vocab_size\\\\|struct\\\\|class LM_Config\\\\|public\\\\|nlohmann\" src/include/lm_config.hpp | head -40; echo \"=== omni model config.json vision/image processor ===\"; find /scratch/alfxu -maxdepth 4 -name \"config.json\" -path \"*mni*\" 2>/dev/null | head; find /scratch/alfxu -maxdepth 4 -iname \"*omni*\" -type d 2>/dev/null | head)",
+      "Read(//scratch/alfxu/**)",
+      "Bash(python3 -c ' *)",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(json.dumps\\({k:d[k] for k in d if k in ['image_mean','image_std','rescale_factor','patch_size','temporal_patch_size','merge_size','min_pixels','max_pixels','size','shortest_edge','longest_edge']},indent=1\\)\\)\")",
+      "Read(//scratch/alfxu/FastFlowLM_IRON/FLM_DLL/detail/qwen3_5_omni/qwen3_5_omni_talker/**)",
+      "Bash(cat /scratch/alfxu/models/Qwen3.5-omni-NPU2/config.json 2>/dev/null | grep -iE \"audio|vision|image|token_id\" | head -50)",
+      "Read(//scratch/alfxu/models/Qwen3.5-omni-NPU2/**)",
+      "Bash(grep -rniE \"write_wav|write.wav|\\\\.wav|save.*wav|pcm\" /scratch/alfxu/FastFlowLM/src /scratch/alfxu/FastFlowLM_IRON 2>/dev/null | grep -viE \"\\\\.o:|Binary\" | head -40)",
+      "Bash(grep -n \"audio_end_token_id\\\\|audio_start_token_id\\\\|audio_token_id\\\\|codec_bos\\\\|codec_eos\\\\|tts\" /scratch/alfxu/models/Qwen3.5-omni-NPU2/config.json)",
+      "Bash(grep -nE \"\\\\\"thinker_config\\\\\"|\\\\\"talker_config\\\\\"|\\\\\"text_config\\\\\"|\\\\\"vision_config\\\\\"|\\\\\"audio_config\\\\\"|audio_end_token_id|audio_start_token_id|audio_token_id\" /scratch/alfxu/models/Qwen3.5-omni-NPU2/config.json | head -40)",
+      "Bash(cd /scratch/alfxu/FastFlowLM/src; echo \"=== audio_reader.hpp API ===\"; grep -n \"load_audio\\\\|audio_data_t\\\\|MonoDownmix\\\\|sample_rate\\\\|num_frames\\\\|num_samples\\\\|struct\\\\|class AudioReader\" include/audio/audio_reader.hpp | head -30; echo \"=== omni engine resample rate / audio config ===\"; grep -rn \"resample\\\\|sample_rate\\\\|16000\\\\|Audio_resample\" /scratch/alfxu/FastFlowLM_IRON/FLM_DLL/detail/qwen3_5_omni/qwen3_5_omni_thinker/qwen3_5_omni_audio_embed/*.cpp 2>/dev/null | head)",
+      "Read(//scratch/alfxu/FastFlowLM_IRON/FLM_DLL/detail/qwen3_5_omni/qwen3_5_omni_thinker/qwen3_5_omni_audio_embed/**)",
+      "Bash(cd /scratch/alfxu/FastFlowLM_IRON/FLM_DLL/detail/qwen3_5_omni/qwen3_5_omni_thinker/qwen3_5_omni_audio_embed; ls; echo \"=== audio embed hpp ===\"; cat *.hpp 2>/dev/null | head -60)",
+      "Bash(grep -rn \"say\\\\|talker\\\\|codec\\\\|thinker_res\" /scratch/alfxu/FastFlowLM/src/include/models/qwen3_5_omni/qwen3_5_omni.hpp; echo \"===say impl===\"; grep -rn \"::say\\\\|buffer<bf16> say\\\\|say\\(\" /scratch/alfxu/FastFlowLM/src /scratch/alfxu/FastFlowLM_IRON 2>/dev/null | grep -v \"\\\\.o:\" | head)",
+      "Bash(make clean *)",
+      "Bash(cd /scratch/alfxu/FastFlowLM/src; grep -rn \"model.q4nx\\\\|\\\\.q4nx\\\\|safetensors\" common/tensor_utils/*.cpp 2>/dev/null | head; echo \"=== how other models' model dirs look \\(do they have model.q4nx?\\) ===\"; ls /scratch/alfxu/models/Qwen3.5-4B-NPU2/ 2>/dev/null | head)",
+      "Read(//scratch/alfxu/models/Qwen3.5-4B-NPU2/**)",
+      "Bash(g++ -std=c++20 -fsyntax-only -I include -I . common/qwen3_5_omni/modeling_qwen3_5_omni.cpp)",
+      "Bash(g++ -std=c++20 -fsyntax-only -I include -I . test/qwen3_5_omni_npu/test.cpp)",
+      "Bash(g++ -std=c++20 -fsyntax-only -I include -I . common/AutoModel/automodel.cpp)",
+      "Bash(g++ -std=c++20 -fsyntax-only -D__FLM_VERSION__='\"test\"' -I include -I . test/qwen3_5_omni_npu/test.cpp)",
+      "Bash(g++ -std=c++20 -fsyntax-only -I include -I . common/AutoModel/modeling_qwen3_5_omni.cpp)"
+    ]
+  }
+}

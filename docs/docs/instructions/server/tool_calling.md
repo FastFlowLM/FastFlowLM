@@ -69,6 +69,42 @@ Tool calling has been supported since `v0.9.26`.
 
 Please refer to the [model card](https://fastflowlm.com/docs/models/) to see whether tool calling is supported for each model.
 
+## OpenAI tool-selection behavior
+
+The `/v1/chat/completions` endpoint accepts the OpenAI `tool_choice` values
+`none`, `auto`, and `required`. It also accepts a named function choice:
+
+```json
+{
+  "tool_choice": {
+    "type": "function",
+    "function": { "name": "get_temperature" }
+  }
+}
+```
+
+`parallel_tool_calls` is a boolean. When it is `false`, a response containing
+more than one function call is rejected. A named choice must refer to a function
+in the request's `tools` array. `required` and named choices must produce at
+least one function call; FastFlowLM returns a model error instead of silently
+returning a successful text response when the model violates that contract.
+The Chat Completions `allowed_tools` form is also supported for limiting the
+request to a named subset of its function tools in `auto` or `required` mode.
+Hosted and custom tool types are not supported by FastFlowLM model templates.
+
+Tool-call responses are checked before they are returned. Each call must name an
+available function, and `function.arguments` must be a string containing a JSON
+object. Requests with tools are therefore buffered before an OpenAI-compatible
+stream is emitted. This keeps streaming response shapes compatible but makes
+time to first token approximately equal to the complete tool-call generation
+time.
+
+Function definitions with `strict: true` currently return an explicit request
+error. FastFlowLM does not yet have constrained JSON-schema decoding, so
+claiming strict schema adherence would be incorrect. Applications must continue
+to validate argument values against their function schema before executing a
+tool.
+
 ## 🐍 How to use tool calling with FLM via Python script
 
 This section walks through an end‑to‑end tool‑calling flow in both streaming and non‑streaming modes. 

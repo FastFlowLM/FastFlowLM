@@ -7,6 +7,7 @@
  *  \version 0.9.24
  */
 #include "rest_handler.hpp"
+#include "openai_tool_policy.hpp"
 #include "wstream_buf.hpp"
 #include "streaming_ostream.hpp"
 #include "streaming_ostream_openai.hpp"
@@ -567,6 +568,42 @@ json RestHandler::build_nstream_response(std::string response_text) {
     });
 }
 
+namespace {
+
+void send_buffered_chat_completion_stream(const json& response,
+                                           const StreamResponseCallback& send_streaming_response) {
+    const auto& choice = response["choices"][0];
+    json content_chunk = {
+        {"id", response["id"]},
+        {"object", "chat.completion.chunk"},
+        {"created", response["created"]},
+        {"model", response["model"]},
+        {"choices", json::array({{
+            {"index", 0},
+            {"delta", choice["message"]},
+            {"finish_reason", nullptr},
+        }})},
+    };
+    send_streaming_response(json("data: " + content_chunk.dump() + "\n\n"), false);
+
+    json final_chunk = {
+        {"id", response["id"]},
+        {"object", "chat.completion.chunk"},
+        {"created", response["created"]},
+        {"model", response["model"]},
+        {"choices", json::array({{
+            {"index", 0},
+            {"delta", json::object()},
+            {"finish_reason", choice["finish_reason"]},
+        }})},
+        {"usage", response["usage"]},
+    };
+    send_streaming_response(json("data: " + final_chunk.dump() + "\n\n"), false);
+    send_streaming_response(json("data: [DONE]\n\n"), true);
+}
+
+} // namespace
+
 ///@brief Handle the show request
 ///@param request the request
 ///@param send_response the send response
@@ -1070,7 +1107,8 @@ void RestHandler::handle_openai_chat_completion(const json& request,
         std::string model = request.value("model", current_model_tag);
         bool stream = request.value("stream", false);
         int length_limit = request.value("max_tokens", request.value("max_completion_tokens", 4096));
-        json tools = request.value("tools", json::array());
+        const auto tool_policy = openai_tools::parse_tool_policy(request);
+        json tools = tool_policy.tools;
         json options = request.value("options", json::object());
 
         auto load_start_time = time_utils::now();
@@ -1083,6 +1121,7 @@ void RestHandler::handle_openai_chat_completion(const json& request,
 
         configure_chat_engine_parameters(options, request);
 
+        current_messages = openai_tools::apply_policy_prompt(current_messages, tool_policy);
         current_messages = normalize_messages(current_messages);
         current_messages = normalize_template(current_messages);
 
@@ -1123,7 +1162,7 @@ void RestHandler::handle_openai_chat_completion(const json& request,
         uniformed_input.tools = tools;
         meta_info.load_duration = (uint64_t)time_utils::duration_ns(load_start_time, load_end_time).first;
         meta_info.max_prefill_len = this->prefill_chunk_len;
-        if (stream){
+        if (stream && !tool_policy.requires_buffered_validation()){
             // Create a wrapper callback that passes the pre-formatted SSE string directly
             cancellation_token->reset();
             auto_chat_engine->reset_parser();
@@ -1229,6 +1268,7 @@ void RestHandler::handle_openai_chat_completion(const json& request,
             }
             // check response_text
             json choices = build_nstream_response(response_text);
+            openai_tools::validate_tool_calls(choices, tool_policy);
             response = {
                 {"id", "fastflowlm-chat-completion"},
                 {"object", "chat.completion"},
@@ -1252,9 +1292,16 @@ void RestHandler::handle_openai_chat_completion(const json& request,
                 header_print("❌ ", "Generation Cancelled!");
                 this->prompt_cache.reset();
             }
-            send_response(response);
+            if (stream) {
+                send_buffered_chat_completion_stream(response, send_streaming_response);
+            }
+            else {
+                send_response(response);
+            }
         }
 
+    } catch (const openai_tools::ToolPolicyError& e) {
+        send_response(openai_tools::error_response(e));
     } catch (const std::exception& e) {
         json error_response = {
             {"error", {

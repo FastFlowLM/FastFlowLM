@@ -571,34 +571,11 @@ json RestHandler::build_nstream_response(std::string response_text) {
 namespace {
 
 void send_buffered_chat_completion_stream(const json& response,
+                                           const openai_tools::StreamOptions& stream_options,
                                            const StreamResponseCallback& send_streaming_response) {
-    const auto& choice = response["choices"][0];
-    json content_chunk = {
-        {"id", response["id"]},
-        {"object", "chat.completion.chunk"},
-        {"created", response["created"]},
-        {"model", response["model"]},
-        {"choices", json::array({{
-            {"index", 0},
-            {"delta", choice["message"]},
-            {"finish_reason", nullptr},
-        }})},
-    };
-    send_streaming_response(json("data: " + content_chunk.dump() + "\n\n"), false);
-
-    json final_chunk = {
-        {"id", response["id"]},
-        {"object", "chat.completion.chunk"},
-        {"created", response["created"]},
-        {"model", response["model"]},
-        {"choices", json::array({{
-            {"index", 0},
-            {"delta", json::object()},
-            {"finish_reason", choice["finish_reason"]},
-        }})},
-        {"usage", response["usage"]},
-    };
-    send_streaming_response(json("data: " + final_chunk.dump() + "\n\n"), false);
+    for (const auto& chunk : openai_tools::build_buffered_stream_chunks(response, stream_options)) {
+        send_streaming_response(json("data: " + chunk.dump() + "\n\n"), false);
+    }
     send_streaming_response(json("data: [DONE]\n\n"), true);
 }
 
@@ -1108,6 +1085,7 @@ void RestHandler::handle_openai_chat_completion(const json& request,
         bool stream = request.value("stream", false);
         int length_limit = request.value("max_tokens", request.value("max_completion_tokens", 4096));
         const auto tool_policy = openai_tools::parse_tool_policy(request);
+        const auto stream_options = openai_tools::parse_stream_options(request);
         json tools = tool_policy.tools;
         json options = request.value("options", json::object());
 
@@ -1293,7 +1271,7 @@ void RestHandler::handle_openai_chat_completion(const json& request,
                 this->prompt_cache.reset();
             }
             if (stream) {
-                send_buffered_chat_completion_stream(response, send_streaming_response);
+                send_buffered_chat_completion_stream(response, stream_options, send_streaming_response);
             }
             else {
                 send_response(response);
@@ -1301,6 +1279,13 @@ void RestHandler::handle_openai_chat_completion(const json& request,
         }
 
     } catch (const openai_tools::ToolPolicyError& e) {
+        if (e.type == "model_error") {
+            if (this->auto_chat_engine != nullptr) {
+                this->auto_chat_engine->reset_parser();
+                this->auto_chat_engine->clear_context();
+            }
+            this->prompt_cache.reset();
+        }
         send_response(openai_tools::error_response(e));
     } catch (const std::exception& e) {
         json error_response = {

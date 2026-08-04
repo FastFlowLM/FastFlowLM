@@ -14,6 +14,9 @@ override_dh_auto_configure:
 override_dh_auto_build:
 	cmake --build build
 
+override_dh_auto_test:
+	ctest --test-dir build --output-on-failure
+
 override_dh_auto_install:
 	DESTDIR=$(CURDIR)/debian/fastflowlm cmake --install build --prefix=/opt/fastflowlm
 	rmdir --ignore-fail-on-non-empty debian/fastflowlm/opt/fastflowlm/bin

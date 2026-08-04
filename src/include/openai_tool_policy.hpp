@@ -5,6 +5,7 @@
 #include <string>
 #include <unordered_set>
 #include <utility>
+#include <vector>
 
 #include <nlohmann/json.hpp>
 
@@ -44,12 +45,82 @@ struct ToolPolicy {
     }
 };
 
+struct StreamOptions {
+    bool include_usage = false;
+};
+
 inline ToolPolicyError invalid_request(const std::string& message, const std::string& param) {
     return ToolPolicyError(message, "invalid_request_error", param, 400);
 }
 
 inline ToolPolicyError model_contract_error(const std::string& message) {
     return ToolPolicyError(message, "model_error", "tool_choice", 500);
+}
+
+inline StreamOptions parse_stream_options(const json& request) {
+    StreamOptions options;
+    if (!request.contains("stream_options")) {
+        return options;
+    }
+    if (!request["stream_options"].is_object()) {
+        throw invalid_request("stream_options must be an object", "stream_options");
+    }
+
+    const auto& stream_options = request["stream_options"];
+    if (stream_options.contains("include_usage")) {
+        if (!stream_options["include_usage"].is_boolean()) {
+            throw invalid_request(
+                "stream_options.include_usage must be a boolean",
+                "stream_options.include_usage");
+        }
+        options.include_usage = stream_options["include_usage"].get<bool>();
+    }
+    return options;
+}
+
+inline std::vector<json> build_buffered_stream_chunks(
+    const json& response,
+    const StreamOptions& options) {
+    const auto& choice = response["choices"][0];
+    json content_chunk = {
+        {"id", response["id"]},
+        {"object", "chat.completion.chunk"},
+        {"created", response["created"]},
+        {"model", response["model"]},
+        {"choices", json::array({{
+            {"index", 0},
+            {"delta", choice["message"]},
+            {"finish_reason", nullptr},
+        }})},
+    };
+
+    json finish_chunk = {
+        {"id", response["id"]},
+        {"object", "chat.completion.chunk"},
+        {"created", response["created"]},
+        {"model", response["model"]},
+        {"choices", json::array({{
+            {"index", 0},
+            {"delta", json::object()},
+            {"finish_reason", choice["finish_reason"]},
+        }})},
+    };
+
+    if (!options.include_usage) {
+        return {std::move(content_chunk), std::move(finish_chunk)};
+    }
+
+    content_chunk["usage"] = nullptr;
+    finish_chunk["usage"] = nullptr;
+    json usage_chunk = {
+        {"id", response["id"]},
+        {"object", "chat.completion.chunk"},
+        {"created", response["created"]},
+        {"model", response["model"]},
+        {"choices", json::array()},
+        {"usage", response["usage"]},
+    };
+    return {std::move(content_chunk), std::move(finish_chunk), std::move(usage_chunk)};
 }
 
 inline bool valid_function_name(const std::string& name) {
@@ -71,6 +142,18 @@ inline std::string function_name(const json& tool, std::size_t index) {
         throw invalid_request(
             param + ".function.name must contain at most 64 letters, digits, underscores, or hyphens",
             param + ".function.name");
+    }
+    if (tool["function"].contains("description") &&
+        !tool["function"]["description"].is_string()) {
+        throw invalid_request(
+            param + ".function.description must be a string",
+            param + ".function.description");
+    }
+    if (tool["function"].contains("parameters") &&
+        !tool["function"]["parameters"].is_object()) {
+        throw invalid_request(
+            param + ".function.parameters must be a JSON Schema object",
+            param + ".function.parameters");
     }
     if (tool["function"].contains("strict") && !tool["function"]["strict"].is_boolean()) {
         throw invalid_request(param + ".function.strict must be a boolean", param + ".function.strict");
@@ -244,8 +327,11 @@ inline void validate_tool_calls(const json& choices, const ToolPolicy& policy) {
     if (policy.mode == ToolChoiceMode::none && has_calls) {
         throw model_contract_error("model emitted a tool call while tool_choice was 'none'");
     }
-    if ((policy.mode == ToolChoiceMode::required || policy.mode == ToolChoiceMode::named) && !has_calls) {
+    if (policy.mode == ToolChoiceMode::required && !has_calls) {
         throw model_contract_error("model did not emit a tool call required by tool_choice");
+    }
+    if (policy.mode == ToolChoiceMode::named && call_count != 1) {
+        throw model_contract_error("model did not emit exactly one call to the function required by tool_choice");
     }
     if (!policy.parallel_tool_calls && call_count > 1) {
         throw model_contract_error("model emitted parallel tool calls while parallel_tool_calls was false");

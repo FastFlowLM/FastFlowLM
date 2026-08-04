@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.22)
 project(flm LANGUAGES CXX VERSION 0.1.0)
 
+include(CTest)
+
 if(NOT DEFINED FLM_VERSION)
     message(FATAL_ERROR "FLM_VERSION must be specified externally. Use -DFLM_VERSION=<version> when running cmake.")
 endif()
@@ -808,4 +810,8 @@ if(NOT WIN32 AND NOT FLM_PORTABLE_BUILD AND NOT CMAKE_INSTALL_PREFIX STREQUAL "/
             \"${CMAKE_INSTALL_PREFIX}/bin/flm\"
             \"$ENV{DESTDIR}/usr/local/bin/flm\")"
     )
+endif()
+
+if(BUILD_TESTING)
+    add_subdirectory(test/openai_tool_policy)
 endif()

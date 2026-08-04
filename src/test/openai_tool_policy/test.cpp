@@ -25,6 +25,12 @@ json tools() {
     });
 }
 
+json minimal_tool() {
+    return json::array({
+        {{"type", "function"}, {"function", {{"name", "ping"}}}},
+    });
+}
+
 json choices_with_calls(std::initializer_list<std::string> names) {
     json calls = json::array();
     for (const auto& name : names) {
@@ -45,6 +51,21 @@ json choices_with_text() {
         {"message", {{"role", "assistant"}, {"content", "done"}}},
         {"finish_reason", "stop"},
     }});
+}
+
+json buffered_response() {
+    return {
+        {"id", "chatcmpl-test"},
+        {"object", "chat.completion"},
+        {"created", 123},
+        {"model", "test-model"},
+        {"choices", choices_with_calls({"read_file"})},
+        {"usage", {
+            {"prompt_tokens", 10},
+            {"completion_tokens", 5},
+            {"total_tokens", 15},
+        }},
+    };
 }
 
 void require(bool condition) {
@@ -92,6 +113,9 @@ int main() {
     require(named.tools[0]["function"]["name"] == "write_file");
     openai_tools::validate_tool_calls(choices_with_calls({"write_file"}), named);
     expect_error([&] { openai_tools::validate_tool_calls(choices_with_calls({"read_file"}), named); }, 500);
+    expect_error([&] {
+        openai_tools::validate_tool_calls(choices_with_calls({"write_file", "write_file"}), named);
+    }, 500);
 
     const json allowed_choice = {
         {"type", "allowed_tools"},
@@ -149,6 +173,63 @@ int main() {
     auto strict_tools = tools();
     strict_tools[0]["function"]["strict"] = true;
     expect_error([&] { openai_tools::parse_tool_policy({{"tools", strict_tools}}); }, 400);
+
+    auto invalid_description = tools();
+    invalid_description[0]["function"]["description"] = json::array();
+    expect_error([&] {
+        openai_tools::parse_tool_policy({{"tools", invalid_description}});
+    }, 400);
+
+    auto invalid_parameters = tools();
+    invalid_parameters[0]["function"]["parameters"] = "not a schema";
+    expect_error([&] {
+        openai_tools::parse_tool_policy({{"tools", invalid_parameters}});
+    }, 400);
+
+    auto invalid_strict = tools();
+    invalid_strict[0]["function"]["strict"] = "false";
+    expect_error([&] {
+        openai_tools::parse_tool_policy({{"tools", invalid_strict}});
+    }, 400);
+
+    const auto minimal = openai_tools::parse_tool_policy({{"tools", minimal_tool()}});
+    require(minimal.tools.size() == 1);
+
+    auto unicode_description = minimal_tool();
+    unicode_description[0]["function"]["description"] = "Meteo pour Sao Paulo, Tokyo, and \U0001f30d";
+    const auto unicode = openai_tools::parse_tool_policy({{"tools", unicode_description}});
+    require(unicode.tools[0]["function"]["description"] ==
+        unicode_description[0]["function"]["description"]);
+
+    const auto default_stream = openai_tools::parse_stream_options(json::object());
+    require(!default_stream.include_usage);
+    const auto chunks_without_usage =
+        openai_tools::build_buffered_stream_chunks(buffered_response(), default_stream);
+    require(chunks_without_usage.size() == 2);
+    require(!chunks_without_usage[0].contains("usage"));
+    require(!chunks_without_usage[1].contains("usage"));
+    require(chunks_without_usage[1]["choices"][0]["finish_reason"] == "tool_calls");
+
+    const auto usage_stream = openai_tools::parse_stream_options({
+        {"stream_options", {{"include_usage", true}}},
+    });
+    require(usage_stream.include_usage);
+    const auto chunks_with_usage =
+        openai_tools::build_buffered_stream_chunks(buffered_response(), usage_stream);
+    require(chunks_with_usage.size() == 3);
+    require(chunks_with_usage[0]["usage"].is_null());
+    require(chunks_with_usage[1]["usage"].is_null());
+    require(chunks_with_usage[2]["choices"].empty());
+    require(chunks_with_usage[2]["usage"]["total_tokens"] == 15);
+
+    expect_error([&] {
+        openai_tools::parse_stream_options({{"stream_options", json::array()}});
+    }, 400);
+    expect_error([&] {
+        openai_tools::parse_stream_options({
+            {"stream_options", {{"include_usage", "true"}}},
+        });
+    }, 400);
 
     const auto prompted = openai_tools::apply_policy_prompt(
         json::array({{{"role", "user"}, {"content", "write it"}}}), named);

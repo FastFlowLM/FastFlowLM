@@ -387,9 +387,16 @@ bool RestHandler::ensure_model_loaded(const std::string& model_tag) {
         std::pair<std::string, std::unique_ptr<AutoModel>> auto_model = get_auto_model(ensure_tag, this->supported_models, &this->npu_device_inst);
         auto_chat_engine = std::move(auto_model.second);
         ensure_tag = auto_model.first;
-        if (!downloader.is_model_downloaded(ensure_tag)) {
-            downloader.pull_model(ensure_tag, this->modelscope);
-        }
+        switch (downloader.is_model_downloaded(ensure_tag)) {
+            case ModelDownloader::ModelStatus::Ready:
+                break;
+            case ModelDownloader::ModelStatus::Outdated:
+            case ModelDownloader::ModelStatus::Missing:
+                downloader.pull_model(ensure_tag, this->modelscope);
+                break;
+            case ModelDownloader::ModelStatus::Incompatible:
+                return false;
+            }
         auto [new_ensure_tag, model_info] = supported_models.get_model_info(ensure_tag);
         auto_chat_engine->configure_parameter("img_pre_resize", this->img_pre_resize);
         try {
@@ -417,8 +424,17 @@ bool RestHandler::ensure_model_loaded(const std::string& model_tag) {
 void RestHandler::ensure_asr_model_loaded(const std::string& model_tag) {
 #ifndef FASTFLOWLM_LINUX_LIMITED_MODELS
     std::string ensure_tag = model_tag;
-    if (!downloader.is_model_downloaded(ensure_tag)) {
-        downloader.pull_model(ensure_tag, modelscope);
+    switch (downloader.is_model_downloaded(ensure_tag)) {
+        case ModelDownloader::ModelStatus::Ready:
+            break;
+        case ModelDownloader::ModelStatus::Outdated:
+        case ModelDownloader::ModelStatus::Missing:
+            downloader.pull_model(ensure_tag, modelscope);
+            break;
+        case ModelDownloader::ModelStatus::Incompatible:
+            header_print("ERROR", "Whisper is incompatible with this version of FastFlowLM, skipping... ");
+            this->asr = false;
+            return;
     }
     this->whisper_engine = std::make_unique<Whisper>(&this->npu_device_inst);
     auto [new_ensure_tag, whisper_model_info] = this->supported_models.get_model_info(ensure_tag);
@@ -440,8 +456,17 @@ void RestHandler::ensure_asr_model_loaded(const std::string& model_tag) {
 void RestHandler::ensure_embed_model_loaded(const std::string& model_tag) {
 #ifndef FASTFLOWLM_LINUX_LIMITED_MODELS
     std::string ensure_tag = model_tag;
-    if (!this->downloader.is_model_downloaded(ensure_tag)) {
-        this->downloader.pull_model(ensure_tag, this->modelscope);
+    switch (this->downloader.is_model_downloaded(ensure_tag)) {
+        case ModelDownloader::ModelStatus::Ready:
+            break;
+        case ModelDownloader::ModelStatus::Outdated:
+        case ModelDownloader::ModelStatus::Missing:
+            this->downloader.pull_model(ensure_tag, this->modelscope);
+            break;
+        case ModelDownloader::ModelStatus::Incompatible:
+            header_print("ERROR", "EmbeddingGemma is incompatible with this version of FastFlowLM, skipping... ");
+            this->embed = false;
+            return;
     }
     auto [embedding_model_tag, auto_embedding_engine] = get_auto_embedding_model(ensure_tag, &this->npu_device_inst);
     this->auto_embedding_engine = std::move(auto_embedding_engine);

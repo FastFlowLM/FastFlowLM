@@ -433,6 +433,7 @@ void RestHandler::ensure_asr_model_loaded(const std::string& model_tag) {
             break;
         case ModelDownloader::ModelStatus::Incompatible:
             header_print("ERROR", "Whisper is incompatible with this version of FastFlowLM, skipping... ");
+            this->asr = false;
             return;
     }
     this->whisper_engine = std::make_unique<Whisper>(&this->npu_device_inst);
@@ -464,6 +465,7 @@ void RestHandler::ensure_embed_model_loaded(const std::string& model_tag) {
             break;
         case ModelDownloader::ModelStatus::Incompatible:
             header_print("ERROR", "EmbeddingGemma is incompatible with this version of FastFlowLM, skipping... ");
+            this->embed = false;
             return;
     }
     auto [embedding_model_tag, auto_embedding_engine] = get_auto_embedding_model(ensure_tag, &this->npu_device_inst);

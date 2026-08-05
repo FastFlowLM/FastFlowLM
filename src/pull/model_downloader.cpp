@@ -27,7 +27,6 @@ ModelDownloader::ModelStatus ModelDownloader::is_model_downloaded(const std::str
     ModelStatus modelstatus = ModelStatus::Missing;
 
     if (!is_config_file_missing) {
-        // header_print("DEBUG", "Are you kidding me?");
         modelstatus = check_model_compatibility(model_tag, sub_process_mode);
 
         if (modelstatus == ModelStatus::Outdated) {
@@ -36,10 +35,11 @@ ModelDownloader::ModelStatus ModelDownloader::is_model_downloaded(const std::str
                 verify_and_clean_files(model_tag, sub_process_mode);
             }
         }
-        else if (modelstatus == ModelStatus::Incompatible) {
+        else if (modelstatus == ModelStatus::Ready && !missing_files.empty()) {
+            // config.json is present and the version check passed, but other
+            // files (e.g. weights) are still missing.
+            modelstatus = ModelStatus::Missing;
         }
-        else if (modelstatus == ModelStatus::Ready) {
-        }        
     }
     return modelstatus;
 }
@@ -63,19 +63,21 @@ ModelDownloader::ModelStatus ModelDownloader::check_model_compatibility(const st
     uint32_t required_version_u32 = l_r * 1000000 + m_r * 1000 + r_r;
     uint32_t flm_version_u32 = l_f * 1000000 + m_f * 1000 + r_f;
 
-    if (!sub_process_mode) {
-        if (local_version_u32 > flm_version_u32) {
+    if (local_version_u32 > flm_version_u32) {
+        if (!sub_process_mode) {
             header_print("WARNING", "Local model " + model_tag + " version: " + flm_version + " > " + __FLM_VERSION__);
             header_print("WARNING", "Please update FLM to the latest version.");
-            return ModelStatus::Incompatible;
         }
-        if (local_version_u32 < required_version_u32) {
+        return ModelStatus::Incompatible;
+    }
+    if (local_version_u32 < required_version_u32) {
+        if (!sub_process_mode) {
             header_print("WARNING", "Local model " + model_tag + " version: " + flm_version + " < " + flm_min_version);
             header_print("FLM", "Re-pulling latest model...");
-            return ModelStatus::Outdated;
         }
+        return ModelStatus::Outdated;
     }
-    return  ModelStatus::Ready;
+    return ModelStatus::Ready;
 }
 /// \brief Pull the model
 /// \param model_tag the model tag

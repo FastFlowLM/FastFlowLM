@@ -16,7 +16,7 @@ private:
     std::string nanbeige_filter(int token);
 
 public:
-    Nanbeige(xrt::device* npu_device_inst);
+    Nanbeige(flm_rt::device* npu_device_inst);
 
     void load_model(std::string model_path, json model_inf, int default_context_length = -1, bool enable_preemption = false) override;
     //void toggle_enable_think() override;

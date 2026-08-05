@@ -1,36 +1,45 @@
 #!/bin/bash
-# Wrapper script for the FLM portable build
-# Sets XILINX_XRT so XRT can find its bundled libraries at $XILINX_XRT/lib/x86_64-linux-gnu/
+# Wrapper for the FLM portable build.
+#
+# The portable tree is self-contained: the real binary (flm-real) and all of its
+# bundled shared libraries (the NPU runtime + the NPU engine .so) live under
+# ./lib next to this script. The engine libs carry an $ORIGIN-relative RUNPATH,
+# so this wrapper mainly makes ./lib discoverable and then execs the real binary.
+#
+# This template is shared by both NPU runtime backends; the active one is
+# substituted in by CMake (see FLM_RUNTIME_NAME): 0 = XRT, 1 = HRX.
+FLM_RUNTIME="@FLM_RUNTIME_NAME@"
 
-# Determine the directory where this script is located
+# Directory containing this script (and the bundled tree).
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# XRT constructs library paths as $XILINX_XRT/lib/x86_64-linux-gnu/<lib>
-# Point XILINX_XRT to the portable root so XRT finds ./lib/x86_64-linux-gnu/
-export XILINX_XRT="$SCRIPT_DIR"
-
-# Add bundled libraries to LD_LIBRARY_PATH for runtime resolution
+# Make the bundled libraries resolvable at runtime.
 export LD_LIBRARY_PATH="$SCRIPT_DIR/lib:$LD_LIBRARY_PATH"
 
-# Ensure the multiarch directory structure exists with symlinks to bundled libs
-MULTIARCH_DIR="$SCRIPT_DIR/lib/x86_64-linux-gnu"
-if [ ! -d "$MULTIARCH_DIR" ]; then
-    mkdir -p "$MULTIARCH_DIR"
-    cd "$SCRIPT_DIR/lib"
-    for lib in libxrt*.so* libxrt++.so*; do
-        if [ -f "$lib" ] || [ -L "$lib" ]; then
-            # Handle symlinks by following them to get the actual target
-            if [ -L "$lib" ]; then
-                target=$(readlink "$lib")
-                ln -sf "../$target" "$MULTIARCH_DIR/$lib" 2>/dev/null
-            else
-                ln -sf "../$lib" "$MULTIARCH_DIR/$lib" 2>/dev/null
+if [ "$FLM_RUNTIME" = "xrt" ]; then
+    # XRT constructs library paths as $XILINX_XRT/lib/x86_64-linux-gnu/<lib>.
+    # Point XILINX_XRT at the portable root so XRT finds ./lib/x86_64-linux-gnu/.
+    export XILINX_XRT="$SCRIPT_DIR"
+
+    # Ensure the multiarch directory structure exists with symlinks to the
+    # bundled XRT libs, so XRT's internal path construction resolves.
+    MULTIARCH_DIR="$SCRIPT_DIR/lib/x86_64-linux-gnu"
+    if [ ! -d "$MULTIARCH_DIR" ]; then
+        mkdir -p "$MULTIARCH_DIR"
+        cd "$SCRIPT_DIR/lib"
+        for lib in libxrt*.so* libxrt++.so*; do
+            if [ -f "$lib" ] || [ -L "$lib" ]; then
+                if [ -L "$lib" ]; then
+                    target=$(readlink "$lib")
+                    ln -sf "../$target" "$MULTIARCH_DIR/$lib" 2>/dev/null
+                else
+                    ln -sf "../$lib" "$MULTIARCH_DIR/$lib" 2>/dev/null
+                fi
             fi
-        fi
-    done
-    cd - > /dev/null
+        done
+        cd - > /dev/null
+    fi
 fi
 
-# Execute the real binary
+# Execute the real binary, forwarding all arguments.
 exec "$SCRIPT_DIR/flm-real" "$@"
-

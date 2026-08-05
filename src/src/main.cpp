@@ -59,10 +59,12 @@ std::atomic<bool> should_exit(false);
 std::mutex exit_mutex;
 std::condition_variable exit_cv;
 
-#ifndef _WIN32
+
+#if !defined(FLM_USE_HRX) && !defined(_WIN32)
 ///@brief Preload critical XRT libraries from the executable directory
 ///@details This ensures that dlopen() calls within libraries find the bundled versions
-///@note Only on Linux/Unix; Windows handles DLL loading differently
+///@note Only on Linux/Unix for the XRT backend; Windows handles DLL loading
+///      differently and the HRX backend has no equivalent preload requirement.
 void preload_bundled_libraries() {
     std::string exe_dir = utils::get_executable_directory();
 
@@ -89,6 +91,7 @@ void preload_bundled_libraries() {
     }
 }
 #endif
+
 
 
 
@@ -463,8 +466,8 @@ int main(int argc, char* argv[]) {
 #ifdef _WIN32
     SetConsoleOutputCP(CP_UTF8);
     SetConsoleCP(CP_UTF8);
-#else
-    // Preload bundled libraries from executable directory
+#elif !defined(FLM_USE_HRX)
+    // XRT backend: preload bundled XRT libraries from the executable directory.
     preload_bundled_libraries();
 #endif
     
@@ -486,7 +489,6 @@ int main(int argc, char* argv[]) {
         std::cerr << e.what() << std::endl;
         return 1;
     }
-
     // Get the models directory from environment variable or default
     std::string models_dir = utils::get_models_directory();
 

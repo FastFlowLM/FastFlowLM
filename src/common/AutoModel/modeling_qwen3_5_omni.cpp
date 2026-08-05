@@ -4,7 +4,7 @@
 
 #include "AutoModel/modeling_qwen3_5_omni.hpp"
 
-Qwen3_5_Omni::Qwen3_5_Omni(xrt::device* npu_device_inst)
+Qwen3_5_Omni::Qwen3_5_Omni(flm_rt::device* npu_device_inst)
     : AutoModel(npu_device_inst) {}
 
 /// \brief Pull the thinker-scope vision config (with VL fallbacks).

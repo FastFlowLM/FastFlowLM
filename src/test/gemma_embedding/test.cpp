@@ -58,7 +58,7 @@ static float reference[] = {
     4.077148e-02,   1.806641e-02,   1.843262e-02,   -2.661133e-02,  7.446289e-03,   3.768921e-03,   5.566406e-02,   -4.687500e-02,  -4.174805e-02,  1.531982e-02,   9.765625e-03,   2.343750e-02,   2.905273e-02,   2.246094e-02,   2.160645e-02,   5.859375e-03
 };
 // Model-specific factory function for Gemma3 Text family only
-inline std::pair<std::string, std::unique_ptr<AutoEmbeddingModel>> get_gemma_embedding_model(const std::string& model_tag, xrt::device* npu_device_inst) {
+inline std::pair<std::string, std::unique_ptr<AutoEmbeddingModel>> get_gemma_embedding_model(const std::string& model_tag, flm_rt::device* npu_device_inst) {
     static std::unordered_set<std::string> gemma_embedding_Tags = {
         "embed-gemma", "embed-gemma:300m"
     };
@@ -101,7 +101,7 @@ int main(int argc, char* argv[]) {
     std::cout << "Model path: " << model_path << std::endl;
     std::cout << "Model info: " << model_info.dump() << std::endl;
 
-    auto npu_device_global = xrt::device(0);
+    auto npu_device_global = flm_rt::device(0);
 
     // Use model-specific factory
     std::unique_ptr<AutoEmbeddingModel> embedding = std::make_unique<Gemma_Embedding>(&npu_device_global);

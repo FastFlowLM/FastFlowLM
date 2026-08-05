@@ -43,7 +43,7 @@ private:
     void preprocess_image(qwen2vl_image_t& image,  std::vector<bf16> &pixel_values);
 
 public:
-    Qwen2VL(xrt::device* npu_device_inst);
+    Qwen2VL(flm_rt::device* npu_device_inst);
 
     void load_model(std::string model_path, json model_inf, int default_context_length = -1, bool enable_preemption = false) override;
     //void toggle_enable_think() override;

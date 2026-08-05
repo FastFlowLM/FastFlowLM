@@ -8,7 +8,7 @@
 #include "AutoModel/automodel.hpp"
 
 
-AutoModel::AutoModel(xrt::device* npu_device_inst, std::string current_model) {
+AutoModel::AutoModel(flm_rt::device* npu_device_inst, std::string current_model) {
     this->npu_device_inst = npu_device_inst;
     this->current_model = current_model;
     this->total_tokens = 0;

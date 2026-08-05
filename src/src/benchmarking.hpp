@@ -267,7 +267,7 @@ BenchmarkResults_t run_benchmarks(std::string model_tag, std::string bench_confi
         input_file.close();
     }
 
-    xrt::device npu_device_inst = xrt::device(0);
+    flm_rt::device npu_device_inst = flm_rt::device(0);
     std::unique_ptr<AutoModel> auto_chat_engine;
     if (!availble_models.is_model_supported(model_tag)) {
         header_print_r("ERROR", "Model not found: " << model_tag << "; Please check with `flm list` and try again.");

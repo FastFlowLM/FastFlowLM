@@ -23,6 +23,7 @@ struct program_args_t {
 
     // handling input file
     std::string input_file_name = "";
+    int iterations = 2;
 
     // specific commands
     int img_pre_resize = 3;

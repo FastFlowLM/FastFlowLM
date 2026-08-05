@@ -611,7 +611,7 @@ int main(int argc, char* argv[]) {
         }
 
         if (parsed_args.command == "bench") {
-            benchmarking::BenchmarkResults_t results = benchmarking::run_benchmarks(parsed_args.model_tag, parsed_args.input_file_name, availble_models);
+            benchmarking::BenchmarkResults_t results = benchmarking::run_benchmarks(parsed_args.model_tag, parsed_args.input_file_name, availble_models, parsed_args.iterations);
         }
         else if (parsed_args.command == "run") {
             check_and_notify_new_version();

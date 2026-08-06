@@ -10,6 +10,7 @@ find_library(FFTW3F_LIBRARY NAMES fftw3f libfftw3f.so.3 REQUIRED)
 add_executable(test_qwen3_asr_preprocessor
     test.cpp
     ../../common/audio/qwen3_asr_preprocessor.cpp
+    ../../common/audio/qwen3_asr_utils.cpp
     ../../common/audio_process_utils/audioproc.cpp
     ../../common/audio_process_utils/audioprocAVX512.cpp
 )

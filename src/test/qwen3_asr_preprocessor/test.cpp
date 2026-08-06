@@ -1,4 +1,5 @@
 #include "audio/qwen3_asr_preprocessor.hpp"
+#include "audio/qwen3_asr_utils.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -58,6 +59,24 @@ int main(int argc, char** argv) {
     ok &= expect(Qwen3ASRPreprocessor::feature_output_length(100) == 13, "100 mel frames");
     ok &= expect(Qwen3ASRPreprocessor::feature_output_length(101) == 14, "101 mel frames");
     ok &= expect(Qwen3ASRPreprocessor::feature_output_length(3000) == 390, "3000 mel frames");
+
+    ok &= expect(qwen3_asr_normalize_language("  cHINese ") == "Chinese", "normalize language");
+    ok &= expect(qwen3_asr_is_supported_language("ENGLISH"), "supported language");
+    ok &= expect(!qwen3_asr_is_supported_language("Klingon"), "unsupported language");
+
+    const std::string prompt = qwen3_asr_build_prompt("hot words", 2, "english");
+    ok &= expect(prompt ==
+        "<|im_start|>system\nhot words<|im_end|>\n"
+        "<|im_start|>user\n<|audio_start|><|audio_pad|><|audio_pad|><|audio_end|><|im_end|>\n"
+        "<|im_start|>assistant\nlanguage English<asr_text>",
+        "Qwen3-ASR chat prompt");
+
+    const auto parsed = qwen3_asr_parse_output("language Chinese<asr_text>你好，世界。 ");
+    ok &= expect(parsed.language == "Chinese" && parsed.text == "你好，世界。", "parse tagged output");
+    const auto silent = qwen3_asr_parse_output("language None<asr_text>");
+    ok &= expect(silent.language.empty() && silent.text.empty(), "parse silent audio");
+    const auto forced = qwen3_asr_parse_output("plain transcription", "French");
+    ok &= expect(forced.language == "French" && forced.text == "plain transcription", "parse forced language output");
 
     Qwen3ASRPreprocessor preprocessor;
 

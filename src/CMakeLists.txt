@@ -529,16 +529,13 @@ else()
     set(_flm_rt_dep_dir "${XRT_LIB_DIR}")
 endif()
 if(NOT FLM_USE_HRX)
-    if(FLM_PORTABLE_BUILD)
-        # Portable XRT: bundle libxrt into the self-contained tree.
-        # NOTE: the dlopen'd XDNA driver plugin (libxrt_driver_xdna.so.2) is not a
-        # NEEDED entry and must still be provided separately (as on main).
-        set(_flm_rt_pre_exclude "__flm_no_such_lib__")
-    else()
-        # System XRT: treat as an external/system dependency (resolved via the
-        # package's Depends), do not bundle it.
-        set(_flm_rt_pre_exclude "libxrt.*")
-    endif()
+    # Exclude libxrt from the flm dependency closure in every XRT configuration.
+    # flm only has libxrt_coreutil as a link-time NEEDED entry, but XRT dlopens
+    # further libraries at run time (libxrt_core, the libxrt_driver_xdna plugin,
+    # ...) that the closure cannot see. For a portable build the complete XRT
+    # runtime set is therefore bundled explicitly below (mirrors main); for a
+    # system build XRT is an external dependency resolved via the package Depends.
+    set(_flm_rt_pre_exclude "libxrt.*")
 endif()
 
 if(WIN32)
@@ -611,6 +608,83 @@ else()
             TYPE SHARED_LIBRARY
             FOLLOW_SYMLINK_CHAIN
             FILES \${_flm_resolved})
+    ")
+endif()
+
+# ————————————————————————————————————————————————————————————
+# Portable XRT: bundle the XRT runtime libraries the app loads at run time.
+#
+# The flm dependency closure above only captures libxrt_coreutil (flm's single
+# link-time NEEDED entry). XRT itself dlopens more libraries at run time —
+# libxrt_core, the libxrt_driver_xdna plugin, libxrt++, ... — via a path it
+# constructs as $XILINX_XRT/lib/x86_64-linux-gnu/<lib>. Those are invisible to
+# file(GET_RUNTIME_DEPENDENCIES), so copy the whole libxrt*.so* set from the
+# discovered XRT lib dir, re-root each real lib's RUNPATH at $ORIGIN so they
+# resolve one another inside lib/, and mirror them under lib/x86_64-linux-gnu so
+# XRT's internal lookup succeeds from the self-contained tree (mirrors main).
+if(NOT WIN32 AND NOT FLM_USE_HRX AND FLM_PORTABLE_BUILD)
+    find_program(PATCHELF_EXECUTABLE patchelf REQUIRED)
+    install(CODE "
+        # Locate a directory that actually holds the XRT runtime libraries.
+        set(_flm_xrt_src \"\")
+        foreach(_cand \"${_flm_rt_dep_dir}\" \"/usr/lib/x86_64-linux-gnu\" \"/usr/lib\")
+            if(_cand AND EXISTS \"\${_cand}/libxrt_coreutil.so.2\")
+                set(_flm_xrt_src \"\${_cand}\")
+                break()
+            endif()
+        endforeach()
+        if(NOT _flm_xrt_src)
+            message(FATAL_ERROR
+                \"Portable XRT build: could not locate libxrt_coreutil.so.2 to bundle\")
+        endif()
+        message(STATUS \"Bundling XRT runtime libraries from \${_flm_xrt_src}\")
+
+        set(_flm_libdir \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}\")
+        file(MAKE_DIRECTORY \"\${_flm_libdir}\")
+
+        # Copy every libxrt*.so* (preserving the symlink chain).
+        file(GLOB _flm_xrt_files \"\${_flm_xrt_src}/libxrt*.so*\")
+        foreach(_f \${_flm_xrt_files})
+            get_filename_component(_n \"\${_f}\" NAME)
+            if(IS_SYMLINK \"\${_f}\")
+                file(READ_SYMLINK \"\${_f}\" _t)
+                execute_process(COMMAND \"\${CMAKE_COMMAND}\" -E create_symlink
+                    \"\${_t}\" \"\${_flm_libdir}/\${_n}\")
+            else()
+                file(COPY \"\${_f}\" DESTINATION \"\${_flm_libdir}\"
+                    FILE_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE
+                                     GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
+            endif()
+        endforeach()
+
+        # Re-root the real libs at \$ORIGIN so they find each other in lib/.
+        file(GLOB _flm_xrt_real \"\${_flm_libdir}/libxrt*.so.*\")
+        foreach(_l \${_flm_xrt_real})
+            if(NOT IS_SYMLINK \"\${_l}\")
+                execute_process(
+                    COMMAND \"${PATCHELF_EXECUTABLE}\" --set-rpath \"\$ORIGIN\" \"\${_l}\"
+                    RESULT_VARIABLE _rc)
+                if(NOT _rc EQUAL 0)
+                    message(FATAL_ERROR \"patchelf --set-rpath failed for \${_l}\")
+                endif()
+            endif()
+        endforeach()
+
+        # Mirror the bundled libs under lib/x86_64-linux-gnu for XRT's lookup.
+        set(_flm_multiarch \"\${_flm_libdir}/x86_64-linux-gnu\")
+        file(MAKE_DIRECTORY \"\${_flm_multiarch}\")
+        file(GLOB _flm_xrt_all \"\${_flm_libdir}/libxrt*.so*\")
+        foreach(_l \${_flm_xrt_all})
+            get_filename_component(_n \"\${_l}\" NAME)
+            if(IS_SYMLINK \"\${_l}\")
+                file(READ_SYMLINK \"\${_l}\" _t)
+                execute_process(COMMAND \"\${CMAKE_COMMAND}\" -E create_symlink
+                    \"../\${_t}\" \"\${_flm_multiarch}/\${_n}\")
+            else()
+                execute_process(COMMAND \"\${CMAKE_COMMAND}\" -E create_symlink
+                    \"../\${_n}\" \"\${_flm_multiarch}/\${_n}\")
+            endif()
+        endforeach()
     ")
 endif()
 

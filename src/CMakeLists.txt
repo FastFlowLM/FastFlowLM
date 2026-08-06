@@ -117,6 +117,106 @@ else()
             set(XRT_INCLUDE_DIR /opt/xilinx/xrt/include CACHE PATH "Where XRT headers live")
             set(XRT_LIB_DIR     /opt/xilinx/xrt/lib     CACHE PATH "Where XRT libs live")
         endif()
+
+        # Portable XRT build: statically link FFmpeg (and zlib) so the self-
+        # contained tarball does not depend on the host having libavformat/
+        # libavcodec/... installed. FFmpeg and zlib are fetched and built from
+        # source; the resulting .a archives are linked into flm below. Non-
+        # portable builds keep using the system FFmpeg via pkg-config.
+        if(FLM_PORTABLE_BUILD)
+            include(FetchContent)
+            message(STATUS "Portable build: FFmpeg and zlib will be built statically")
+
+            # ——— FFmpeg (static) ———
+            set(FFMPEG_GIT_REPO "https://github.com/FFmpeg/FFmpeg.git" CACHE STRING "FFmpeg Git repository URL")
+            set(FFMPEG_GIT_TAG  "n7.1" CACHE STRING "FFmpeg Git tag/branch to fetch")
+            FetchContent_Declare(ffmpeg_source
+                GIT_REPOSITORY ${FFMPEG_GIT_REPO}
+                GIT_TAG ${FFMPEG_GIT_TAG}
+                GIT_SHALLOW TRUE)
+            message(STATUS "Fetching FFmpeg sources...")
+            FetchContent_Populate(ffmpeg_source)
+
+            set(FFMPEG_SOURCE_DIR ${ffmpeg_source_SOURCE_DIR})
+            set(FFMPEG_BUILD_DIR ${CMAKE_BINARY_DIR}/ffmpeg-build)
+            set(FFMPEG_INSTALL_DIR ${CMAKE_BINARY_DIR}/ffmpeg-install)
+            file(MAKE_DIRECTORY ${FFMPEG_BUILD_DIR})
+
+            message(STATUS "Configuring FFmpeg for static build...")
+            execute_process(
+                COMMAND ${FFMPEG_SOURCE_DIR}/configure
+                    --prefix=${FFMPEG_INSTALL_DIR}
+                    --enable-static
+                    --disable-shared
+                    --disable-programs
+                    --disable-doc
+                    --disable-htmlpages
+                    --disable-manpages
+                    --disable-podpages
+                    --disable-txtpages
+                    --enable-pic
+                    --enable-zlib
+                    --enable-avcodec
+                    --enable-avformat
+                    --enable-avutil
+                    --enable-swscale
+                    --enable-swresample
+                    --disable-vaapi
+                    --disable-libdrm
+                    --disable-bzlib
+                    --disable-lzma
+                WORKING_DIRECTORY ${FFMPEG_BUILD_DIR}
+                RESULT_VARIABLE FFMPEG_CONFIGURE_RESULT
+                OUTPUT_FILE ${FFMPEG_BUILD_DIR}/configure.log
+                ERROR_FILE ${FFMPEG_BUILD_DIR}/configure.log)
+            if(NOT FFMPEG_CONFIGURE_RESULT EQUAL 0)
+                message(FATAL_ERROR "FFmpeg configure failed. Check ${FFMPEG_BUILD_DIR}/configure.log")
+            endif()
+
+            message(STATUS "Building FFmpeg static libraries...")
+            # FFmpeg compilation is memory-intensive, so cap parallelism at 4.
+            if(DEFINED CMAKE_BUILD_PARALLEL_LEVEL AND CMAKE_BUILD_PARALLEL_LEVEL GREATER 4)
+                set(FFMPEG_BUILD_JOBS 4)
+            elseif(DEFINED CMAKE_BUILD_PARALLEL_LEVEL)
+                set(FFMPEG_BUILD_JOBS ${CMAKE_BUILD_PARALLEL_LEVEL})
+            else()
+                set(FFMPEG_BUILD_JOBS 2)
+            endif()
+            execute_process(
+                COMMAND make -j${FFMPEG_BUILD_JOBS}
+                WORKING_DIRECTORY ${FFMPEG_BUILD_DIR}
+                RESULT_VARIABLE FFMPEG_BUILD_RESULT
+                OUTPUT_FILE ${FFMPEG_BUILD_DIR}/build.log
+                ERROR_FILE ${FFMPEG_BUILD_DIR}/build.log)
+            if(NOT FFMPEG_BUILD_RESULT EQUAL 0)
+                message(FATAL_ERROR "FFmpeg build failed. Check ${FFMPEG_BUILD_DIR}/build.log")
+            endif()
+
+            message(STATUS "Installing FFmpeg static libraries...")
+            execute_process(
+                COMMAND make install
+                WORKING_DIRECTORY ${FFMPEG_BUILD_DIR}
+                RESULT_VARIABLE FFMPEG_INSTALL_RESULT)
+            if(NOT FFMPEG_INSTALL_RESULT EQUAL 0)
+                message(FATAL_ERROR "FFmpeg install failed")
+            endif()
+
+            set(FFMPEG_BUILT_FROM_SOURCE TRUE)
+            set(FFMPEG_INCLUDE_DIRS ${FFMPEG_INSTALL_DIR}/include)
+            set(FFMPEG_LIBRARY_DIRS ${FFMPEG_INSTALL_DIR}/lib)
+            message(STATUS "FFmpeg built successfully (static): ${FFMPEG_LIBRARY_DIRS}")
+
+            # ——— zlib (static) ———
+            message(STATUS "Fetching zlib source...")
+            FetchContent_Declare(zlib_source
+                GIT_REPOSITORY "https://github.com/madler/zlib.git"
+                GIT_TAG "v1.3.1"
+                GIT_SHALLOW TRUE)
+            FetchContent_MakeAvailable(zlib_source)
+            set(ZLIB_BUILT_FROM_SOURCE TRUE)
+            set(ZLIB_STATIC_LIB ${zlib_source_BINARY_DIR}/libz.a)
+            message(STATUS "zlib built successfully (static): ${ZLIB_STATIC_LIB}")
+        endif()
     endif()
 endif()
 
@@ -199,10 +299,19 @@ else()
     pkg_check_modules(FFTW3 REQUIRED IMPORTED_TARGET fftw3)
     pkg_check_modules(FFTW3F REQUIRED IMPORTED_TARGET fftw3f)
     pkg_check_modules(FFTW3L REQUIRED IMPORTED_TARGET fftw3l)
-    pkg_check_modules(FFMPEG REQUIRED IMPORTED_TARGET
-        libavformat libavcodec libavutil libswscale libswresample)
-    pkg_check_modules(readline REQUIRED IMPORTED_TARGET readline)
-    pkg_check_modules(ncurses REQUIRED IMPORTED_TARGET ncursesw)
+    # Portable builds link FFmpeg statically (built from source above), so the
+    # system FFmpeg is only resolved via pkg-config for non-portable builds.
+    if(NOT FFMPEG_BUILT_FROM_SOURCE)
+        pkg_check_modules(FFMPEG REQUIRED IMPORTED_TARGET
+            libavformat libavcodec libavutil libswscale libswresample)
+    endif()
+    # readline is GPL; skip it for portable builds (the CLI falls back to a
+    # plain line reader via the FASTFLOWLM_USE_READLINE guard) so the portable
+    # tarball carries no readline/ncurses runtime dependency.
+    if(NOT FLM_PORTABLE_BUILD)
+        pkg_check_modules(readline REQUIRED IMPORTED_TARGET readline)
+        pkg_check_modules(ncurses REQUIRED IMPORTED_TARGET ncursesw)
+    endif()
 endif()
 
 # ———————————————————————————————————————————————
@@ -375,6 +484,27 @@ elseif(WIN32)
         libfftw3f-3
         libfftw3l-3
     )
+elseif(FFMPEG_BUILT_FROM_SOURCE)
+    # Portable Linux: link the static FFmpeg archives built above (plus zlib) so
+    # flm carries no libav*/libsw* runtime dependency.
+    if(ZLIB_BUILT_FROM_SOURCE)
+        set(_flm_zlib_lib ${ZLIB_STATIC_LIB})
+    else()
+        set(_flm_zlib_lib z)
+    endif()
+    target_link_libraries(flm PUBLIC
+        ${FFMPEG_LIBRARY_DIRS}/libavformat.a
+        ${FFMPEG_LIBRARY_DIRS}/libavcodec.a
+        ${FFMPEG_LIBRARY_DIRS}/libavutil.a
+        ${FFMPEG_LIBRARY_DIRS}/libswscale.a
+        ${FFMPEG_LIBRARY_DIRS}/libswresample.a
+        ${_flm_zlib_lib}
+        Boost::program_options
+        CURL::libcurl
+        PkgConfig::FFTW3
+        PkgConfig::FFTW3F
+        PkgConfig::FFTW3L
+    )
 else()
     target_link_libraries(flm PUBLIC
         ${FFMPEG_LIBRARIES}
@@ -389,8 +519,12 @@ endif()
 if(NOT WIN32)
     target_compile_options(flm PUBLIC -mavx -mavx2)
 
-    target_compile_definitions(flm PUBLIC FASTFLOWLM_USE_READLINE=1)
-    target_link_libraries(flm PUBLIC PkgConfig::readline PkgConfig::ncurses)
+    # readline is only linked for non-portable builds (see the discovery block);
+    # the CLI compiles a plain line-reader fallback when the macro is undefined.
+    if(NOT FLM_PORTABLE_BUILD)
+        target_compile_definitions(flm PUBLIC FASTFLOWLM_USE_READLINE=1)
+        target_link_libraries(flm PUBLIC PkgConfig::readline PkgConfig::ncurses)
+    endif()
 
     # Link with dl library for dlopen() support (used for preloading bundled libraries)
     target_link_libraries(flm PUBLIC dl)
@@ -586,11 +720,18 @@ elseif(NOT FLM_USE_HRX AND FLM_PORTABLE_BUILD)
         set(_flm_libdir \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}\")
         file(MAKE_DIRECTORY \"\${_flm_libdir}\")
 
-        # Copy every libxrt*.so* and libboost_program_options.so* (preserving the
-        # symlink chain).
-        file(GLOB _flm_xrt_files
-            \"\${_flm_xrt_src}/libxrt*.so*\"
-            \"\${_flm_xrt_src}/libboost_program_options.so*\")
+        # Copy every libxrt*.so* (from the XRT dir) plus libboost_program_options.so*
+        # (searched across the standard system dirs, since Boost may live apart
+        # from XRT — e.g. XRT under /opt/xilinx but Boost in the multiarch dir),
+        # preserving the symlink chain.
+        file(GLOB _flm_xrt_files \"\${_flm_xrt_src}/libxrt*.so*\")
+        foreach(_bdir \"\${_flm_xrt_src}\" \"/usr/lib/x86_64-linux-gnu\" \"/usr/lib\")
+            file(GLOB _flm_boost_files \"\${_bdir}/libboost_program_options.so*\")
+            if(_flm_boost_files)
+                list(APPEND _flm_xrt_files \${_flm_boost_files})
+                break()
+            endif()
+        endforeach()
         foreach(_f \${_flm_xrt_files})
             get_filename_component(_n \"\${_f}\" NAME)
             if(IS_SYMLINK \"\${_f}\")

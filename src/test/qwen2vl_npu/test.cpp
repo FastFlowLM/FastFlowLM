@@ -54,33 +54,14 @@ int main(int argc, char* argv[]) {
     lm_uniform_input_t uniformed_input;
 
     if (short_prompt) {
-        uniformed_input.prompt = "What is this?";
+        uniformed_input.prompt = "What are these?";
         std::cout << "Prompt: " << uniformed_input.prompt << std::endl;
         uniformed_input.images.push_back("../../../tb_files/panda.png");
+        uniformed_input.images.push_back("../../../tb_files/pcb.jpg");
+        uniformed_input.images.push_back("../../../tb_files/error.png");
         std::cout << "Response: ";
         chat->start_total_timer();
         std::string response = chat->generate_with_prompt(meta_info, uniformed_input, 1024, std::cout);
-        chat->stop_total_timer();
-        std::cout << std::endl;
-        std::cout << std::endl;
-        std::cout << chat->show_profile() << std::endl;
-        // uniformed_input.prompt = "How are you";
-        uniformed_input.images.clear();
-        uniformed_input.images.push_back("../../../tb_files/panda.png");
-        std::cout << "Prompt: " << uniformed_input.prompt << std::endl;
-        std::cout << "Response: " << std::endl;
-        chat->start_total_timer();
-        response = chat->generate_with_prompt(meta_info, uniformed_input, 1024, std::cout);
-        chat->stop_total_timer();
-        std::cout << std::endl;
-        std::cout << std::endl;
-        std::cout << chat->show_profile() << std::endl;
-        uniformed_input.images.clear();
-        uniformed_input.images.push_back("../../../tb_files/panda.png");
-        std::cout << "Prompt: " << uniformed_input.prompt << std::endl;
-        std::cout << "Response: " << std::endl;
-        chat->start_total_timer();
-        response = chat->generate_with_prompt(meta_info, uniformed_input, 1024, std::cout);
         chat->stop_total_timer();
         std::cout << std::endl;
         std::cout << std::endl;

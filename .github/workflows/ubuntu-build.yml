@@ -72,15 +72,11 @@ jobs:
       - name: Upgrade Rust toolchain
         run: |
           apt-get update
-          apt-get install -y --no-install-recommends curl ca-certificates zstd patchelf
+          apt-get install -y --no-install-recommends curl ca-certificates
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
             sh -s -- -y --profile minimal --default-toolchain stable
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
           rustc --version
-
-      - name: Fetch pinned HRX release artifact
-        id: hrx
-        run: hrx-integration/fetch-hrx-release.sh
 
       - name: Build Debian package
         working-directory: ${{ github.workspace }}
@@ -88,7 +84,6 @@ jobs:
           DEBEMAIL: noreply@example.com
           DEBFULLNAME: fastflowlm
           DEB_VERSION: ${{ steps.get_version.outputs.deb_version }}
-          CMAKE_PREFIX_PATH: ${{ steps.hrx.outputs.prefix }}
         run: |
           dpkg-buildpackage -b -us -uc
           mv ../fastflowlm_${DEB_VERSION}_amd64.deb ./fastflowlm_${DEB_VERSION}_${{ matrix.distro }}${{ matrix.version }}_amd64.deb

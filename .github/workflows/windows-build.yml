@@ -28,24 +28,12 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
 
-      - name: Fetch pinned Windows HRX release artifact
-        id: hrx
-        shell: powershell
-        working-directory: ${{ github.workspace }}
-        run: |
-          $ErrorActionPreference = "Stop"
-          Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
-          .\hrx-integration\fetch-hrx-release.ps1
-
       - name: Configure CMake
         shell: powershell
-        env:
-          CMAKE_PREFIX_PATH: ${{ steps.hrx.outputs.prefix }}
         run: |
           # Native deps (Boost/CURL/FFMPEG/FFTW3) are linked by raw name from the
-          # runner's standalone Boost (C:/dev/boost_1_88_0) and vcpkg lib dirs, as
-          # on main — so no vcpkg toolchain is needed here. CMAKE_PREFIX_PATH above
-          # points find_package(hrx) at the fetched HRX release package.
+          # runner's standalone Boost (C:/dev/boost_1_88_0) and vcpkg lib dirs,
+          # so no vcpkg toolchain is needed here.
           cmake --preset windows-vs18
 
       - name: Build
@@ -73,10 +61,6 @@ jobs:
           Copy-Item -Path .\model_list.json -Destination $dist\ -Force
           Copy-Item -Path .\model_info.json -Destination $dist\ -Force
           Copy-Item -Path .\lib\*.dll -Destination $dist\ -Force
-
-          # HRX runtime DLL (from the pinned Windows HRX artifact) — required by flm.exe at runtime
-          $hrxDll = Get-ChildItem -Path ..\hrx-integration\.hrx-release\hrx-amdxdna-*-windows-x86_64\bin\hrx.dll -ErrorAction Stop | Select-Object -First 1
-          Copy-Item -Path $hrxDll.FullName -Destination $dist\ -Force
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4

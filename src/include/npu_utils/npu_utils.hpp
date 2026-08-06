@@ -6,7 +6,8 @@
 ///        interleave the two implementations, each lives in its own variant
 ///        header and this file includes exactly one, chosen by the FLM_USE_HRX
 ///        build flag (0 = XRT default, 1 = HRX). This keeps each backend's code
-///        clean and makes syncing the XRT path with upstream main trivial.
+///        clean and lets the XRT variant stay a verbatim copy of the upstream
+///        implementation.
 #pragma once
 
 #if defined(FLM_USE_HRX)

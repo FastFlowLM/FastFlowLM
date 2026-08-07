@@ -210,7 +210,7 @@ gc.collect()
 
 You can load a full `.txt` file as a prompt — useful for long documents or testing large context windows.
 
-👉 [Download the sample prompt](https://github.com/FastFlowLM/FastFlowLM/blob/main/assets/alice_in_wonderland.txt)  
+👉 [Download the sample prompt](https://github.com/ROCm/FastFlowLM/blob/main/assets/alice_in_wonderland.txt)  
 
 Download to Downloads folder. This contains over 38k token, thus may take longer to prompt. FastFlowLM supports full context length (32k–128k), making it ideal for processing long documents like this
 

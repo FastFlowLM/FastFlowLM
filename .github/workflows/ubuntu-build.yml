@@ -31,7 +31,7 @@ jobs:
             distro: "debian"
 
     container:
-      image: ghcr.io/fastflowlm/fastflowlm/build-environment:${{ matrix.distro }}${{ matrix.version }}
+      image: ghcr.io/rocm/fastflowlm/build-environment:${{ matrix.distro }}${{ matrix.version }}
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}

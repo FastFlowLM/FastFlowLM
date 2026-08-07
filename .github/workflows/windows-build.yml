@@ -31,9 +31,6 @@ jobs:
       - name: Configure CMake
         shell: powershell
         run: |
-          # Native deps (Boost/CURL/FFMPEG/FFTW3) are linked by raw name from the
-          # runner's standalone Boost (C:/dev/boost_1_88_0) and vcpkg lib dirs,
-          # so no vcpkg toolchain is needed here.
           cmake --preset windows-vs18
 
       - name: Build

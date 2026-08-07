@@ -59,7 +59,6 @@ std::atomic<bool> should_exit(false);
 std::mutex exit_mutex;
 std::condition_variable exit_cv;
 
-
 #if !defined(FLM_USE_HRX) && !defined(_WIN32)
 ///@brief Preload critical XRT libraries from the executable directory
 ///@details This ensures that dlopen() calls within libraries find the bundled versions
@@ -91,7 +90,6 @@ void preload_bundled_libraries() {
     }
 }
 #endif
-
 
 
 
@@ -489,6 +487,7 @@ int main(int argc, char* argv[]) {
         std::cerr << e.what() << std::endl;
         return 1;
     }
+
     // Get the models directory from environment variable or default
     std::string models_dir = utils::get_models_directory();
 

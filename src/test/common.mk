@@ -23,7 +23,6 @@ ifeq ($(WSL), 0)
 # Use g++-13 directly without CMake
 
 CXX := g++-13
-
 CXX_FLAGS := -std=c++20 -fPIC -Wall -DUSEAVX2=1
 CXX_FLAGS += -mavx2 -mfma -march=native -ffast-math
 CXX_FLAGS += -fmax-errors=1

@@ -22,15 +22,3 @@ override_dh_auto_install:
 
 	# Remove include directories
 	rm -rf debian/fastflowlm/opt/fastflowlm/include
-
-override_dh_shlibdeps:
-	# The NPU engine .so and flm link the bundled libhrx (and the private engine
-	# libs), which are shipped inside this package rather than provided by another
-	# .deb. Point dpkg-shlibdeps at the bundled lib dirs so it can locate them, and
-	# ignore the missing external dependency info for those private libraries.
-	# dh_shlibdeps treats -l as a single value, so both directories must be passed
-	# in one colon-separated argument; otherwise only the last -l is honoured and
-	# dpkg-shlibdeps never searches lib/ (where libhrx.so.0 lives).
-	dh_shlibdeps \
-	  -l$(CURDIR)/debian/fastflowlm/opt/fastflowlm/lib:$(CURDIR)/debian/fastflowlm/opt/fastflowlm/lib/flm \
-	  -- --ignore-missing-info

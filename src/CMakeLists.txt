@@ -593,14 +593,24 @@ else()
         set(FLM_FLM_INSTALL_RPATH "$ORIGIN/${CMAKE_INSTALL_LIBDIR}")
         # Engine libs sit next to libhrx in <root>/lib.
         set(FLM_ENGINE_INSTALL_RPATH "$ORIGIN")
-    else()
+    elseif(FLM_USE_HRX)
+        # HRX FHS layout: engine libs sit in <prefix>/lib/flm and the bundled NPU
+        # runtime (libhrx) one level up in <prefix>/lib, so engines resolve it via
+        # $ORIGIN/.. — this separation is what lets the HRX .deb ship libhrx.
         set(FLM_BIN_DESTINATION "bin")
         set(FLM_ENGINE_LIB_DESTINATION "${CMAKE_INSTALL_LIBDIR}/flm")
         set(FLM_SHARE_DESTINATION "share/flm")
         set(FLM_FLM_INSTALL_RPATH "$ORIGIN/../${CMAKE_INSTALL_LIBDIR}/flm;$ORIGIN/../${CMAKE_INSTALL_LIBDIR}")
-        # Engine libs sit in <prefix>/lib/flm; the NPU runtime lib (libhrx for
-        # HRX) is bundled one level up in <prefix>/lib.
         set(FLM_ENGINE_INSTALL_RPATH "$ORIGIN:$ORIGIN/..")
+    else()
+        # XRT FHS layout: identical to upstream main — engine libs install directly
+        # into <prefix>/lib and flm resolves them via $ORIGIN/../lib. XRT itself is
+        # an external dependency (libxrt-npu2) resolved from the system.
+        set(FLM_BIN_DESTINATION "bin")
+        set(FLM_ENGINE_LIB_DESTINATION "${CMAKE_INSTALL_LIBDIR}")
+        set(FLM_SHARE_DESTINATION "share/flm")
+        set(FLM_FLM_INSTALL_RPATH "$ORIGIN/../${CMAKE_INSTALL_LIBDIR}")
+        set(FLM_ENGINE_INSTALL_RPATH "$ORIGIN")
     endif()
 
     file(GLOB so_libs "${FLM_ENGINE_LIB_DIR}/*.so*")

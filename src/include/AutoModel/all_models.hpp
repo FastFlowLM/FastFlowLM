@@ -50,7 +50,7 @@ typedef enum {
     error_embedding
 } SupportedModelFamily;
 
-inline std::pair<std::string, std::unique_ptr<AutoModel>> get_auto_model(const std::string& model_tag, model_list& available_models, xrt::device* npu_device_inst) {
+inline std::pair<std::string, std::unique_ptr<AutoModel>> get_auto_model(const std::string& model_tag, model_list& available_models, flm_rt::device* npu_device_inst) {
 
     
     static const std::map<std::string, SupportedModelFamily> modelFamilyMap = {

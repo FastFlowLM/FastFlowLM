@@ -5,7 +5,7 @@
 #include "AutoModel/modeling_qwen3vl.hpp"
 #include "model_list.hpp"
 
-xrt::device npu_device_global;
+flm_rt::device npu_device_global;
 
 // Model-specific factory function for Qwen family and DeepSeek_r1_0528_8b
 inline std::pair<std::string, std::unique_ptr<AutoModel>> get_qwen3vl_model(const std::string& model_tag) {
@@ -58,7 +58,7 @@ int main(int argc, char* argv[]) {
     std::cout << "Model path: " << model_path << std::endl;
 
     std::unique_ptr<AutoModel> chat = std::make_unique<Qwen3VL>(&npu_device_global);
-    npu_device_global = xrt::device(0); 
+    npu_device_global = flm_rt::device(0); 
    
     chat->load_model(model_path, model_info, -1, preemption);
     header_print("info", "Model loaded");

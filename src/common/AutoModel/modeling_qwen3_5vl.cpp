@@ -11,7 +11,7 @@
 
 
 /************              Qwen3_5VL family            **************/
-Qwen3_5VL::Qwen3_5VL(xrt::device* npu_device_inst) : AutoModel(npu_device_inst, "Qwen3_5VL") {}
+Qwen3_5VL::Qwen3_5VL(flm_rt::device* npu_device_inst) : AutoModel(npu_device_inst, "Qwen3_5VL") {}
 
 void Qwen3_5VL::load_model(std::string model_path, json model_info, int default_context_length, bool enable_preemption) {
     this->_shared_load_model(model_path, model_info, default_context_length, enable_preemption);

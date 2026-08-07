@@ -5,7 +5,7 @@
 #include "AutoModel/modeling_gemma3.hpp"
 #include "model_list.hpp"
 
-xrt::device npu_device_global;
+flm_rt::device npu_device_global;
 
 int main(int argc, char* argv[]) {
 #ifdef __WINDOWS__
@@ -39,7 +39,7 @@ int main(int argc, char* argv[]) {
     std::cout << "Model info" << model_info.dump(4) << std::endl;
 
     
-    npu_device_global = xrt::device(0); 
+    npu_device_global = flm_rt::device(0); 
     std::unique_ptr<AutoModel> chat = std::make_unique<Gemma3>(&npu_device_global);
    
     chat->load_model(model_path, model_info, -1, preemption);

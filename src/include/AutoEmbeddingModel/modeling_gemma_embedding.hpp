@@ -52,7 +52,7 @@ private:
         }
     }
 public:
-    Gemma_Embedding(xrt::device* npu_device_inst);
+    Gemma_Embedding(flm_rt::device* npu_device_inst);
     ~Gemma_Embedding();
 
     void load_model(std::string model_path, json model_info, bool enable_preemption = false) override;

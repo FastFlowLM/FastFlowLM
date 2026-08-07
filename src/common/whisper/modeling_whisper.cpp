@@ -7,7 +7,7 @@
 #include "whisper/modeling_whisper.hpp"
 
 
-Whisper::Whisper(xrt::device* npu_device_inst){
+Whisper::Whisper(flm_rt::device* npu_device_inst){
     this->device = npu_device_inst;
     
     time_stamp = 0;

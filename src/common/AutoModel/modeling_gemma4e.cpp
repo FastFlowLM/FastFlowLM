@@ -410,7 +410,7 @@ std::pair<std::string, json> parse_gemma4e_tool_content(std::string tool_content
 
 
 /************              Gemma4e family            **************/
-Gemma4e::Gemma4e(xrt::device* npu_device_inst) : AutoModel(npu_device_inst, "Gemma4e") {}
+Gemma4e::Gemma4e(flm_rt::device* npu_device_inst) : AutoModel(npu_device_inst, "Gemma4e") {}
 
 void Gemma4e::load_model(std::string model_path, json model_info, int default_context_length, bool enable_preemption) {
     

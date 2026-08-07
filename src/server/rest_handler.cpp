@@ -323,7 +323,7 @@ static json convert_tool_responses_gemma4(json messages) {
 ///@return the rest handler
 RestHandler::RestHandler(model_list& models, ModelDownloader& downloader, program_args_t& args)
     : supported_models(models), downloader(downloader), default_model_tag(args.model_tag), current_model_tag(""), modelscope(args.modelscope), asr(args.asr), embed(args.embed), img_pre_resize(args.img_pre_resize), preemption(args.preemption){
-    this->npu_device_inst = xrt::device(0);
+    this->npu_device_inst = flm_rt::device(0);
 
     if (args.ctx_length != -1) {
         this->ctx_length = args.ctx_length >= 512 ? args.ctx_length : 512;
@@ -406,7 +406,7 @@ bool RestHandler::ensure_model_loaded(const std::string& model_tag) {
             header_print("ERROR", "Failed to load model: " + std::string(e.what()));
             this->auto_chat_engine.reset();
             this->npu_device_inst.reset();
-            this->npu_device_inst = xrt::device(0);
+            this->npu_device_inst = flm_rt::device(0);
             this->current_model_tag = "model-faker";
             return false;
         }

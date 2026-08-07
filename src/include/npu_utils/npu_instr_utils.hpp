@@ -14,9 +14,9 @@
 #include <cstdint>
 #include <cstdlib>
 #include <stdio.h>
+#include <unordered_map>
 #include "buffer.hpp"
 #include "utils/debug_utils.hpp"
-#include "xrt/xrt_bo.h"
 #include "instr_utils/npu_cmd.hpp"
 #include "instr_utils/npu_cmd_write.hpp"
 #include "instr_utils/npu_cmd_ddr.hpp"
@@ -478,22 +478,22 @@ class npu_sequence{
                 constexpr int wrap_bits = 10; 
                 
                 if(size[3] > (1<< wrap_bits)){
-                    header_print_r("ERROR", ": step_3 out ouf range");
+                    header_print("ERROR", ": step_3 out ouf range");
                 }
                 if(stride[3] > (1<< step_bits)){
-                    header_print_r("ERROR", ": stride_3 out of range");
+                    header_print("ERROR", ": stride_3 out of range");
                 }
                 if(size[2] > (1<< wrap_bits)){
-                    header_print_r("ERROR", ": step_2 out ouf range");
+                    header_print("ERROR", ": step_2 out ouf range");
                 }
                 if(stride[2] > (1<< step_bits)){
-                    header_print_r("ERROR", ": stride_2 out of range");
+                    header_print("ERROR", ": stride_2 out of range");
                 }
                 if(size[1] > (1<< wrap_bits)){
-                    header_print_r("ERROR", ": step_1 out ouf range");
+                    header_print("ERROR", ": step_1 out ouf range");
                 }
                 if(stride[1] > (1<< step_bits)){
-                    header_print_r("ERROR", ": stride_1 out of range");
+                    header_print("ERROR", ": stride_1 out of range");
                 }
                 // inverse of human's order
                 cmd->dim0_size = size[3];
@@ -657,6 +657,47 @@ class npu_sequence{
                 this->cmds2seq();
             }
             return std::make_pair(this->npu_seq.data(), this->npu_seq.size());
+        }
+
+        ///@brief Build the host patch table for the current control code (TXN).
+        ///@note Replaces the relocations aiebu used to emit. For every DDR
+        ///      address-patch op we locate the matching shim-DMA BLOCKWRITE BD
+        ///      (same col/row/bd_id) and emit a triple
+        ///      (byte_offset_of_BD_length_word, arg_idx, arg_offset).
+        ///      The amdxdna host-patch path reads addr-low at offset+4 and
+        ///      addr-high at offset+8 of that BD, adding the bound buffer's
+        ///      device address. Word offsets are into dump() (TXN incl. header).
+        ///@return flat vector of (offset, arg_idx, arg_offset) triples.
+        std::vector<uint32_t> dump_patch_table(){
+            if (this->is_valid == false){
+                this->cmds2seq();
+            }
+            std::vector<uint32_t> patch;
+            // (col,row,bd_id) -> word index of the most recent BLOCKWRITE BD.
+            std::unordered_map<uint32_t, size_t> bd_to_word;
+            size_t word = 4; // 4-word TXN header precedes the ops
+            for (auto& c : this->cmds){
+                if (auto* d = dynamic_cast<npu_ddr_cmd*>(c.get())){
+                    uint32_t key = (d->col << 16) | (d->row << 8) | d->bd_id;
+                    auto it = bd_to_word.find(key);
+                    if (it != bd_to_word.end()){
+                        size_t bw = it->second; // BLOCKWRITE start word
+                        // word4 of the BLOCKWRITE = BD length register (0x1D000);
+                        // +4 -> addr low (0x1D004, =0), +8 -> addr high (0x1D008).
+                        patch.push_back((uint32_t)((bw + 4) * sizeof(uint32_t)));
+                        patch.push_back(d->arg_idx);
+                        patch.push_back(d->arg_offset);
+                    }
+                    word += c->get_op_lines();
+                    continue;
+                }
+                if (auto* b = dynamic_cast<npu_dma_block_cmd*>(c.get())){
+                    uint32_t key = (b->col << 16) | (b->row << 8) | b->bd_id;
+                    bd_to_word[key] = word;
+                }
+                word += c->get_op_lines();
+            }
+            return patch;
         }
 
         inline bool sequence_valid(){return this->is_valid;}

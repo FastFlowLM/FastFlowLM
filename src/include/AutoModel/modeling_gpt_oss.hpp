@@ -33,7 +33,7 @@ private:
         accumulated_text.clear();
     }
 public:
-    GPT_OSS(xrt::device* npu_device_inst);
+    GPT_OSS(flm_rt::device* npu_device_inst);
 
     void load_model(std::string model_path, json model_info, int default_context_length = -1, bool enable_preemption = false) override;
     std::string apply_chat_template(nlohmann::ordered_json& messages, nlohmann::ordered_json tools = nlohmann::ordered_json::object()) override;

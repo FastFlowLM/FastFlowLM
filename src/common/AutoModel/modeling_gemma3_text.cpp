@@ -9,7 +9,7 @@
 
 
 /************              Gemma3_Text_Only family            **************/
-Gemma3_Text_Only::Gemma3_Text_Only(xrt::device* npu_device_inst) : AutoModel(npu_device_inst, "Gemma3_Text_Only") {}
+Gemma3_Text_Only::Gemma3_Text_Only(flm_rt::device* npu_device_inst) : AutoModel(npu_device_inst, "Gemma3_Text_Only") {}
 
 void Gemma3_Text_Only::load_model(std::string model_path, json model_info, int default_context_length, bool enable_preemption) {
 

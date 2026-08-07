@@ -14,11 +14,11 @@ sections:
       The FastFlowLM team is now part of AMD.
     ctas:
       - label: "Download FastFlowLM (Windows)"
-        href: "https://github.com/FastFlowLM/FastFlowLM/releases/latest/download/flm-setup.exe"
+        href: "https://github.com/ROCm/FastFlowLM/releases/latest/download/flm-setup.exe"
         style: primary
         external: true
       - label: "GitHub"
-        href: "https://github.com/FastFlowLM/FastFlowLM"
+        href: "https://github.com/ROCm/FastFlowLM"
         style: ghost
         external: true
       - label: "Models"
@@ -166,7 +166,7 @@ sections:
       code_blocks:
         - title: "CLI"
           content: |
-            Invoke-WebRequest https://github.com/FastFlowLM/FastFlowLM/releases/latest/download/flm-setup.exe `
+            Invoke-WebRequest https://github.com/ROCm/FastFlowLM/releases/latest/download/flm-setup.exe `
               -OutFile flm-setup.exe
             Start-Process .\flm-setup.exe -Wait
             flm pull llama3.2:3b

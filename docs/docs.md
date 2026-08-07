@@ -57,7 +57,7 @@ sections:
         Liquid shortcodes + markdown tables keep everything portable.
       ctas:
         - label: "Edit on GitHub"
-          href: "https://github.com/FastFlowLM/FastFlowLM/tree/main/docs"
+          href: "https://github.com/ROCm/FastFlowLM/tree/main/docs"
           style: ghost
           external: true
     right:

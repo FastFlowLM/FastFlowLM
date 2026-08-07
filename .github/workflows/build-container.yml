@@ -50,7 +50,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/fastflowlm/fastflowlm/build-environment
+          images: ghcr.io/rocm/fastflowlm/build-environment
           tags: |
             type=raw,value=${{ matrix.distro }}${{ matrix.release }}
             type=raw,value=latest,enable=${{ matrix.release == '26.04' }}

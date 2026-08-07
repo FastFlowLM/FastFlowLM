@@ -85,7 +85,7 @@ sections:
           href: "mailto:info@fastflowlm.com"
           style: primary
         - label: "Open an issue"
-          href: "https://github.com/FastFlowLM/FastFlowLM/issues/new"
+          href: "https://github.com/ROCm/FastFlowLM/issues/new"
           style: ghost
           external: true
 ---

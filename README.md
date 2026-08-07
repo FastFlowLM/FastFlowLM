@@ -23,7 +23,7 @@ Run large language models — now with **Vision**, **Audio**, **Embedding** and 
 
 ## 🔗 Quick Links
 
-  🔽 **[Download](https://github.com/FastFlowLM/FastFlowLM/releases/latest/download/flm-setup.exe)** | 📊 **[Benchmarks](https://fastflowlm.com/docs/benchmarks/)** | 📦 **[Model List](https://fastflowlm.com/docs/models/)**  
+  🔽 **[Download](https://github.com/ROCm/FastFlowLM/releases/latest/download/flm-setup.exe)** | 📊 **[Benchmarks](https://fastflowlm.com/docs/benchmarks/)** | 📦 **[Model List](https://fastflowlm.com/docs/models/)**  
 
   🐧 **[Linux Getting Started Guide](./docs/linux-getting-started.md)**
 
@@ -33,7 +33,7 @@ Run large language models — now with **Vision**, **Audio**, **Embedding** and 
 
 ## 🚀 Quick Start
 
-A packaged FLM Windows installer is available here: [**flm-setup.exe**](https://github.com/FastFlowLM/FastFlowLM/releases/latest/download/flm-setup.exe). For more details, see the [release notes](https://github.com/FastFlowLM/FastFlowLM/releases/).
+A packaged FLM Windows installer is available here: [**flm-setup.exe**](https://github.com/ROCm/FastFlowLM/releases/latest/download/flm-setup.exe). For more details, see the [release notes](https://github.com/ROCm/FastFlowLM/releases/).
 
 📺 [**Watch the quick start video (Windows)**](https://www.youtube.com/watch?v=mYOfDNkyBII)
 
@@ -57,7 +57,7 @@ flm run llama3.2:1b
 > - During installation on Windows, you can select a different base folder (e.g., if you choose `C:\Users\<USER>\flm`, models will be saved under `C:\Users\<USER>\flm\models\`).
 > - On Linux, you can override the default location by setting the `FLM_MODEL_PATH` environment variable.
 > - To disable the startup version check, set `FLM_DISABLE_UPDATE_CHECK=1`.
-> - ⚠️ If HuggingFace is not accessible in your region, manually download the model ([check this issue](https://github.com/FastFlowLM/FastFlowLM/issues/2)) and place it in the chosen directory.   
+> - ⚠️ If HuggingFace is not accessible in your region, manually download the model ([check this issue](https://github.com/ROCm/FastFlowLM/issues/2)) and place it in the chosen directory.   
 
 🎉🚀 FastFlowLM (FLM) is ready — your NPU is unlocked and you can start chatting with models right away!
 
@@ -115,12 +115,12 @@ No model rewrites, no tuning — it just works.
 - These NPU-accelerated binary kernels are completely free for any use, including commercial use.
 - Please acknowledge FastFlowLM in your README/project page (or product) as follows:
   ```
-  Powered by [FastFlowLM](https://github.com/FastFlowLM/FastFlowLM)
+  Powered by [FastFlowLM](https://github.com/ROCm/FastFlowLM)
   ```
   
 ---
 
-💬 Have **feedback/issues** or want **early access** to our new releases? [Open an issue](https://github.com/fastflowlm/fastflowlm/issues/new) or [Join our Discord community](https://discord.gg/z24t23HsHF)
+💬 Have **feedback/issues** or want **early access** to our new releases? [Open an issue](https://github.com/ROCm/FastFlowLM/issues/new) or [Join our Discord community](https://discord.gg/z24t23HsHF)
 
 ---
 
@@ -152,7 +152,7 @@ More details on the exact procedure, with dependencies to be installed, for linu
 1.  **Clone the repository:**
 
     ```bash
-    git clone --recursive https://github.com/FastFlowLM/FastFlowLM.git
+    git clone --recursive https://github.com/ROCm/FastFlowLM.git
     cd FastFlowLM/src
     ```
 

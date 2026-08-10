@@ -105,7 +105,9 @@ bool parse_options(int argc, char *argv[], program_args_t& parsed_args) {
             ("preemption", po::value<bool>(&parsed_args.preemption)->default_value(false),
              "Enable preemption")
             ("prompt,i", po::value<std::string>(&parsed_args.input_file_name)->default_value(""),
-             "Direct file input");
+             "Direct file input")
+            ("bench-iterations", po::value<int>(&parsed_args.iterations)->default_value(2),
+             "Iterations for bench");
 
         // Define positional arguments
         po::positional_options_description pos_desc;

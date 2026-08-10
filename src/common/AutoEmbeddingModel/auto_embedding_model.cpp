@@ -11,7 +11,7 @@ std::unordered_set<std::string> embeddingModelTags = {
         "embed-gemma", "embed-gemma:300m"
 };
 
-AutoEmbeddingModel::AutoEmbeddingModel(xrt::device* npu_device_inst, std::string current_model) {
+AutoEmbeddingModel::AutoEmbeddingModel(flm_rt::device* npu_device_inst, std::string current_model) {
     this->npu_device_inst = npu_device_inst;
     this->current_model = current_model;
 }

@@ -134,7 +134,7 @@ private:
     std::unique_ptr<whisper_npu> whisper_engine;
     std::unique_ptr<npu_xclbin_manager> npu;
 	std::unique_ptr<Whisper_Config> lm_config = nullptr;
-    xrt::device* device;
+    flm_rt::device* device;
 
     bool enable_preemption;
 
@@ -241,7 +241,7 @@ public:
         e_transcribe = 1
     } whisper_task_type_t;
 
-    Whisper(xrt::device* npu_device_inst);
+    Whisper(flm_rt::device* npu_device_inst);
 
     void load_model(std::string model_path, nlohmann::ordered_json model_inf, bool enable_preemption = false);
     //void toggle_enable_think() override;

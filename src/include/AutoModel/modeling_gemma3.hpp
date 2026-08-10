@@ -27,7 +27,7 @@ private:
     buffer<bf16> preprocess_image(bytes& image);
 
 public:
-    Gemma3(xrt::device* npu_device_inst);
+    Gemma3(flm_rt::device* npu_device_inst);
 
     void load_model(std::string model_path, json model_inf, int default_context_length = -1, bool enable_preemption = false) override;
     //void toggle_enable_think() override;

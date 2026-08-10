@@ -19,7 +19,7 @@ jobs:
             version: "13"
 
     container:
-      image: ghcr.io/fastflowlm/fastflowlm/build-environment:${{ matrix.distro }}${{ matrix.version }}
+      image: ghcr.io/rocm/fastflowlm/build-environment:${{ matrix.distro }}${{ matrix.version }}
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
@@ -47,7 +47,7 @@ jobs:
     - name: Upgrade Rust toolchain
       run: |
         apt-get update
-        apt-get install -y uuid-dev nasm
+        apt-get install -y uuid-dev nasm patchelf
         apt-get install -y --no-install-recommends curl ca-certificates
         curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
           sh -s -- -y --profile minimal --default-toolchain stable
@@ -86,6 +86,7 @@ jobs:
           model_list.json \
           model_info.json
         echo "Created tarball with symlinks preserved"
+        # The default backend is XRT, so confirm libxrt is bundled.
         tar tzf $GITHUB_WORKSPACE/fastflowlm_${VERSION}_linux.tar.gz | grep libxrt
 
     - name: Upload portable build artifact

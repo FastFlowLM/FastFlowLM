@@ -5,7 +5,7 @@
 #include "AutoModel/modeling_qwen2vl.hpp"
 #include "model_list.hpp"
 
-xrt::device npu_device_global;
+flm_rt::device npu_device_global;
 
 
 int main(int argc, char* argv[]) {
@@ -42,7 +42,7 @@ int main(int argc, char* argv[]) {
 
     std::unique_ptr<AutoModel> chat = std::make_unique<Qwen2VL>(&npu_device_global);
 
-    npu_device_global = xrt::device(0); 
+    npu_device_global = flm_rt::device(0); 
    
     chat->load_model(model_path, model_info, -1, preemption);
     chat->set_topk(1);

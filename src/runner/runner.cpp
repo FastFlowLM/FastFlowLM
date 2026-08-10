@@ -18,6 +18,8 @@
 #include <iomanip>
 #include <fstream>
 #include <algorithm>
+#include <thread>
+#include <chrono>
 
 /// \brief Command map for command line input
 std::map<std::string, runner_cmd_t> cmd_map = {
@@ -39,7 +41,7 @@ std::map<std::string, runner_cmd_t> cmd_map = {
 Runner::Runner(model_list& supported_models, ModelDownloader& downloader, program_args_t& args)
     : supported_models(supported_models), downloader(downloader), tag(args.model_tag), modelscope(args.modelscope), asr(args.asr), embed(args.embed), img_pre_resize(args.img_pre_resize), preemption(args.preemption) {
 
-    this->npu_device_inst = xrt::device(0);
+    this->npu_device_inst = flm_rt::device(0);
 
     if (args.ctx_length != -1) {
         this->ctx_length = args.ctx_length >= 512 ? args.ctx_length : 512;
@@ -56,8 +58,15 @@ Runner::Runner(model_list& supported_models, ModelDownloader& downloader, progra
     
     this->tag = auto_model.first;
 
-    if (!this->downloader.is_model_downloaded(this->tag)) {
-        this->downloader.pull_model(this->tag, this->modelscope);
+    switch (this->downloader.is_model_downloaded(this->tag)) {
+        case ModelDownloader::ModelStatus::Ready:
+            break;
+        case ModelDownloader::ModelStatus::Outdated:
+        case ModelDownloader::ModelStatus::Missing:
+            this->downloader.pull_model(this->tag, this->modelscope);
+            break;
+        case ModelDownloader::ModelStatus::Incompatible:
+            exit(EXIT_FAILURE);
     }
     auto [new_tag, model_info] = this->supported_models.get_model_info(this->tag);
     this->asr_supported = model_info.contains("asr") && model_info["asr"];
@@ -99,8 +108,16 @@ Runner::Runner(model_list& supported_models, ModelDownloader& downloader, progra
         {
             header_print("FLM", "The loaded model does not support ASR. Loading default Whisper model for ASR...");
             std::string whisper_tag = "whisper-v3:turbo";
-            if (!this->downloader.is_model_downloaded(whisper_tag)) {
-                this->downloader.pull_model(whisper_tag, this->modelscope);
+            switch (this->downloader.is_model_downloaded(whisper_tag)) {
+                case ModelDownloader::ModelStatus::Ready:
+                    break;
+                case ModelDownloader::ModelStatus::Outdated:
+                case ModelDownloader::ModelStatus::Missing:
+                    this->downloader.pull_model(whisper_tag, this->modelscope);
+                    break;
+                case ModelDownloader::ModelStatus::Incompatible:
+                    header_print("ERROR", "Whisper is incompatible with this version of FastFlowLM, skipping... ");
+                    return;
             }
             this->whisper_engine = std::make_unique<Whisper>(&this->npu_device_inst);
             auto [new_whisper_tag, whisper_model_info] = this->supported_models.get_model_info(whisper_tag);
@@ -109,7 +126,7 @@ Runner::Runner(model_list& supported_models, ModelDownloader& downloader, progra
                 this->whisper_engine->load_model(whisper_model_path, whisper_model_info, this->preemption);
             }
             catch (const std::exception& e) {
-                header_print("ERROR", "Failed to load ASR model: " + std::string(e.what()));
+                header_print("WARNING", "Failed to load ASR model: " + std::string(e.what()));
                 exit(EXIT_FAILURE);
             }
         }
@@ -204,13 +221,13 @@ void Runner::run() {
                 std::cout << "Models:" << std::endl;
                 nlohmann::json models = supported_models.get_all_models();
                 for (const auto& model : models["models"]) {
-                    bool is_present = downloader.is_model_downloaded(model["name"].get<std::string>());
-                    std::cout << "  - " << model["name"].get<std::string>();
-                    if (is_present){
-                        std::cout << " ✅";
-                    }
-                    else{
-                        std::cout << " ⏬";
+                    std::string name = model["name"].get<std::string>();
+                    std::cout << "  - " << name;
+                    switch (downloader.is_model_downloaded(name)) {
+                        case ModelDownloader::ModelStatus::Ready:        std::cout << " ✅"; break;
+                        case ModelDownloader::ModelStatus::Missing:      std::cout << " ⏬"; break;
+                        case ModelDownloader::ModelStatus::Outdated:     std::cout << " ⚠️"; break;
+                        case ModelDownloader::ModelStatus::Incompatible: std::cout << " ⚠️"; break;
                     }
                     std::cout << std::endl;
                 }
@@ -414,8 +431,16 @@ void Runner::cmd_load(std::vector<std::string>& input_list) {
     if (model_name != this->tag) {
         this->tag = model_name;
 
-        if (!this->downloader.is_model_downloaded(this->tag)) {
-            this->downloader.pull_model(this->tag, this->modelscope);
+        switch (this->downloader.is_model_downloaded(this->tag)) {
+            case ModelDownloader::ModelStatus::Ready:
+                break;
+            case ModelDownloader::ModelStatus::Outdated:
+            case ModelDownloader::ModelStatus::Missing:
+                this->downloader.pull_model(this->tag, this->modelscope);
+                break;
+            case ModelDownloader::ModelStatus::Incompatible:
+                header_print("ERROR", "Model is incompatible with this version of FastFlowLM: " + this->tag);
+                exit(EXIT_FAILURE);
         }
         auto_chat_engine.reset();
         if(model_name=="gpt-oss:20b")

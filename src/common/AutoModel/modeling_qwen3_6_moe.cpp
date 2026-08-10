@@ -11,7 +11,7 @@
 
 
 /************              Qwen3_6_MOE family            **************/
-Qwen3_6_MOE::Qwen3_6_MOE(xrt::device* npu_device_inst) : AutoModel(npu_device_inst, "Qwen3_6_MOE") {}
+Qwen3_6_MOE::Qwen3_6_MOE(flm_rt::device* npu_device_inst) : AutoModel(npu_device_inst, "Qwen3_6_MOE") {}
 
 void Qwen3_6_MOE::load_model(std::string model_path, json model_info, int default_context_length, bool enable_preemption) {
     this->_shared_load_model(model_path, model_info, default_context_length, enable_preemption);

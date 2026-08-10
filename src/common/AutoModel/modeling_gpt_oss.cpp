@@ -7,7 +7,7 @@
 #include "AutoModel/modeling_gpt_oss.hpp"   
 
 
-GPT_OSS::GPT_OSS(xrt::device* npu_device_inst) : AutoModel(npu_device_inst, "gpt-oss") {}
+GPT_OSS::GPT_OSS(flm_rt::device* npu_device_inst) : AutoModel(npu_device_inst, "gpt-oss") {}
 
 void GPT_OSS::load_model(std::string model_path, json model_info, int default_context_length, bool enable_preemption) {
     this->model_path = model_path;

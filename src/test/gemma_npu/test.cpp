@@ -50,6 +50,7 @@ int main(int argc, char* argv[]) {
     if (short_prompt) {
         uniformed_input.prompt = "Describe this?";
         uniformed_input.images.push_back("../../../tb_files/panda.png");
+        uniformed_input.images.push_back("../../../tb_files/pcb.jpg");
         uniformed_input.image_payload_types.push_back(input_payload_type_t::FILE_NAME);
         std::cout << "Prompt: " << uniformed_input.prompt << std::endl;
         std::cout << "Response: ";

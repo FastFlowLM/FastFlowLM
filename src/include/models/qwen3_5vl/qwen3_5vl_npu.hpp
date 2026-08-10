@@ -126,15 +126,15 @@ public:
 
     inline void load_vision_preprocess_parameters(LM_Config& config){
         // Note: this should be called by Impl:: constructor
-        QWEN3_5_PATCH_SIZE  = config._vision_config.value("QWEN3_5_PATCH_SIZE", -1);
-        QWEN3_5_IMAGE_MERGE_SIZE = config._vision_config.value("QWEN3_5_IMAGE_MERGE_SIZE", -1);
-        QWEN3_5_SPATIAL_MERGE_SIZE = config._vision_config.value("QWEN3_5_SPATIAL_MERGE_SIZE", -1);
-        QWEN3_5_SHORTEST_EDGE = config._vision_config.value("QWEN3_5_SHORTEST_EDGE", -1);
-        QWEN3_5_LONGEST_EDGE = config._vision_config.value("QWEN3_5_LONGEST_EDGE", -1);
-        QWEN3_5_VISION_RESCALE_FACTOR = config._vision_config.value("QWEN3_5_VISION_RESCALE_FACTOR", -1.0f);
-        QWEN3_5_VISION_RESCALE_IMAGE_MEAN = config._vision_config.value("QWEN3_5_VISION_RESCALE_IMAGE_MEAN", -1.0f);
-        QWEN3_5_VISION_RESCALE_IMAGE_STD = config._vision_config.value("QWEN3_5_VISION_RESCALE_IMAGE_STD", -1.0f);
-        QWEN3_5_TEMPORAL_PATCH_SIZE = config._vision_config.value("QWEN3_5_TEMPORAL_PATCH_SIZE", -1);
+        QWEN3_5_PATCH_SIZE  = config.sub("vision_config").value("QWEN3_5_PATCH_SIZE", -1);
+        QWEN3_5_IMAGE_MERGE_SIZE = config.sub("vision_config").value("QWEN3_5_IMAGE_MERGE_SIZE", -1);
+        QWEN3_5_SPATIAL_MERGE_SIZE = config.sub("vision_config").value("QWEN3_5_SPATIAL_MERGE_SIZE", -1);
+        QWEN3_5_SHORTEST_EDGE = config.sub("vision_config").value("QWEN3_5_SHORTEST_EDGE", -1);
+        QWEN3_5_LONGEST_EDGE = config.sub("vision_config").value("QWEN3_5_LONGEST_EDGE", -1);
+        QWEN3_5_VISION_RESCALE_FACTOR = config.sub("vision_config").value("QWEN3_5_VISION_RESCALE_FACTOR", -1.0f);
+        QWEN3_5_VISION_RESCALE_IMAGE_MEAN = config.sub("vision_config").value("QWEN3_5_VISION_RESCALE_IMAGE_MEAN", -1.0f);
+        QWEN3_5_VISION_RESCALE_IMAGE_STD = config.sub("vision_config").value("QWEN3_5_VISION_RESCALE_IMAGE_STD", -1.0f);
+        QWEN3_5_TEMPORAL_PATCH_SIZE = config.sub("vision_config").value("QWEN3_5_TEMPORAL_PATCH_SIZE", -1);
 
         QWEN3_5_MERGE_SIZE = QWEN3_5_IMAGE_MERGE_SIZE;
 

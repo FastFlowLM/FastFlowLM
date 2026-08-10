@@ -50,7 +50,7 @@ void Whisper::load_model(std::string model_path, nlohmann::ordered_json model_in
     s_config.min_p = 0.1;
     s_config.temperature = 0.4;
 
-    this->sampler = std::make_unique<Sampler>(this->lm_config->vocab_size, s_config);
+    this->sampler = std::make_unique<Sampler>(this->lm_config->get("vocab_size"), s_config);
 }
 
 void Whisper::setup_tokenizer(std::string model_path) {

@@ -57,6 +57,7 @@ jobs:
           Copy-Item -Path .\xclbins -Destination $dist\ -Recurse -Force
           Copy-Item -Path .\model_list.json -Destination $dist\ -Force
           Copy-Item -Path .\model_info.json -Destination $dist\ -Force
+          Copy-Item -Path .\xrt\lib\*.dll -Destination $dist\ -Force
           Copy-Item -Path .\lib\*.dll -Destination $dist\ -Force
 
       - name: Upload build artifact

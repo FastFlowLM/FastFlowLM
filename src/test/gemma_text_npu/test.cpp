@@ -5,9 +5,9 @@
 #include "AutoModel/modeling_gemma3_text.hpp"
 #include "model_list.hpp"
 
-xrt::device npu_device_global;
+flm_rt::device npu_device_global;
 // Model-specific factory function for Gemma3 Text family only
-inline std::pair<std::string, std::unique_ptr<AutoModel>> get_gemma_text_model(const std::string& model_tag, xrt::device* npu_device_inst) {
+inline std::pair<std::string, std::unique_ptr<AutoModel>> get_gemma_text_model(const std::string& model_tag, flm_rt::device* npu_device_inst) {
     static std::unordered_set<std::string> gemma3_text_Tags = {
         "gemma3", "gemma3:270m", "gemma3:1b"
     };
@@ -55,7 +55,7 @@ int main(int argc, char* argv[]) {
     std::cout << "Model info" << model_info.dump(4) << std::endl;
 
     
-    npu_device_global = xrt::device(0); 
+    npu_device_global = flm_rt::device(0); 
     std::unique_ptr<AutoModel> chat = std::make_unique<Gemma3_Text_Only>(&npu_device_global);
    
     chat->load_model(model_path, model_info, -1, preemption);

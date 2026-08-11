@@ -14,7 +14,7 @@ private:
     void setup_tokenizer(std::string model_path);
 
 public:
-    Llama3(xrt::device* npu_device_inst);
+    Llama3(flm_rt::device* npu_device_inst);
 
     void load_model(std::string model_path, json model_inf, int default_context_length = -1, bool enable_preemption = false) override;
     //void toggle_enable_think() override;
@@ -36,7 +36,7 @@ private:
     void setup_tokenizer(std::string model_path);
 
 public:
-    DeepSeek_r1_8b(xrt::device* npu_device_inst);
+    DeepSeek_r1_8b(flm_rt::device* npu_device_inst);
 
     void load_model(std::string model_path, json model_inf, int default_context_length = -1, bool enable_preemption = false) override;
     //void toggle_enable_think() override;

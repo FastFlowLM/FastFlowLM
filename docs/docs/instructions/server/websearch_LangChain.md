@@ -18,7 +18,7 @@ This project demonstrates how to build a lightweight Retrieval-Augmented Generat
 
 - Windows machine
 - Python 3.9 or later
-- [FastFlowLM](https://github.com/FastFlowLM/FastFlowLM) installed
+- [FastFlowLM](https://github.com/ROCm/FastFlowLM) installed
 - FastFlowLM model served (e.g., `llama3.2:1b`)
 
 ---

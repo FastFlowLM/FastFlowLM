@@ -1,46 +1,55 @@
 <footer class="footer">
   <div class="footer__inner">
-    <div class="footer__brand">
-      <a href="{{ '/' | relative_url }}" class="footer__logo">
-        <div>
-          <span class="footer__name">{{ site.title }}</span>
-          <span class="footer__tagline">{{ site.description }}</span>
+    <div class="footer__top">
+      <div class="footer__about">
+        <img src="{{ '/assets/amd-logo.jpg' | relative_url }}" alt="AMD" class="footer__amd" />
+        <p class="footer__label">About AMD</p>
+        <p class="footer__blurb">
+          AMD (NASDAQ: AMD) drives innovation in high-performance and AI computing to solve the
+          world's most important challenges. Today, AMD technology powers billions of experiences
+          across cloud and AI infrastructure, embedded systems, AI PCs and gaming. With a broad
+          portfolio of AI-optimized CPUs, GPUs, networking and software, AMD delivers full-stack AI
+          solutions that provide the performance and scalability needed for a new era of intelligent
+          computing. Learn more at
+          <a href="https://www.amd.com" target="_blank" rel="noreferrer">www.amd.com</a>.
+        </p>
+        <div class="footer__social">
+          <a href="https://www.linkedin.com/company/amd" class="footer__social-link" aria-label="LinkedIn" target="_blank" rel="noreferrer"><i class="fa-brands fa-linkedin-in"></i></a>
+          <a href="https://x.com/AMD" class="footer__social-link" aria-label="X" target="_blank" rel="noreferrer"><i class="fa-brands fa-x-twitter"></i></a>
+          <a href="https://www.instagram.com/amd" class="footer__social-link" aria-label="Instagram" target="_blank" rel="noreferrer"><i class="fa-brands fa-instagram"></i></a>
+          <a href="http://www.facebook.com/amd" class="footer__social-link" aria-label="Facebook" target="_blank" rel="noreferrer"><i class="fa-brands fa-facebook-f"></i></a>
         </div>
-      </a>
-      <p class="footer__legal">
-        © <span id="year">{{ site.time | date: "%Y" }}</span> {{ site.title }}. All rights reserved.
-      </p>
+      </div>
+
+      <div class="footer__cols">
+        <div class="footer__col">
+          <p class="footer__label">Video Channels</p>
+          <a href="https://www.youtube.com/user/amd" target="_blank" rel="noreferrer">AMD</a>
+          <a href="https://www.youtube.com/@AMDDevCentral" target="_blank" rel="noreferrer">Developers</a>
+          <a href="https://www.youtube.com/@Gaming-AMD" target="_blank" rel="noreferrer">Gaming</a>
+        </div>
+        <div class="footer__col">
+          <p class="footer__label">Discord</p>
+          <a href="https://discord.com/invite/amd-dev" target="_blank" rel="noreferrer">Developers</a>
+          <a href="https://discord.gg/amd-gaming" target="_blank" rel="noreferrer">Gaming</a>
+        </div>
+      </div>
     </div>
-    <div class="footer__links">
-      <div>
-        <p class="footer__label">Site</p>
-        {% for item in site.nav_links %}
-        {% assign href = item.url %}
-        {% if item.children %}
-        {% if item.label == 'Technology' and item.children.first %}
-        {% assign href = item.children.first.url %}
-        {% elsif item.label == 'Company' %}
-        {% assign href = '/team/' %}
-        {% endif %}
-        {% endif %}
-        {% assign is_external = false %}
-        {% if href contains '://' or href contains 'mailto:' %}
-        {% assign is_external = true %}
-        {% endif %}
-        <a href="{% unless is_external %}{{ href | relative_url }}{% else %}{{ href }}{% endunless %}" {% if is_external
-          %}target="_blank" rel="noreferrer" {% endif %}>
-          {{ item.label }}
-        </a>
-        {% endfor %}
-      </div>
-      <div>
-        <p class="footer__label">Connect</p>
-        {% for item in site.cta_links %}
-        <a href="{{ item.url }}" {% if item.url contains '://' %}target="_blank" rel="noreferrer" {% endif %}>
-          {{ item.label }}
-        </a>
-        {% endfor %}
-      </div>
+
+    <div class="footer__bottom">
+      <p class="footer__copyright">
+        &copy;<span id="year">{{ site.time | date: "%Y" }}</span> Advanced Micro Devices, Inc.
+      </p>
+      <nav class="footer__legal-links" aria-label="Legal">
+        <a href="https://www.amd.com/en/legal/copyright.html" target="_blank" rel="noreferrer">Terms and Conditions</a>
+        <a href="https://www.amd.com/en/legal/privacy.html" target="_blank" rel="noreferrer">Privacy</a>
+        <a href="https://www.amd.com/en/legal/trademarks.html" target="_blank" rel="noreferrer">Trademarks</a>
+        <a href="https://www.amd.com/content/dam/amd/en/documents/corporate/cr/supply-chain-transparency.pdf" target="_blank" rel="noreferrer">Supply Chain Transparency</a>
+        <a href="https://www.amd.com/en/legal/competition.html" target="_blank" rel="noreferrer">Fair &amp; Open Competition</a>
+        <a href="https://www.amd.com/content/dam/amd/en/documents/pdfs/corporate/amd-uk-tax-strategy.pdf" target="_blank" rel="noreferrer">UK Tax Strategy</a>
+        <a href="https://www.amd.com/en/legal/cookies.html" target="_blank" rel="noreferrer">Cookies Policy</a>
+        <a href="https://www.amd.com/en/preferences.html" target="_blank" rel="noreferrer">Cookie Settings</a>
+      </nav>
     </div>
   </div>
 </footer>

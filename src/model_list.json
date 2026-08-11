@@ -6,6 +6,7 @@
                 "name": "Nanbeige4.1-3B-NPU2",
                 "url": "https://huggingface.co/FastFlowLM/Nanbeige4.1-3B-NPU2",
                 "file_url": "https://huggingface.co/api/models/FastFlowLM/Nanbeige4.1-3B-NPU2/tree/main",
+                "ms_url": "https://modelscope.cn/models/amd/Nanbeige4.1-3B-NPU2",
                 "modified_at": "2025-05-30T00:00:00Z",
                 "size": 1000000000,
                 "flm_min_version": "0.9.38",
@@ -32,8 +33,9 @@
         "qwen3vl-it": {
             "4b": {
                 "name": "Qwen3-VL-4B-Instruct-NPU2",
-                "url": "https://huggingface.co/FastFlowLM/Qwen3-VL-4B-Instruct-NPU2/resolve/v0.9.22-faster-q4-1",
-                "file_url": "https://huggingface.co/api/models/FastFlowLM/Qwen3-VL-4B-Instruct-NPU2/tree/v0.9.22-faster-q4-1",
+                "url": "https://huggingface.co/FastFlowLM/Qwen3-VL-4B-Instruct-NPU2",
+                "file_url": "https://huggingface.co/api/models/FastFlowLM/Qwen3-VL-4B-Instruct-NPU2/tree/main",
+                "ms_url": "https://modelscope.cn/models/amd/Qwen3-VL-4B-Instruct-NPU2",
                 "size": 4000000000,
                 "flm_min_version": "0.9.22",
                 "files": [
@@ -63,8 +65,9 @@
         "gemma4-it": {
             "e2b": {
                 "name": "Gemma4-E2B-IT-NPU2",
-                "url": "https://huggingface.co/FastFlowLM/Gemma4-E2B-IT-NPU2/resolve/test_new_template",
-                "file_url": "https://huggingface.co/api/models/FastFlowLM/Gemma4-E2B-IT-NPU2/tree/test_new_template",
+                "url": "https://huggingface.co/FastFlowLM/Gemma4-E2B-IT-NPU2",
+                "file_url": "https://huggingface.co/api/models/FastFlowLM/Gemma4-E2B-IT-NPU2/tree/main",
+                "ms_url": "https://modelscope.cn/models/amd/Gemma4-E2B-IT-NPU2",
                 "size": 2000000000,
                 "flm_min_version": "0.9.43",
                 "files": [
@@ -98,8 +101,9 @@
             },
             "e4b": {
                 "name": "Gemma4-E4B-IT-NPU2",
-                "url": "https://huggingface.co/FastFlowLM/Gemma4-E4B-IT-NPU2/resolve/test_new_template",
-                "file_url": "https://huggingface.co/api/models/FastFlowLM/Gemma4-E4B-IT-NPU2/tree/test_new_template",
+                "url": "https://huggingface.co/FastFlowLM/Gemma4-E4B-IT-NPU2",
+                "file_url": "https://huggingface.co/api/models/FastFlowLM/Gemma4-E4B-IT-NPU2/tree/main",
+                "ms_url": "https://modelscope.cn/models/amd/Gemma4-E4B-IT-NPU2",
                 "size": 4000000000,
                 "flm_min_version": "0.9.43",
                 "files": [
@@ -131,12 +135,13 @@
                 ],
                 "footprint": 9.1
             }
-        },        
+        },
         "qwen3.5": {
             "0.8b": {
                 "name": "Qwen3.5-0.8B-NPU2",
                 "url": "https://huggingface.co/FastFlowLM/Qwen3.5-0.8B-NPU2",
                 "file_url": "https://huggingface.co/api/models/FastFlowLM/Qwen3.5-0.8B-NPU2/tree/main",
+                "ms_url": "https://modelscope.cn/models/amd/Qwen3.5-0.8B-NPU2",
                 "size": 800000000,
                 "flm_min_version": "0.9.45",
                 "files": [
@@ -167,6 +172,7 @@
                 "name": "Qwen3.5-2B-NPU2",
                 "url": "https://huggingface.co/FastFlowLM/Qwen3.5-2B-NPU2",
                 "file_url": "https://huggingface.co/api/models/FastFlowLM/Qwen3.5-2B-NPU2/tree/main",
+                "ms_url": "https://modelscope.cn/models/amd/Qwen3.5-2B-NPU2",
                 "size": 2000000000,
                 "flm_min_version": "0.9.45",
                 "files": [
@@ -198,6 +204,7 @@
                 "name": "Qwen3.5-4B-NPU2",
                 "url": "https://huggingface.co/FastFlowLM/Qwen3.5-4B-NPU2",
                 "file_url": "https://huggingface.co/api/models/FastFlowLM/Qwen3.5-4B-NPU2/tree/main",
+                "ms_url": "https://modelscope.cn/models/amd/Qwen3.5-4B-NPU2",
                 "size": 4000000000,
                 "flm_min_version": "0.9.45",
                 "files": [
@@ -229,6 +236,7 @@
                 "name": "Qwen3.5-9B-NPU2",
                 "url": "https://huggingface.co/FastFlowLM/Qwen3.5-9B-NPU2",
                 "file_url": "https://huggingface.co/api/models/FastFlowLM/Qwen3.5-9B-NPU2/tree/main",
+                "ms_url": "https://modelscope.cn/models/amd/Qwen3.5-9B-NPU2",
                 "size": 9000000000,
                 "flm_min_version": "0.9.45",
                 "files": [
@@ -257,12 +265,13 @@
                 "footprint": 8.94
             }
         },
-        
+
         "qwen3.6-moe": {
             "35b-a3b": {
                 "name": "Qwen3.6-35B-A3B-NPU2",
                 "url": "https://huggingface.co/FastFlowLM/Qwen3.6-35B-A3B-NPU2",
                 "file_url": "https://huggingface.co/api/models/FastFlowLM/Qwen3.6-35B-A3B-NPU2/tree/main",
+                "ms_url": "https://modelscope.cn/models/amd/Qwen3.6-35B-A3B-NPU2",
                 "size": 35000000000,
                 "flm_min_version": "0.9.45",
                 "files": [
@@ -290,12 +299,13 @@
                 ],
                 "footprint": 24.3
             }
-        },        
+        },
         "lfm2": {
             "1.2b": {
                 "name": "LFM2-1.2B-NPU2",
-                "url": "https://huggingface.co/FastFlowLM/LFM2-1.2B-NPU2/resolve/v0.9.24-significant-update",
-                "file_url": "https://huggingface.co/api/models/FastFlowLM/LFM2-1.2B-NPU2/tree/v0.9.24-significant-update",
+                "url": "https://huggingface.co/FastFlowLM/LFM2-1.2B-NPU2",
+                "file_url": "https://huggingface.co/api/models/FastFlowLM/LFM2-1.2B-NPU2/tree/main",
+                "ms_url": "https://modelscope.cn/models/amd/LFM2-1.2B-NPU2",
                 "size": 1200000000,
                 "default_context_length": 32768,
                 "max_prefill_len": 4096,
@@ -319,8 +329,9 @@
             },
             "2.6b": {
                 "name": "LFM2-2.6B-NPU2",
-                "url": "https://huggingface.co/FastFlowLM/LFM2-2.6B-NPU2/resolve/v0.9.24-significant-update",
-                "file_url": "https://huggingface.co/api/models/FastFlowLM/LFM2-2.6B-NPU2/tree/v0.9.24-significant-update",
+                "url": "https://huggingface.co/FastFlowLM/LFM2-2.6B-NPU2",
+                "file_url": "https://huggingface.co/api/models/FastFlowLM/LFM2-2.6B-NPU2/tree/main",
+                "ms_url": "https://modelscope.cn/models/amd/LFM2-2.6B-NPU2",
                 "size": 2600000000,
                 "default_context_length": 32768,
                 "max_prefill_len": 4096,
@@ -348,6 +359,7 @@
                 "name": "LFM2-2.6B-Transcript-NPU2",
                 "url": "https://huggingface.co/FastFlowLM/LFM2-2.6B-Transcript-NPU2",
                 "file_url": "https://huggingface.co/api/models/FastFlowLM/LFM2-2.6B-Transcript-NPU2/tree/main",
+                "ms_url": "https://modelscope.cn/models/amd/LFM2-2.6B-Transcript-NPU2",
                 "size": 2600000000,
                 "default_context_length": 32768,
                 "max_prefill_len": 4096,
@@ -375,6 +387,7 @@
                 "name": "LFM2.5-1.2B-NPU2",
                 "url": "https://huggingface.co/FastFlowLM/LFM2.5-1.2B-NPU2",
                 "file_url": "https://huggingface.co/api/models/FastFlowLM/LFM2.5-1.2B-NPU2/tree/main",
+                "ms_url": "https://modelscope.cn/models/amd/LFM2.5-1.2B-NPU2",
                 "size": 1200000000,
                 "default_context_length": 32768,
                 "max_prefill_len": 4096,
@@ -402,6 +415,7 @@
                 "name": "LFM2.5-1.2B-Thinking-NPU2",
                 "url": "https://huggingface.co/FastFlowLM/LFM2.5-1.2B-Thinking-NPU2",
                 "file_url": "https://huggingface.co/api/models/FastFlowLM/LFM2.5-1.2B-Thinking-NPU2/tree/main",
+                "ms_url": "https://modelscope.cn/models/amd/LFM2.5-1.2B-Thinking-NPU2",
                 "size": 1200000000,
                 "default_context_length": 32768,
                 "max_prefill_len": 4096,
@@ -433,6 +447,7 @@
                 "name": "Phi4-mini-Instruct-NPU2",
                 "url": "https://huggingface.co/FastFlowLM/Phi4-mini-Instruct-NPU2",
                 "file_url": "https://huggingface.co/api/models/FastFlowLM/Phi4-mini-Instruct-NPU2/tree/main",
+                "ms_url": "https://modelscope.cn/models/amd/Phi4-mini-Instruct-NPU2",
                 "size": 4000000000,
                 "default_context_length": 32768,
                 "max_prefill_len": 4096,
@@ -459,6 +474,7 @@
                 "name": "Embedding-Gemma-300M-NPU2",
                 "url": "https://huggingface.co/FastFlowLM/Embedding-Gemma-300M-NPU2",
                 "file_url": "https://huggingface.co/api/models/FastFlowLM/Embedding-Gemma-300M-NPU2/tree/main",
+                "ms_url": "https://modelscope.cn/models/amd/Embedding-Gemma-300M-NPU2",
                 "size": 300000000,
                 "flm_min_version": "0.9.15",
                 "files": [
@@ -486,6 +502,7 @@
                 "name": "Whisper-V3-Turbo-NPU2",
                 "url": "https://huggingface.co/FastFlowLM/Whisper-V3-Turbo-NPU2",
                 "file_url": "https://huggingface.co/api/models/FastFlowLM/Whisper-V3-Turbo-NPU2/tree/main",
+                "ms_url": "https://modelscope.cn/models/amd/Whisper-V3-Turbo-NPU2",
                 "size": 1000000000,
                 "flm_min_version": "0.9.14",
                 "files": [
@@ -514,8 +531,9 @@
         "gemma3": {
             "1b": {
                 "name": "Gemma3-1B-NPU2",
-                "url": "https://huggingface.co/FastFlowLM/Gemma3-1B-NPU2/resolve/v0.9.20-faster-q4-1",
-                "file_url": "https://huggingface.co/api/models/FastFlowLM/Gemma3-1B-NPU2/tree/v0.9.20-faster-q4-1",
+                "url": "https://huggingface.co/FastFlowLM/Gemma3-1B-NPU2",
+                "file_url": "https://huggingface.co/api/models/FastFlowLM/Gemma3-1B-NPU2/tree/main",
+                "ms_url": "https://modelscope.cn/models/amd/Gemma3-1B-NPU2",
                 "modified_at": "2025-05-30T00:00:00Z",
                 "size": 1000000000,
                 "default_context_length": 32768,
@@ -538,8 +556,9 @@
             },
             "4b": {
                 "name": "Gemma3-4B-NPU2",
-                "url": "https://huggingface.co/FastFlowLM/Gemma3-4B-NPU2/resolve/v0.9.23-optimize-vision",
-                "file_url": "https://huggingface.co/api/models/FastFlowLM/Gemma3-4B-NPU2/tree/v0.9.23-optimize-vision",
+                "url": "https://huggingface.co/FastFlowLM/Gemma3-4B-NPU2",
+                "file_url": "https://huggingface.co/api/models/FastFlowLM/Gemma3-4B-NPU2/tree/main",
+                "ms_url": "https://modelscope.cn/models/amd/Gemma3-4B-NPU2",
                 "modified_at": "2025-05-30T00:00:00Z",
                 "size": 4000000000,
                 "default_context_length": 65536,
@@ -571,6 +590,7 @@
                 "name": "Translategemma-4B-Instruct-NPU2",
                 "url": "https://huggingface.co/FastFlowLM/Translategemma-4B-Instruct-NPU2/resolve/main",
                 "file_url": "https://huggingface.co/api/models/FastFlowLM/Translategemma-4B-Instruct-NPU2/tree/main",
+                "ms_url": "https://modelscope.cn/models/amd/Translategemma-4B-Instruct-NPU2",
                 "modified_at": "2025-05-30T00:00:00Z",
                 "size": 4000000000,
                 "default_context_length": 65536,
@@ -581,7 +601,7 @@
                     "config.json",
                     "model.q4nx",
                     "tokenizer.json",
-                    "tokenizer_config.json", 
+                    "tokenizer_config.json",
                     "vision_weight.q4nx"
                 ],
                 "details": {
@@ -593,7 +613,7 @@
                 },
                 "label":[
                     "vision"
-                ],                
+                ],
                 "footprint": 4.5
             }
         },
@@ -602,6 +622,7 @@
                 "name": "Medgemma-4B-NPU2",
                 "url": "https://huggingface.co/FastFlowLM/medgemma-4b-it-NPU2/resolve/main",
                 "file_url": "https://huggingface.co/api/models/FastFlowLM/medgemma-4b-it-NPU2/tree/main",
+                "ms_url": "https://modelscope.cn/models/amd/Medgemma-4B-NPU2",
                 "modified_at": "2025-05-30T00:00:00Z",
                 "size": 4000000000,
                 "default_context_length": 65536,
@@ -631,8 +652,9 @@
         "medgemma1.5": {
             "4b": {
                 "name": "Medgemma-1.5-4B-NPU2",
-                "url": "https://huggingface.co/FastFlowLM/medgemma-1.5-4b-it-NPU2/resolve/test_new_template",
-                "file_url": "https://huggingface.co/api/models/FastFlowLM/medgemma-1.5-4b-it-NPU2/tree/test_new_template",
+                "url": "https://huggingface.co/FastFlowLM/medgemma-1.5-4b-it-NPU2",
+                "file_url": "https://huggingface.co/api/models/FastFlowLM/medgemma-1.5-4b-it-NPU2/tree/main",
+                "ms_url": "https://modelscope.cn/models/amd/Medgemma-1.5-4B-NPU2",
                 "modified_at": "2025-05-30T00:00:00Z",
                 "size": 4000000000,
                 "default_context_length": 65536,
@@ -662,8 +684,9 @@
         "llama3.2": {
             "1b": {
                 "name": "Llama-3.2-1B-NPU2",
-                "url": "https://huggingface.co/FastFlowLM/Llama-3.2-1B-NPU2/resolve/v0.9.21-merge-lm-head",
-                "file_url": "https://huggingface.co/api/models/FastFlowLM/Llama-3.2-1B-NPU2/tree/v0.9.21-merge-lm-head",
+                "url": "https://huggingface.co/FastFlowLM/Llama-3.2-1B-NPU2",
+                "file_url": "https://huggingface.co/api/models/FastFlowLM/Llama-3.2-1B-NPU2/tree/main",
+                "ms_url": "https://modelscope.cn/models/amd/Llama-3.2-1B-NPU2",
                 "modified_at": "2025-05-30T00:00:00Z",
                 "size": 1000000000,
                 "flm_min_version": "0.9.21",
@@ -685,8 +708,9 @@
             },
             "3b": {
                 "name": "Llama-3.2-3B-NPU2",
-                "url": "https://huggingface.co/FastFlowLM/Llama-3.2-3B-NPU2/resolve/v0.9.21-merging-lm-head",
-                "file_url": "https://huggingface.co/api/models/FastFlowLM/Llama-3.2-3B-NPU2/tree/v0.9.21-merging-lm-head",
+                "url": "https://huggingface.co/FastFlowLM/Llama-3.2-3B-NPU2",
+                "file_url": "https://huggingface.co/api/models/FastFlowLM/Llama-3.2-3B-NPU2/tree/main",
+                "ms_url": "https://modelscope.cn/models/amd/Llama-3.2-3B-NPU2",
                 "modified_at": "2025-05-30T00:00:00Z",
                 "size": 3000000000,
                 "flm_min_version": "0.9.21",
@@ -710,8 +734,9 @@
         "llama3.1": {
             "8b": {
                 "name": "Llama-3.1-8B-NPU2",
-                "url": "https://huggingface.co/FastFlowLM/Llama-3.1-8B-NPU2/resolve/v0.9.21-merge-lm-head",
-                "file_url": "https://huggingface.co/api/models/FastFlowLM/Llama-3.1-8B-NPU2/tree/v0.9.21-merge-lm-head",
+                "url": "https://huggingface.co/FastFlowLM/Llama-3.1-8B-NPU2",
+                "file_url": "https://huggingface.co/api/models/FastFlowLM/Llama-3.1-8B-NPU2/tree/main",
+                "ms_url": "https://modelscope.cn/models/amd/Llama-3.1-8B-NPU2",
                 "modified_at": "2025-05-30T00:00:00Z",
                 "size": 8000000000,
                 "flm_min_version": "0.9.21",
@@ -737,6 +762,7 @@
                 "name": "Deepseek-R1-Distill-Llama-8B-NPU2",
                 "url": "https://huggingface.co/FastFlowLM/Deepseek-R1-Distill-Llama-8B-NPU2/resolve/main",
                 "file_url": "https://huggingface.co/api/models/FastFlowLM/Deepseek-R1-Distill-Llama-8B-NPU2/tree/main",
+                "ms_url": "https://modelscope.cn/models/amd/Deepseek-R1-Distill-Llama-8B-NPU2",
                 "modified_at": "2025-05-30T00:00:00Z",
                 "size": 8000000000,
                 "flm_min_version": "0.9.43",
@@ -763,8 +789,9 @@
         "deepseek-r1-0528": {
             "8b": {
                 "name": "DeepSeek-R1-0528-Qwen3-8B-NPU2",
-                "url": "https://huggingface.co/FastFlowLM/DeepSeek-R1-0528-Qwen3-8B-NPU2/resolve/v0.9.22-faster-q4-1",
-                "file_url": "https://huggingface.co/api/models/FastFlowLM/DeepSeek-R1-0528-Qwen3-8B-NPU2/tree/v0.9.22-faster-q4-1",
+                "url": "https://huggingface.co/FastFlowLM/DeepSeek-R1-0528-Qwen3-8B-NPU2",
+                "file_url": "https://huggingface.co/api/models/FastFlowLM/DeepSeek-R1-0528-Qwen3-8B-NPU2/tree/main",
+                "ms_url": "https://modelscope.cn/models/amd/DeepSeek-R1-0528-Qwen3-8B-NPU2",
                 "modified_at": "2025-05-30T00:00:00Z",
                 "size": 8000000000,
                 "flm_min_version": "0.9.22",
@@ -792,8 +819,9 @@
         "qwen3": {
             "0.6b": {
                 "name": "Qwen3-0.6B-NPU2",
-                "url": "https://huggingface.co/FastFlowLM/Qwen3-0.6B-NPU2/resolve/v0.9.22-faster-q4-1",
-                "file_url": "https://huggingface.co/api/models/FastFlowLM/Qwen3-0.6B-NPU2/tree/v0.9.22-faster-q4-1",
+                "url": "https://huggingface.co/FastFlowLM/Qwen3-0.6B-NPU2",
+                "file_url": "https://huggingface.co/api/models/FastFlowLM/Qwen3-0.6B-NPU2/tree/main",
+                "ms_url": "https://modelscope.cn/models/amd/Qwen3-0.6B-NPU2",
                 "modified_at": "2025-05-30T00:00:00Z",
                 "size": 600000000,
                 "flm_min_version": "0.9.22",
@@ -819,8 +847,9 @@
             },
             "1.7b": {
                 "name": "Qwen3-1.7B-NPU2",
-                "url": "https://huggingface.co/FastFlowLM/Qwen3-1.7B-NPU2/resolve/v0.9.22-faster-q4-1",
-                "file_url": "https://huggingface.co/api/models/FastFlowLM/Qwen3-1.7B-NPU2/tree/v0.9.22-faster-q4-1",
+                "url": "https://huggingface.co/FastFlowLM/Qwen3-1.7B-NPU2",
+                "file_url": "https://huggingface.co/api/models/FastFlowLM/Qwen3-1.7B-NPU2/tree/main",
+                "ms_url": "https://modelscope.cn/models/amd/Qwen3-1.7B-NPU2",
                 "modified_at": "2025-05-30T00:00:00Z",
                 "size": 1700000000,
                 "flm_min_version": "0.9.22",
@@ -846,8 +875,9 @@
             },
             "4b": {
                 "name": "Qwen3-4B-NPU2",
-                "url": "https://huggingface.co/FastFlowLM/Qwen3-4B-NPU2/resolve/v0.9.22-faster-q4-1",
-                "file_url": "https://huggingface.co/api/models/FastFlowLM/Qwen3-4B-NPU2/tree/v0.9.22-faster-q4-1",
+                "url": "https://huggingface.co/FastFlowLM/Qwen3-4B-NPU2",
+                "file_url": "https://huggingface.co/api/models/FastFlowLM/Qwen3-4B-NPU2/tree/main",
+                "ms_url": "https://modelscope.cn/models/amd/Qwen3-4B-NPU2",
                 "modified_at": "2025-05-30T00:00:00Z",
                 "size": 4000000000,
                 "flm_min_version": "0.9.22",
@@ -874,8 +904,9 @@
             },
             "8b": {
                 "name": "Qwen3-8B-NPU2",
-                "url": "https://huggingface.co/FastFlowLM/Qwen3-8B-NPU2/resolve/v0.9.22-faster-q4-1",
-                "file_url": "https://huggingface.co/api/models/FastFlowLM/Qwen3-8B-NPU2/tree/v0.9.22-faster-q4-1",
+                "url": "https://huggingface.co/FastFlowLM/Qwen3-8B-NPU2",
+                "file_url": "https://huggingface.co/api/models/FastFlowLM/Qwen3-8B-NPU2/tree/main",
+                "ms_url": "https://modelscope.cn/models/amd/Qwen3-8B-NPU2",
                 "modified_at": "2025-05-30T00:00:00Z",
                 "size": 8000000000,
                 "flm_min_version": "0.9.22",
@@ -904,8 +935,9 @@
         "qwen3-tk": {
             "4b": {
                 "name": "Qwen3-4B-Thinking-2507-NPU2",
-                "url": "https://huggingface.co/FastFlowLM/Qwen3-4B-Thinking-2507-NPU2/resolve/v0.9.22-faster-q4-1",
-                "file_url": "https://huggingface.co/api/models/FastFlowLM/Qwen3-4B-Thinking-2507-NPU2/tree/v0.9.22-faster-q4-1",
+                "url": "https://huggingface.co/FastFlowLM/Qwen3-4B-Thinking-2507-NPU2",
+                "file_url": "https://huggingface.co/api/models/FastFlowLM/Qwen3-4B-Thinking-2507-NPU2/tree/main",
+                "ms_url": "https://modelscope.cn/models/amd/Qwen3-4B-Thinking-2507-NPU2",
                 "modified_at": "2025-05-30T00:00:00Z",
                 "size": 4000000000,
                 "flm_min_version": "0.9.22",
@@ -934,8 +966,9 @@
         "qwen3-it": {
             "4b": {
                 "name": "Qwen3-4B-Instruct-2507-NPU2",
-                "url": "https://huggingface.co/FastFlowLM/Qwen3-4B-Instruct-2507-NPU2/resolve/v0.9.22-faster-q4-1",
-                "file_url": "https://huggingface.co/api/models/FastFlowLM/Qwen3-4B-Instruct-2507-NPU2/tree/v0.9.22-faster-q4-1",
+                "url": "https://huggingface.co/FastFlowLM/Qwen3-4B-Instruct-2507-NPU2",
+                "file_url": "https://huggingface.co/api/models/FastFlowLM/Qwen3-4B-Instruct-2507-NPU2/tree/main",
+                "ms_url": "https://modelscope.cn/models/amd/Qwen3-4B-Instruct-2507-NPU2",
                 "modified_at": "2025-05-30T00:00:00Z",
                 "size": 4000000000,
                 "flm_min_version": "0.9.22",
@@ -963,8 +996,9 @@
         "gpt-oss": {
             "20b": {
                 "name": "GPT-OSS-20B-NPU2",
-                "url": "https://huggingface.co/FastFlowLM/GPT-OSS-20B-NPU2/resolve/v0.9.20-merge-lm-head",
-                "file_url": "https://huggingface.co/api/models/FastFlowLM/GPT-OSS-20B-NPU2/tree/v0.9.20-merge-lm-head",
+                "url": "https://huggingface.co/FastFlowLM/GPT-OSS-20B-NPU2",
+                "file_url": "https://huggingface.co/api/models/FastFlowLM/GPT-OSS-20B-NPU2/tree/main",
+                "ms_url": "https://modelscope.cn/models/amd/GPT-OSS-20B-NPU2",
                 "modified_at": "2025-05-30T00:00:00Z",
                 "size": 20000000000,
                 "flm_min_version": "0.9.20",
@@ -992,8 +1026,9 @@
         "gpt-oss-sg": {
             "20b": {
                 "name": "GPT-OSS-Safeguard-20b-NPU2",
-                "url": "https://huggingface.co/FastFlowLM/GPT-OSS-Safeguard-20b-NPU2/resolve/v0.9.20-merge-lm-head",
-                "file_url": "https://huggingface.co/api/models/FastFlowLM/GPT-OSS-Safeguard-20b-NPU2/tree/v0.9.20-merge-lm-head",
+                "url": "https://huggingface.co/FastFlowLM/GPT-OSS-Safeguard-20b-NPU2",
+                "file_url": "https://huggingface.co/api/models/FastFlowLM/GPT-OSS-Safeguard-20b-NPU2/tree/main",
+                "ms_url": "https://modelscope.cn/models/amd/GPT-OSS-Safeguard-20b-NPU2",
                 "modified_at": "2025-05-30T00:00:00Z",
                 "size": 20000000000,
                 "flm_min_version": "0.9.20",
@@ -1023,6 +1058,7 @@
                 "name": "Qwen2.5-3B-Instruct-NPU2",
                 "url": "https://huggingface.co/FastFlowLM/Qwen2.5-3B-Instruct-NPU2/resolve/main",
                 "file_url": "https://huggingface.co/api/models/FastFlowLM/Qwen2.5-3B-Instruct-NPU2/tree/main",
+                "ms_url": "https://modelscope.cn/models/amd/Qwen2.5-3B-Instruct-NPU2",
                 "modified_at": "2025-05-30T00:00:00Z",
                 "size": 3000000000,
                 "flm_min_version": "0.9.32",
@@ -1049,6 +1085,7 @@
                 "name": "Qwen2.5-VL-3B-Instruct-NPU2",
                 "url": "https://huggingface.co/FastFlowLM/Qwen2.5-VL-3B-Instruct-NPU2/resolve/main",
                 "file_url": "https://huggingface.co/api/models/FastFlowLM/Qwen2.5-VL-3B-Instruct-NPU2/tree/main",
+                "ms_url": "https://modelscope.cn/models/amd/Qwen2.5-VL-3B-Instruct-NPU2",
                 "modified_at": "2025-05-30T00:00:00Z",
                 "size": 3000000000,
                 "flm_min_version": "0.9.32",

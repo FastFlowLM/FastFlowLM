@@ -116,7 +116,7 @@ void Gemma4e::extract_spectrogram(std::vector<audio_data_t>& audio_inputs, gemma
     std::vector<float> mel_filters = audioproc::mel_filter_bank_optimized(
         num_frequency_bins, feature_size,
         min_frequency, max_frequency,
-        sampling_rate, /*apply_slaney_norm=*/false);
+        sampling_rate, /*apply_slaney_norm=*/false, false);
 
     // ------- waveform = audio_input.samples (mono, 1D) -------
     // The Python code works on [B, T]. We handle B=1 (single waveform).

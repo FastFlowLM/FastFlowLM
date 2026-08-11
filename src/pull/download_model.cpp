@@ -9,6 +9,8 @@
 #include <iostream>
 #include <filesystem>
 #include <iomanip>
+#include <thread>
+#include <chrono>
 #include "utils/utils.hpp"
 #include "nlohmann/json.hpp"
 #include "picosha2.h" 
@@ -184,13 +186,16 @@ bool download_file(const std::string& url, const std::string& local_path, bool i
         std::cout << std::endl;
     }
 
-    header_print("FLM", "Checking Hash...");
-    std::string local_oid = is_lfs ? calculate_file_sha256(local_path) : calculate_git_blob_oid(local_path);
-    if (local_oid != remote_oid) {
-        header_print("FLM", "Hash not matched!");
-        show_cursor(); // Show cursor on error
-        return false;
+    if (1) {
+        header_print("FLM", "Checking Hash...");
+        std::string local_oid = is_lfs ? calculate_file_sha256(local_path) : calculate_git_blob_oid(local_path);
+        if (local_oid != remote_oid) {
+            header_print("FLM", "Hash not matched!");
+            show_cursor(); // Show cursor on error
+            return false;
+        }
     }
+
 
     header_print("FLM", "Download completed: " << local_path);
     return true;

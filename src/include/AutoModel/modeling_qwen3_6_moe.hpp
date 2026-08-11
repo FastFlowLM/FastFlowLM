@@ -48,7 +48,7 @@ private:
     void preprocess_image(qwen3_6_moe_image_t& image,  std::vector<bf16> &pixel_values);
 
 public:
-    Qwen3_6_MOE(xrt::device* npu_device_inst);
+    Qwen3_6_MOE(flm_rt::device* npu_device_inst);
 
     void load_model(std::string model_path, json model_inf, int default_context_length = -1, bool enable_preemption = false) override;
     //void toggle_enable_think() override;
@@ -120,6 +120,14 @@ public:
                     target_size = 1080;
                 } else if (this->image_pre_resize <= 4) {
                     target_size = 1440;
+                } else if (this->image_pre_resize <= 5) {
+                    target_size = 2160;
+                } else if (this->image_pre_resize <= 6) {
+                    target_size = 2880;
+                } else if (this->image_pre_resize <= 7) {
+                    target_size = 3240;
+                } else if (this->image_pre_resize <= 8) {
+                    target_size = 4320;
                 } else {
                     this->image_pre_resize = 0;
                     target_size = 0;

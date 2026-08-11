@@ -36,8 +36,10 @@ inline void print_help(po::options_description& general) {
     std::cout << "Examples:" << std::endl;
     std::cout << "\tflm run llama3.2:1b" << std::endl;
     std::cout << "\tflm run llama3.2:1b --asr 1" << std::endl;
+    std::cout << "\tflm run llama3.2:1b --modelscope 1" << std::endl;
     std::cout << "\tflm serve llama3.2:1b --pmode balanced" << std::endl;
     std::cout << "\tflm pull llama3.2:1b --force" << std::endl;
+    std::cout << "\tflm pull llama3.2:1b --modelscope 1" << std::endl;
     std::cout << "\tflm check llama3.2:1b" << std::endl;
     std::cout << "\tflm serve llama3.2:1b --ctx-len 8192" << std::endl;
     std::cout << "\tflm serve llama3.2:1b --prefill-chunk-len 8192" << std::endl;
@@ -47,7 +49,8 @@ inline void print_help(po::options_description& general) {
     std::cout << "\tflm serve llama3.2:1b --cors 0" << std::endl;
     std::cout << "\tflm serve llama3.2:1b --asr 1" << std::endl;
     std::cout << "\tflm serve llama3.2:1b --embed 1" << std::endl;
-    std::cout << "\tflm serve qwen3vl-it:4b --resize 1 (0: original size, 1: height = 480, 2: height = 720, 3: height = 1080)" << std::endl;
+    std::cout << "\tflm serve llama3.2:1b --modelscope 1" << std::endl;
+    std::cout << "\tflm serve qwen3vl-it:4b --img-pre-resize 1" << std::endl;
     std::cout << "\tflm list" << std::endl;
     std::cout << "\tflm list --quiet" << std::endl;
     std::cout << "\tflm list --filter installed" << std::endl;
@@ -79,6 +82,8 @@ bool parse_options(int argc, char *argv[], program_args_t& parsed_args) {
              "Set the server port number (for serve command)")
             ("force", po::bool_switch(&parsed_args.force_redownload),
              "Force re-download even if model exists (for pull command)")
+            ("modelscope", po::value<bool>(&parsed_args.modelscope)->default_value(false)->implicit_value(true),
+             "Download models hosted on ModelScope")
             ("filter", po::value<std::string>(&parsed_args.list_filter)->default_value("all"),
              "Show models: all | installed | not-installed")
             ("quiet", po::bool_switch(&parsed_args.sub_process_mode),
@@ -90,7 +95,7 @@ bool parse_options(int argc, char *argv[], program_args_t& parsed_args) {
             ("prefill-chunk-len,pcl", po::value<int>(&parsed_args.prefill_chunk_len)->default_value(-1),
              "Set prefill chunk length")
             ("img-pre-resize,r", po::value<int>(&parsed_args.img_pre_resize)->default_value(2),
-             "Pre-resize the image, 0: original size, 1: height = 480, 2: height = 720, 3: height = 1080, 4: height = 1440")
+             "Pre-resize the image, 0: original size, 1: height = 480, 2: height = 720, 3: height = 1080, 4: height = 1440, 5: height = 2160, 6: height = 2880, 7: height = 3240, 8: height = 4320")
             ("socket,s", po::value<size_t>(&parsed_args.max_socket_connections)->default_value(10),
             "Set the maximum number of socket connections allowed (for serve command)")
             ("q-len,q", po::value<size_t>(&parsed_args.max_npu_queue)->default_value(10),
@@ -100,7 +105,9 @@ bool parse_options(int argc, char *argv[], program_args_t& parsed_args) {
             ("preemption", po::value<bool>(&parsed_args.preemption)->default_value(false),
              "Enable preemption")
             ("prompt,i", po::value<std::string>(&parsed_args.input_file_name)->default_value(""),
-             "Direct file input");
+             "Direct file input")
+            ("bench-iterations", po::value<int>(&parsed_args.iterations)->default_value(2),
+             "Iterations for bench");
 
         // Define positional arguments
         po::positional_options_description pos_desc;
@@ -197,6 +204,10 @@ bool parse_options(int argc, char *argv[], program_args_t& parsed_args) {
             parsed_args.model_tag = vm["model_tag"].as<std::string>();
         }
 
+
+        // if (vm.count("modelscope")) {
+        //     parsed_args.modelscope = vm["modelscope"].as<bool>();
+        // }
 
         // Note: serve command allows empty model_tag (will use default)
 

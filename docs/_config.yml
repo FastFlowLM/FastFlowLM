@@ -46,21 +46,15 @@ nav_links:
         url: "/benchmarks/"
       # - label: Demos
       #   url: "/demos/"
-  - label: Company
-    children:
-      - label: Team
-        url: "/team/"
-      - label: News
-        url: "/news/"
   - label: Docs
     url: "/docs/"
 
 cta_links:
   - label: GitHub
-    url: "https://github.com/FastFlowLM/FastFlowLM"
+    url: "https://github.com/ROCm/FastFlowLM"
     icon: github
   - label: Discord
-    url: "https://discord.gg/z24t23HsHF?utm_source=site"
+    url: "https://discord.com/invite/jtWZdMJ8ee?utm_source=site"
     icon: discord
   - label: YouTube
     url: "https://www.youtube.com/@FastFlowLM-YT/playlists"

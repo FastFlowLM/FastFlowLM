@@ -2,7 +2,7 @@ ARG BASE_IMAGE
 FROM ${BASE_IMAGE}
 
 LABEL org.opencontainers.image.description="FastFlowLM build environment with all dependencies pre-installed"
-LABEL org.opencontainers.image.source="https://github.com/FastFlowLM/FastFlowLM"
+LABEL org.opencontainers.image.source="https://github.com/ROCm/FastFlowLM"
 
 # Prevent interactive prompts during installation
 ENV DEBIAN_FRONTEND=noninteractive

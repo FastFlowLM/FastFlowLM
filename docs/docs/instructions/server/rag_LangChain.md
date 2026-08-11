@@ -30,7 +30,7 @@ This guide walks you through building a **Retrieval-Augmented Generation (RAG)**
 ### ✅ Install FastFlowLM (local server)
 
 Download from GitHub Releases:  
-👉 https://github.com/FastFlowLM/FastFlowLM
+👉 https://github.com/ROCm/FastFlowLM
 
 Launch the server:
 

@@ -23,6 +23,7 @@ struct program_args_t {
 
     // handling input file
     std::string input_file_name = "";
+    int iterations = 2;
 
     // specific commands
     int img_pre_resize = 3;
@@ -33,6 +34,9 @@ struct program_args_t {
     // for pull command
     bool force_redownload = false;
     
+    // for download related command
+    bool modelscope = false;
+
     // for serve command
     std::string host = "127.0.0.1";
     size_t max_socket_connections = 10;

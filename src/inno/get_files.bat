@@ -8,9 +8,11 @@ copy "..\build\flm.exe" "flm.exe"
 REM Copy all DLL files from lib folder
 echo Copying DLL files...
 copy "..\lib\*.dll" "."
+copy "..\lib\xrt\*.dll" "."
 
 REM Copy model_list.json from root
 echo Copying model_list.json...
 copy "..\model_list.json" "model_list.json"
+copy "..\model_info.json" "model_info.json"
 
 echo Done!

@@ -11,13 +11,13 @@
 
 
 /************              Qwen3VL family            **************/
-Qwen3VL::Qwen3VL(xrt::device* npu_device_inst) : AutoModel(npu_device_inst, "Qwen3VL") {}
+Qwen3VL::Qwen3VL(flm_rt::device* npu_device_inst) : AutoModel(npu_device_inst, "Qwen3VL") {}
 
 void Qwen3VL::load_model(std::string model_path, json model_info, int default_context_length, bool enable_preemption) {
     this->_shared_load_model(model_path, model_info, default_context_length, enable_preemption);
     
     this->q4nx = std::make_unique<Q4NX>(this->model_path);
-    // lm_config->model_type == qwen3
+    // lm_config->get<std::string>("model_type", "") == qwen3
     this->lm_engine = std::make_unique<qwen3vl_npu>(*this->lm_config, this->npu.get(), this->MAX_L);
 
     this->lm_engine->load_weights(*this->q4nx);

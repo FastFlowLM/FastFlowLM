@@ -11,14 +11,14 @@ sections:
     body: |
       FastFlowLM (FLM) delivers an Ollama-style developer experience built exclusively for AMD Ryzen™ AI NPUs. Install in seconds, stream tokens instantly, and run context windows up to 256k — all with dramatically better efficiency than GPU-first stacks.
       
-      FastFlowLM is now part of AMD.
+      The FastFlowLM team is now part of AMD.
     ctas:
       - label: "Download FastFlowLM (Windows)"
-        href: "https://github.com/FastFlowLM/FastFlowLM/releases/latest/download/flm-setup.exe"
+        href: "https://github.com/ROCm/FastFlowLM/releases/latest/download/flm-setup.exe"
         style: primary
         external: true
       - label: "GitHub"
-        href: "https://github.com/FastFlowLM/FastFlowLM"
+        href: "https://github.com/ROCm/FastFlowLM"
         style: ghost
         external: true
       - label: "Models"
@@ -31,7 +31,7 @@ sections:
       #   href: "/demos/"
       #   style: ghost
       - label: "Discord"
-        href: "https://discord.gg/z24t23HsHF?utm_source=site"
+        href: "https://discord.com/invite/jtWZdMJ8ee?utm_source=site"
         style: ghost
         external: true
     stats:
@@ -166,7 +166,7 @@ sections:
       code_blocks:
         - title: "CLI"
           content: |
-            Invoke-WebRequest https://github.com/FastFlowLM/FastFlowLM/releases/latest/download/flm-setup.exe `
+            Invoke-WebRequest https://github.com/ROCm/FastFlowLM/releases/latest/download/flm-setup.exe `
               -OutFile flm-setup.exe
             Start-Process .\flm-setup.exe -Wait
             flm pull llama3.2:3b
@@ -236,6 +236,8 @@ sections:
       title: "Dive into the docs"
       body: |
         Everything you need to install FastFlowLM, pick a model, and start streaming on your Ryzen™ AI NPU.
+
+        For inquiries: [Discord](https://discord.com/invite/jtWZdMJ8ee?utm_source=site)
     right:
       ctas:
         - label: "Dive into docs"

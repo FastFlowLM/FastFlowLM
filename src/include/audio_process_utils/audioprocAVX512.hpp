@@ -103,6 +103,14 @@ namespace avx512 {
         int frame_length,
         int fft_length);
 
+    // AVX512 optimized fused rfft + squared power (no sqrt)
+    void stft_power_batch_avx512(
+        const float* frames,
+        float* out_power,
+        int num_frames,
+        int frame_length,
+        int fft_length);
+
     // AVX512 optimized mel filter bank generation
     std::vector<float> mel_filter_bank_avx512(
         int num_frequency_bins,
@@ -139,7 +147,9 @@ namespace avx512 {
         int frame_length,
         int hop_length);
 
-    // AVX512 vectorized log(x + floor)
+    // AVX512 vectorized log with optional clamp and selectable base.
+    // Matches the template parameters of audioproc::log_mel_floor.
+    template<bool UseClamp = false, int Base = 0>
     void log_mel_floor_avx512(
         const float* in,
         float* out,

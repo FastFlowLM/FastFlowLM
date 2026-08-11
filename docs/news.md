@@ -11,11 +11,11 @@ sections:
       Stay up to date with FastFlowLM releases, community highlights, and technical deep dives.
     ctas:
       - label: "GitHub Releases"
-        href: "https://github.com/FastFlowLM/FastFlowLM/releases"
+        href: "https://github.com/ROCm/FastFlowLM/releases"
         style: primary
         external: true
       - label: "Join Discord"
-        href: "https://discord.gg/z24t23HsHF?utm_source=site"
+        href: "https://discord.com/invite/jtWZdMJ8ee?utm_source=site"
         style: ghost
         external: true
     right:

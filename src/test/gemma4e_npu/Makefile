@@ -40,25 +40,31 @@ LDFLAGS += -lgemma4e_npu
 LDFLAGS += -lavformat -lavcodec -lavutil -lswscale -lswresample
 LDFLAGS += -lfftw3f
 
-TEST_DEPS := $(test.cpp:.cpp=.d)
+CPP_SOURCES := $(filter %.cpp,$(SOURCES))
+OBJECTS := $(addprefix $(BUILD_DIR)/,$(notdir $(CPP_SOURCES:.cpp=.o)))
+DEPS := $(OBJECTS:.o=.d)
+VPATH := $(sort $(dir $(CPP_SOURCES)))
 
-all: directories $(BUILD_DIR)/test_gemma4e_npu
+all: $(BUILD_DIR)/test_gemma4e_npu
 
-directories:
+$(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
-$(BUILD_DIR)/test_gemma4e_npu: $(SOURCES) $(TEST_DEPS)
+$(BUILD_DIR)/%.o: %.cpp | $(BUILD_DIR)
+	$(CXX) $(CXX_FLAGS) -c $< -o $@
+
+$(BUILD_DIR)/test_gemma4e_npu: $(OBJECTS)
 	$(CXX) $(CXX_FLAGS) -o $@ $^ $(LDFLAGS) $(DEPENDENCY_LDFLAGS)
 
 clean:
 	rm -rf $(BUILD_DIR)
 
-test: $(BUILD_DIR)/
+test: $(BUILD_DIR)/test_gemma4e_npu
 	cp ../../model_list.json $(BUILD_DIR)/model_list.json
 	cd $(BUILD_DIR) && export LD_LIBRARY_PATH=../../../lib && ./test_gemma4e_npu --model gemma4-it:e2b -s 1
 
--include $(TEST_DEPS)
-.PHONY: all clean test directories
+-include $(DEPS)
+.PHONY: all clean test
 
 else
 

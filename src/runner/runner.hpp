@@ -48,6 +48,7 @@ class Runner {
         void run();
     private:
         std::string tag;
+        bool modelscope;
         int prefill_chunk_len;
         bool asr;
         bool asr_supported;
@@ -66,7 +67,7 @@ class Runner {
         int img_pre_resize;
         // CLI instance for interactive input
         CLIWide cli;
-        xrt::device npu_device_inst;
+        flm_rt::device npu_device_inst;
 
         /// \brief Command functions
         void cmd_set(std::vector<std::string>& input_list);

@@ -8,7 +8,7 @@
 #include "utils/vm_args.hpp"
 #include "metrices.hpp"
 
-xrt::device npu_device_global;
+flm_rt::device npu_device_global;
 
 // Model-specific factory function for Llama family and DeepSeek_r1_8b
 inline std::pair<std::string, std::unique_ptr<AutoModel>> get_lfm2_model(const std::string& model_tag) {
@@ -65,7 +65,7 @@ int main(int argc, char* argv[]) {
 
     std::unique_ptr<AutoModel> chat = std::make_unique<LFM2>(&npu_device_global);
 
-    npu_device_global = xrt::device(0); 
+    npu_device_global = flm_rt::device(0); 
    
     chat->load_model(model_path, model_info, -1, preemption);
     chat->set_topk(1);

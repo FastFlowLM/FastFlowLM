@@ -26,14 +26,20 @@ ifeq ($(WSL), 0)
 
 LDFLAGS += -lqwen2_npu
 
-TEST_DEPS := $(test.cpp:.cpp=.d)
+CPP_SOURCES := $(filter %.cpp,$(SOURCES))
+OBJECTS := $(addprefix $(BUILD_DIR)/,$(notdir $(CPP_SOURCES:.cpp=.o)))
+DEPS := $(OBJECTS:.o=.d)
+VPATH := $(sort $(dir $(CPP_SOURCES)))
 
-all: directories $(BUILD_DIR)/test_qwen2_npu test
+all: $(BUILD_DIR)/test_qwen2_npu test
 
-directories:
+$(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
-$(BUILD_DIR)/test_qwen2_npu: $(SOURCES) $(TEST_DEPS)
+$(BUILD_DIR)/%.o: %.cpp | $(BUILD_DIR)
+	$(CXX) $(CXX_FLAGS) -c $< -o $@
+
+$(BUILD_DIR)/test_qwen2_npu: $(OBJECTS)
 	$(CXX) $(CXX_FLAGS) -o $@ $^ $(LDFLAGS) $(DEPENDENCY_LDFLAGS)
 
 clean:
@@ -43,8 +49,8 @@ test: $(BUILD_DIR)/test_qwen2_npu
 	cp ../../model_list.json $(BUILD_DIR)/model_list.json
 	cd $(BUILD_DIR) && export LD_LIBRARY_PATH=../../../lib && ./test_qwen2_npu --model qwen2.5-it -s 1
 
--include $(TEST_DEPS)
-.PHONY: all clean test directories
+-include $(DEPS)
+.PHONY: all clean test
 
 else
 

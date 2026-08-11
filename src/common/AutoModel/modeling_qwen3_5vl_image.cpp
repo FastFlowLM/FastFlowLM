@@ -29,6 +29,19 @@ qwen3_5vl_image_t Qwen3_5VL::load_image(const std::string& filename) {
                 break;
             case 4:
                 max_height = 1440;
+                break;
+            case 5:
+                max_height = 2160;
+                break;
+            case 6:
+                max_height = 2880;
+                break;
+            case 7:
+                max_height = 3240;
+                break;
+            case 8:
+                max_height = 4320;
+                break;
             default:
                 max_height = decoded.height; // no resizing
                 break;
@@ -84,6 +97,18 @@ qwen3_5vl_image_t Qwen3_5VL::load_image_base64(const std::string& base64_string)
                 break;
             case 4:
                 max_height = 1440;
+                break;
+            case 5:
+                max_height = 2160;
+                break;
+            case 6:
+                max_height = 2880;
+                break;
+            case 7:
+                max_height = 3240;
+                break;
+            case 8:
+                max_height = 4320;
                 break;
             default:
                 max_height = decoded.height; // no resizing

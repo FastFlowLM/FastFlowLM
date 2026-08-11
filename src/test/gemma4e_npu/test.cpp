@@ -5,7 +5,7 @@
 #include "AutoModel/modeling_gemma4e.hpp"
 #include "model_list.hpp"
 
-xrt::device npu_device_global;
+flm_rt::device npu_device_global;
 
 // // Model-specific factory function for Qwen family and DeepSeek_r1_0528_8b
 // inline std::pair<std::string, std::unique_ptr<AutoModel>> get_qwen3_5vl_model(const std::string& model_tag) {
@@ -59,8 +59,8 @@ int main(int argc, char* argv[]) {
 
     std::unique_ptr<AutoModel> chat = std::make_unique<Gemma4e>(&npu_device_global);
     std::cout <<"Chat model initialized" << std::endl;
-    npu_device_global = xrt::device(0); 
-    std::cout << "NPU Device initialized: " << npu_device_global.get_info<xrt::info::device::name>() << std::endl;
+    npu_device_global = flm_rt::device(0); 
+    std::cout << "NPU Device initialized: " << npu_device_global.get_info<flm_rt::info::device::name>() << std::endl;
     chat->load_model(model_path, model_info, -1, preemption);
     header_print("info", "Model loaded");
     chat_meta_info_t meta_info;

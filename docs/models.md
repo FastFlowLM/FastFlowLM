@@ -50,11 +50,11 @@ sections:
       title: "Stay in the loop"
       ctas:
         - label: "Release notes"
-          href: "https://github.com/FastFlowLM/FastFlowLM/releases"
+          href: "https://github.com/ROCm/FastFlowLM/releases"
           style: primary
           external: true
         - label: "Discord"
-          href: "https://discord.gg/z24t23HsHF?utm_source=site"
+          href: "https://discord.com/invite/jtWZdMJ8ee?utm_source=site"
           style: ghost
           external: true
 ---

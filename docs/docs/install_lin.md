@@ -15,7 +15,7 @@ Get set up and then show us what you build!
 
 ## 📢 FastFlowLM Linux Support
 
-[FastFlowLM](https://github.com/FastFlowLM/FastFlowLM) is a lightweight LLM runtime optimized for **AMD NPUs**.  
+[FastFlowLM](https://github.com/ROCm/FastFlowLM) is a lightweight LLM runtime optimized for **AMD NPUs**.  
 Today, FastFlowLM is adding support for **Ubuntu, Arch, and other distros** to enable **fast, low-power LLMs** on **Ryzen™ AI PCs that run Linux**.
 
 This article will help you:
@@ -102,7 +102,7 @@ sudo reboot
 ```
 
 #### 4. Install FastFlowLM
-- Download the latest `.deb` package from the [Releases page](https://github.com/FastFlowLM/FastFlowLM/releases):
+- Download the latest `.deb` package from the [Releases page](https://github.com/ROCm/FastFlowLM/releases):
 
 ```sh
 sudo apt install ./fastflowlm*.deb
@@ -168,7 +168,7 @@ If `flm validate` passes but `flm run` fails with `No such device with index '0'
 
 1. Clone the repository:
    ```sh
-   git clone https://github.com/FastFlowLM/FastFlowLM.git
+   git clone https://github.com/ROCm/FastFlowLM.git
    cd FastFlowLM
    ```
 2. Build:

@@ -67,6 +67,74 @@ namespace avx512 {
         fftwf_free(fft_out);
     }
 
+    // Internal helper: plan_many batch FFT + per-bin AVX512 reduction.
+    // DoSqrt=true  -> magnitude sqrt(re²+im²)
+    // DoSqrt=false -> power   re²+im²
+    template<bool DoSqrt>
+    static void rfft_reduce_batch_avx512_impl(
+        const float* frames,
+        float* out,
+        int num_frames,
+        int frame_length,
+        int fft_length)
+    {
+        const int n_bins = fft_length / 2 + 1;
+        const int pad_len = fft_length - frame_length;
+
+        float* padded_in = (float*)fftwf_malloc(
+            static_cast<size_t>(num_frames) * fft_length * sizeof(float));
+        fftwf_complex* fft_out = (fftwf_complex*)fftwf_malloc(
+            static_cast<size_t>(num_frames) * n_bins * sizeof(fftwf_complex));
+
+        for (int f = 0; f < num_frames; ++f) {
+            float* dst = padded_in + f * fft_length;
+            copy_float_avx512(frames + f * frame_length, dst, frame_length);
+            if (pad_len > 0)
+                zero_fill_avx512(dst + frame_length, pad_len);
+        }
+
+        int n[] = { fft_length };
+        fftwf_plan plan = fftwf_plan_many_dft_r2c(
+            1, n, num_frames,
+            padded_in, nullptr, 1, fft_length,
+            fft_out,   nullptr, 1, n_bins,
+            FFTW_ESTIMATE);
+
+        fftwf_execute(plan);
+
+        const __m512i idx_re = _mm512_set_epi32(30, 28, 26, 24, 22, 20, 18, 16,
+                                                 14, 12, 10,  8,  6,  4,  2,  0);
+        const __m512i idx_im = _mm512_set_epi32(31, 29, 27, 25, 23, 21, 19, 17,
+                                                 15, 13, 11,  9,  7,  5,  3,  1);
+
+        #pragma omp parallel for schedule(static) if(num_frames > 32)
+        for (int f = 0; f < num_frames; ++f) {
+            const float* src = reinterpret_cast<const float*>(fft_out + f * n_bins);
+            float* dst = out + f * n_bins;
+
+            int k = 0;
+            for (; k + 16 <= n_bins; k += 16) {
+                __m512 v0 = _mm512_loadu_ps(src + 2 * k);
+                __m512 v1 = _mm512_loadu_ps(src + 2 * k + 16);
+                __m512 re = _mm512_permutex2var_ps(v0, idx_re, v1);
+                __m512 im = _mm512_permutex2var_ps(v0, idx_im, v1);
+                __m512 mag_sq = _mm512_fmadd_ps(re, re, _mm512_mul_ps(im, im));
+                __m512 result = DoSqrt ? _mm512_sqrt_ps(mag_sq) : mag_sq;
+                _mm512_storeu_ps(dst + k, result);
+            }
+            for (; k < n_bins; ++k) {
+                float re = src[2 * k];
+                float im = src[2 * k + 1];
+                float sq = re * re + im * im;
+                dst[k] = DoSqrt ? std::sqrt(sq) : sq;
+            }
+        }
+
+        fftwf_destroy_plan(plan);
+        fftwf_free(padded_in);
+        fftwf_free(fft_out);
+    }
+
     void rfft_magnitude_batch_avx512(
         const float* frames,
         float* out_magnitude,
@@ -78,54 +146,21 @@ namespace avx512 {
             rfft_magnitude_batch(frames, out_magnitude, num_frames, frame_length, fft_length);
             return;
         }
+        rfft_reduce_batch_avx512_impl<true>(frames, out_magnitude, num_frames, frame_length, fft_length);
+    }
 
-        const int n_bins = fft_length / 2 + 1;
-        const int pad_len = fft_length - frame_length;
-
-        // Allocate contiguous padded input buffer for batch FFT
-        float* padded_in = (float*)fftwf_malloc(
-            static_cast<size_t>(num_frames) * fft_length * sizeof(float));
-        fftwf_complex* fft_out = (fftwf_complex*)fftwf_malloc(
-            static_cast<size_t>(num_frames) * n_bins * sizeof(fftwf_complex));
-
-        // AVX512 accelerated copy + zero-pad
-        for (int f = 0; f < num_frames; ++f) {
-            float* dst = padded_in + f * fft_length;
-            copy_float_avx512(frames + f * frame_length, dst, frame_length);
-            if (pad_len > 0) {
-                zero_fill_avx512(dst + frame_length, pad_len);
-            }
+    void stft_power_batch_avx512(
+        const float* frames,
+        float* out_power,
+        int num_frames,
+        int frame_length,
+        int fft_length)
+    {
+        if (!has_avx512f()) {
+            stft_power_batch(frames, out_power, num_frames, frame_length, fft_length);
+            return;
         }
-
-        // Batch FFT via FFTW plan_many
-        int n[] = { fft_length };
-        fftwf_plan plan = fftwf_plan_many_dft_r2c(
-            1,              // rank
-            n,              // FFT dimension
-            num_frames,     // howmany
-            padded_in,      // input
-            nullptr,        // inembed
-            1,              // istride
-            fft_length,     // idist
-            fft_out,        // output
-            nullptr,        // onembed
-            1,              // ostride
-            n_bins,         // odist
-            FFTW_ESTIMATE);
-
-        fftwf_execute(plan);
-
-        // AVX512 vectorized magnitude computation for each frame
-        #pragma omp parallel for schedule(static) if(num_frames > 32)
-        for (int f = 0; f < num_frames; ++f) {
-            const float* src = reinterpret_cast<const float*>(fft_out + f * n_bins);
-            float* dst = out_magnitude + f * n_bins;
-            complex_magnitude_avx512(src, dst, n_bins);
-        }
-
-        fftwf_destroy_plan(plan);
-        fftwf_free(padded_in);
-        fftwf_free(fft_out);
+        rfft_reduce_batch_avx512_impl<false>(frames, out_power, num_frames, frame_length, fft_length);
     }
 
     // ---------------------------------------------------------------
@@ -510,27 +545,44 @@ namespace avx512 {
         return result;
     }
 
+    template<bool UseClamp, int Base>
     void log_mel_floor_avx512(
         const float* in,
         float* out,
         int count,
         float floor)
     {
-        const __m512 v_floor = _mm512_set1_ps(floor);
+        const float log_base_inv = (Base > 1) ? (1.0f / std::log(static_cast<float>(Base))) : 1.0f;
+        const __m512 v_floor       = _mm512_set1_ps(floor);
+        const __m512 v_log_base_inv = _mm512_set1_ps(log_base_inv);
         int i = 0;
 
         for (; i + 16 <= count; i += 16) {
             __m512 v_in = _mm512_loadu_ps(in + i);
-            __m512 v_sum = _mm512_add_ps(v_in, v_floor);
-            __m512 v_log = fast_log_avx512(v_sum);
+            __m512 v_x;
+            if constexpr (UseClamp) {
+                v_x = _mm512_max_ps(v_in, v_floor);
+            } else {
+                v_x = _mm512_add_ps(v_in, v_floor);
+            }
+            __m512 v_log = fast_log_avx512(v_x);
+            if constexpr (Base > 1) {
+                v_log = _mm512_mul_ps(v_log, v_log_base_inv);
+            }
             _mm512_storeu_ps(out + i, v_log);
         }
 
         // Scalar remainder
         for (; i < count; i++) {
-            out[i] = std::log(in[i] + floor);
+            float x = UseClamp ? std::max(in[i], floor) : (in[i] + floor);
+            out[i] = (Base > 1) ? std::log(x) * log_base_inv : std::log(x);
         }
     }
+
+    template void log_mel_floor_avx512<false, 0>(const float*, float*, int, float);
+    template void log_mel_floor_avx512<true,  0>(const float*, float*, int, float);
+    template void log_mel_floor_avx512<false, 10>(const float*, float*, int, float);
+    template void log_mel_floor_avx512<true,  10>(const float*, float*, int, float);
 
 } // namespace avx512
 } // namespace audioproc

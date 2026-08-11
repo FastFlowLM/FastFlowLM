@@ -14,8 +14,9 @@ all:
 	@$(PWSH) "cmake --build build --preset windows-default"
 
 run:
-	@$(PWSH) "Copy-Item 'lib\\*.dll' '$(OUT_DIR)' -Force"
+	@$(PWSH) "Copy-Item 'lib\\xrt\\*.dll' '$(OUT_DIR)' -Force"
 	@$(PWSH) "Copy-Item 'model_list.json' '$(OUT_DIR)' -Force"
+	@$(PWSH) "Copy-Item 'model_info.json' '$(OUT_DIR)' -Force"
 	@$(PWSH) "Copy-Item 'xclbins' '$(OUT_DIR)' -Recurse -Force"
 	@$(PWSH) "cd '$(OUT_DIR)'; .\\flm.exe run llama3.2:1b -a 0"
 
@@ -44,6 +45,7 @@ all:
 run:
 	@cp lib/*.so $(OUT_DIR)
 	@cp model_list.json $(OUT_DIR)
+	@cp model_info.json $(OUT_DIR)
 	@cd $(OUT_DIR) && ./flm run gpt-oss -a 0
 
 serve:

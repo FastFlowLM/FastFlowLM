@@ -28,14 +28,20 @@ ifeq ($(WSL), 0)
 
 LDFLAGS += -lgemma_embedding
 
-TEST_DEPS := $(test.cpp:.cpp=.d)
+CPP_SOURCES := $(filter %.cpp,$(SOURCES))
+OBJECTS := $(addprefix $(BUILD_DIR)/,$(notdir $(CPP_SOURCES:.cpp=.o)))
+DEPS := $(OBJECTS:.o=.d)
+VPATH := $(sort $(dir $(CPP_SOURCES)))
 
-all: directories test
+all: $(BUILD_DIR)/test_gemma_embedding test
 
-directories:
+$(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
-$(BUILD_DIR)/test_gemma_embedding: $(SOURCES) $(TEST_DEPS)
+$(BUILD_DIR)/%.o: %.cpp | $(BUILD_DIR)
+	$(CXX) $(CXX_FLAGS) -c $< -o $@
+
+$(BUILD_DIR)/test_gemma_embedding: $(OBJECTS)
 	$(CXX) $(CXX_FLAGS) -o $@ $^ $(LDFLAGS) $(DEPENDENCY_LDFLAGS)
 
 clean:
@@ -45,8 +51,8 @@ test: $(BUILD_DIR)/test_gemma_embedding
 	cp ../../model_list.json $(BUILD_DIR)/model_list.json
 	cd $(BUILD_DIR) && export LD_LIBRARY_PATH=../../../lib && ./test_gemma_embedding --model embed-gemma:300m -s 1
 
--include $(TEST_DEPS)
-.PHONY: all clean test directories
+-include $(DEPS)
+.PHONY: all clean test
 
 else
 

@@ -1,6 +1,7 @@
 #include "audio_process_utils/audioproc.hpp"
 #include "audio_process_utils/audioprocAVX512.hpp"
 #include <algorithm>
+#include <cassert>
 // Ensure M_PI is available on MSVC and other platforms that omit it
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -47,6 +48,40 @@ namespace audioproc {
         fftwf_free(fft_out);
     }
 
+    // Internal helper: runs FFTW batch and applies a per-bin scalar reduction.
+    // Reduce: (float re, float im) -> float
+    template<typename Reduce>
+    static void rfft_reduce_batch_impl(
+        const float* frames,
+        float* out,
+        int num_frames,
+        int frame_length,
+        int fft_length,
+        Reduce reduce)
+    {
+        const int n_bins = fft_length / 2 + 1;
+
+        float* fft_in          = (float*)fftwf_malloc(fft_length * sizeof(float));
+        fftwf_complex* fft_out = (fftwf_complex*)fftwf_malloc(n_bins * sizeof(fftwf_complex));
+        fftwf_plan plan = fftwf_plan_dft_r2c_1d(fft_length, fft_in, fft_out, FFTW_ESTIMATE);
+
+        for (int f = 0; f < num_frames; ++f) {
+            std::memcpy(fft_in, frames + f * frame_length, frame_length * sizeof(float));
+            if (fft_length > frame_length)
+                std::memset(fft_in + frame_length, 0, (fft_length - frame_length) * sizeof(float));
+
+            fftwf_execute(plan);
+
+            float* dst = out + f * n_bins;
+            for (int k = 0; k < n_bins; ++k)
+                dst[k] = reduce(fft_out[k][0], fft_out[k][1]);
+        }
+
+        fftwf_destroy_plan(plan);
+        fftwf_free(fft_in);
+        fftwf_free(fft_out);
+    }
+
     void rfft_magnitude_batch(
         const float* frames,
         float* out_magnitude,
@@ -54,32 +89,19 @@ namespace audioproc {
         int frame_length,
         int fft_length)
     {
-        const int n_bins = fft_length / 2 + 1;
+        rfft_reduce_batch_impl(frames, out_magnitude, num_frames, frame_length, fft_length,
+            [](float re, float im) { return std::sqrt(re * re + im * im); });
+    }
 
-        float* fft_in = (float*)fftwf_malloc(fft_length * sizeof(float));
-        fftwf_complex* fft_out = (fftwf_complex*)fftwf_malloc(n_bins * sizeof(fftwf_complex));
-
-        fftwf_plan plan = fftwf_plan_dft_r2c_1d(fft_length, fft_in, fft_out, FFTW_ESTIMATE);
-
-        for (int f = 0; f < num_frames; ++f) {
-            std::memcpy(fft_in, frames + f * frame_length, frame_length * sizeof(float));
-            if (fft_length > frame_length) {
-                std::memset(fft_in + frame_length, 0, (fft_length - frame_length) * sizeof(float));
-            }
-
-            fftwf_execute(plan);
-
-            float* dst = out_magnitude + f * n_bins;
-            for (int k = 0; k < n_bins; ++k) {
-                float re = fft_out[k][0];
-                float im = fft_out[k][1];
-                dst[k] = std::sqrt(re * re + im * im);
-            }
-        }
-
-        fftwf_destroy_plan(plan);
-        fftwf_free(fft_in);
-        fftwf_free(fft_out);
+    void stft_power_batch(
+        const float* frames,
+        float* out_power,
+        int num_frames,
+        int frame_length,
+        int fft_length)
+    {
+        rfft_reduce_batch_impl(frames, out_power, num_frames, frame_length, fft_length,
+            [](float re, float im) { return re * re + im * im; });
     }
 
     // Auto-dispatching versions
@@ -111,6 +133,20 @@ namespace audioproc {
         }
     }
 
+    void stft_power_batch_optimized(
+        const float* frames,
+        float* out_power,
+        int num_frames,
+        int frame_length,
+        int fft_length)
+    {
+        if (avx512::has_avx512f()) {
+            avx512::stft_power_batch_avx512(frames, out_power, num_frames, frame_length, fft_length);
+        } else {
+            stft_power_batch(frames, out_power, num_frames, frame_length, fft_length);
+        }
+    }
+
     // ---------------------------------------------------------------
     //  Mel filter bank — scalar implementation
     // ---------------------------------------------------------------
@@ -121,17 +157,18 @@ namespace audioproc {
         float min_frequency,
         float max_frequency,
         int sampling_rate,
-        bool apply_slaney_norm)
+        bool apply_slaney_norm,
+        bool slaney_mel_scale)
     {
         // mel_freqs: num_mel_filters + 2 linearly spaced points in mel domain
-        float mel_min = hertz_to_mel(min_frequency);
-        float mel_max = hertz_to_mel(max_frequency);
+        float mel_min = hertz_to_mel(min_frequency, slaney_mel_scale);
+        float mel_max = hertz_to_mel(max_frequency, slaney_mel_scale);
 
         const int n_points = num_mel_filters + 2;
         std::vector<float> filter_freqs(n_points);
         for (int i = 0; i < n_points; ++i) {
             float mel = mel_min + (mel_max - mel_min) * i / (n_points - 1);
-            filter_freqs[i] = mel_to_hertz(mel);
+            filter_freqs[i] = mel_to_hertz(mel, slaney_mel_scale);
         }
 
         // fft_freqs: linearly spaced 0 .. sampling_rate/2
@@ -222,17 +259,18 @@ namespace audioproc {
         float min_frequency,
         float max_frequency,
         int sampling_rate,
-        bool apply_slaney_norm)
+        bool apply_slaney_norm,
+        bool slaney_mel_scale)
     {
-        if (avx512::has_avx512f()) {
+        // AVX512 path does not support Slaney mel scale yet — fall through to scalar.
+        if (avx512::has_avx512f() && !slaney_mel_scale) {
             return avx512::mel_filter_bank_avx512(num_frequency_bins, num_mel_filters,
                                                    min_frequency, max_frequency,
                                                    sampling_rate, apply_slaney_norm);
-        } else {
-            return mel_filter_bank(num_frequency_bins, num_mel_filters,
-                                   min_frequency, max_frequency,
-                                   sampling_rate, apply_slaney_norm);
         }
+        return mel_filter_bank(num_frequency_bins, num_mel_filters,
+                               min_frequency, max_frequency,
+                               sampling_rate, apply_slaney_norm, slaney_mel_scale);
     }
 
     void mel_spectrogram_optimized(
@@ -369,20 +407,154 @@ namespace audioproc {
     }
 
     // ---------------------------------------------------------------
-    //  Scalar log_mel_floor
+    //  High-level STFT power spectrum
     // ---------------------------------------------------------------
 
+    int stft_num_frames(int n_samples, int n_fft, int hop_length, bool center)
+    {
+        const int effective = center ? n_samples + n_fft : n_samples;
+        return (effective - n_fft) / hop_length + 1;
+    }
+
+    static void reflect_pad(const float* src, int n, int pad, float* dst)
+    {
+        // dst has length n + 2*pad.  Left pad: src[1..pad] reversed.
+        // Right pad: src[n-2..n-1-pad] reversed.
+        for (int i = 0; i < pad; i++)
+            dst[pad - 1 - i] = (i + 1 < n) ? src[i + 1] : 0.0f;
+        std::memcpy(dst + pad, src, static_cast<size_t>(n) * sizeof(float));
+        for (int i = 0; i < pad; i++)
+            dst[pad + n + i] = (n - 2 - i >= 0) ? src[n - 2 - i] : 0.0f;
+    }
+
+    int stft_power(
+        const float* waveform,
+        int          n_samples,
+        const float* window,
+        int          n_fft,
+        int          hop_length,
+        bool         center,
+        StftPadMode  pad_mode,
+        float*       out_power)
+    {
+        const int num_frames = stft_num_frames(n_samples, n_fft, hop_length, center);
+        if (num_frames <= 0) return 0;
+
+        if (!center) {
+            std::vector<float> windowed(static_cast<size_t>(num_frames) * n_fft);
+            apply_window_frames(waveform, window, windowed.data(), num_frames, n_fft, hop_length);
+            stft_power_batch(windowed.data(), out_power, num_frames, n_fft, n_fft);
+            return num_frames;
+        }
+
+        // center=true: pad n_fft/2 on each side then run uncentered
+        const int pad = n_fft / 2;
+        const int padded_len = n_samples + 2 * pad;
+        std::vector<float> padded(padded_len, 0.0f);
+
+        if (pad_mode == StftPadMode::reflect) {
+            reflect_pad(waveform, n_samples, pad, padded.data());
+        } else {
+            std::memcpy(padded.data() + pad, waveform, static_cast<size_t>(n_samples) * sizeof(float));
+        }
+
+        std::vector<float> windowed(static_cast<size_t>(num_frames) * n_fft);
+        apply_window_frames(padded.data(), window, windowed.data(), num_frames, n_fft, hop_length);
+        stft_power_batch(windowed.data(), out_power, num_frames, n_fft, n_fft);
+        return num_frames;
+    }
+
+    int stft_power_optimized(
+        const float* waveform,
+        int          n_samples,
+        const float* window,
+        int          n_fft,
+        int          hop_length,
+        bool         center,
+        StftPadMode  pad_mode,
+        float*       out_power)
+    {
+        const int num_frames = stft_num_frames(n_samples, n_fft, hop_length, center);
+        if (num_frames <= 0) return 0;
+
+        if (!center) {
+            std::vector<float> windowed(static_cast<size_t>(num_frames) * n_fft);
+            apply_window_frames_optimized(waveform, window, windowed.data(), num_frames, n_fft, hop_length);
+            stft_power_batch_optimized(windowed.data(), out_power, num_frames, n_fft, n_fft);
+            return num_frames;
+        }
+
+        const int pad = n_fft / 2;
+        const int padded_len = n_samples + 2 * pad;
+        std::vector<float> padded(padded_len, 0.0f);
+
+        if (pad_mode == StftPadMode::reflect) {
+            reflect_pad(waveform, n_samples, pad, padded.data());
+        } else {
+            std::memcpy(padded.data() + pad, waveform, static_cast<size_t>(n_samples) * sizeof(float));
+        }
+
+        std::vector<float> windowed(static_cast<size_t>(num_frames) * n_fft);
+        apply_window_frames_optimized(padded.data(), window, windowed.data(), num_frames, n_fft, hop_length);
+        stft_power_batch_optimized(windowed.data(), out_power, num_frames, n_fft, n_fft);
+        return num_frames;
+    }
+
+    // ---------------------------------------------------------------
+    //  reduce_max / clamp_below_max / affine_scale
+    // ---------------------------------------------------------------
+
+    float reduce_max(const float* in, int count)
+    {
+        assert(count > 0);
+        float m = in[0];
+        for (int i = 1; i < count; i++)
+            m = std::max(m, in[i]);
+        return m;
+    }
+
+    void clamp_below_max(float* inout, int count, float max_val, float dynamic_range)
+    {
+        float threshold = max_val - dynamic_range;
+        for (int i = 0; i < count; i++)
+            inout[i] = std::max(inout[i], threshold);
+    }
+
+    void affine_scale(float* inout, int count, float offset, float scale)
+    {
+        float inv_scale = 1.0f / scale;
+        for (int i = 0; i < count; i++)
+            inout[i] = (inout[i] + offset) * inv_scale;
+    }
+
+    // ---------------------------------------------------------------
+    //  Scalar log_mel_floor
+    //  UseClamp=false: out[i] = log_base(in[i] + floor)
+    //  UseClamp=true:  out[i] = log_base(max(in[i], floor))
+    //  Base=0: natural log, Base=10: log10
+    // ---------------------------------------------------------------
+
+    template<bool UseClamp, int Base>
     void log_mel_floor(
         const float* in,
         float* out,
         int count,
         float floor)
     {
+        const float log_base_inv = (Base > 1) ? (1.0f / std::log(static_cast<float>(Base))) : 1.0f;
         for (int i = 0; i < count; i++) {
-            out[i] = std::log(in[i] + floor);
+            float x = UseClamp ? std::max(in[i], floor) : (in[i] + floor);
+            out[i] = (Base > 1) ? std::log(x) * log_base_inv : std::log(x);
         }
     }
 
+    // Explicit instantiations needed for linker
+    template void log_mel_floor<false, 0>(const float*, float*, int, float);
+    template void log_mel_floor<true,  0>(const float*, float*, int, float);
+    template void log_mel_floor<false, 10>(const float*, float*, int, float);
+    template void log_mel_floor<true,  10>(const float*, float*, int, float);
+
+    template<bool UseClamp, int Base>
     void log_mel_floor_optimized(
         const float* in,
         float* out,
@@ -390,10 +562,15 @@ namespace audioproc {
         float floor)
     {
         if (avx512::has_avx512f()) {
-            avx512::log_mel_floor_avx512(in, out, count, floor);
+            avx512::log_mel_floor_avx512<UseClamp, Base>(in, out, count, floor);
         } else {
-            log_mel_floor(in, out, count, floor);
+            log_mel_floor<UseClamp, Base>(in, out, count, floor);
         }
     }
+
+    template void log_mel_floor_optimized<false, 0>(const float*, float*, int, float);
+    template void log_mel_floor_optimized<true,  0>(const float*, float*, int, float);
+    template void log_mel_floor_optimized<false, 10>(const float*, float*, int, float);
+    template void log_mel_floor_optimized<true,  10>(const float*, float*, int, float);
 
 } // namespace audioproc

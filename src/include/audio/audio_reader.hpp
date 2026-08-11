@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 #include <cstdint>
+#include <iostream>
 
 struct audio_data_t {
     /// Interleaved PCM float32 samples normalized to [-1.0, 1.0].
@@ -22,6 +23,24 @@ struct audio_data_t {
     size_t num_samples = 0;         // total float count in samples vector (= num_frames * channels)
     size_t num_frames = 0;          // number of per-channel frames (= num_samples / channels)
 };
+
+/// Append `num_frames` of zero-valued frames to `audio` and update all metadata.
+/// Padding is zero-filled (silence) and appended at the end.
+/// @param audio      audio to pad in-place
+/// @param num_frames number of per-channel frames of silence to append
+inline void pad_audio_data(audio_data_t& audio, size_t num_frames) {
+    if (num_frames == 0) return;
+    if (audio.channels <= 0) {
+        std::cerr << "[pad_audio_data] WARNING: audio.channels=" << audio.channels
+                  << " is invalid; skipping pad of " << num_frames << " frames.\n";
+        return;
+    }
+    const size_t pad_samples = num_frames * static_cast<size_t>(audio.channels);
+    audio.samples.insert(audio.samples.end(), pad_samples, 0.0f);
+    audio.num_frames   += num_frames;
+    audio.num_samples  += pad_samples;
+    audio.duration_seconds = static_cast<double>(audio.num_frames) / audio.sample_rate;
+}
 
 /// Controls how multi-channel audio is downmixed to mono.
 enum class MonoDownmixMode {

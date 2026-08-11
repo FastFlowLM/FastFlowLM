@@ -9,6 +9,7 @@
 #include "download_model.hpp"
 #include <sstream>
 #include <iomanip>
+#include <fstream>
 
 /// \brief Constructor
 /// \param models the model list
@@ -20,33 +21,33 @@ ModelDownloader::ModelDownloader(model_list& models)
 /// \brief Check if the model is downloaded
 /// \param model_tag the model tag
 /// \return true if the model is downloaded, false otherwise
-bool ModelDownloader::is_model_downloaded(const std::string& model_tag, bool sub_process_mode, bool fast_check) {
+ModelDownloader::ModelStatus ModelDownloader::is_model_downloaded(const std::string& model_tag, bool sub_process_mode, bool fast_check) {
     auto missing_files = get_missing_files(model_tag);
     bool is_config_file_missing = std::find(missing_files.begin(), missing_files.end(), "config.json") != missing_files.end();
+    ModelStatus modelstatus = ModelStatus::Missing;
+
     if (!is_config_file_missing) {
-        if (!check_model_compatibility(model_tag, sub_process_mode)) {
-            if (!sub_process_mode)
-                header_print("FLM", "Model " + model_tag + " is not compatible with the current FLM version. ");
-            // Fast path: skip the expensive HF metadata fetch + per-file hash
-            // verification. Caller (e.g. `flm list`) only needs the boolean
-            // status; cleanup can happen later on `pull` / `check`.
-            if (fast_check) {
-                return false;
+        modelstatus = check_model_compatibility(model_tag, sub_process_mode);
+
+        if (modelstatus == ModelStatus::Outdated) {
+            if (!fast_check) {
+                header_print("FLM", "Checking outdated files...");
+                verify_and_clean_files(model_tag, sub_process_mode);
             }
-            // Instead of removing all files wholesale, verify each file against
-            // HuggingFace metadata and remove only corrupted ones (same logic
-            // as check_model). Files that pass verification can be reused.
-            verify_and_clean_files(model_tag, sub_process_mode);
-            return false;
+        }
+        else if (modelstatus == ModelStatus::Ready && !missing_files.empty()) {
+            // config.json is present and the version check passed, but other
+            // files (e.g. weights) are still missing.
+            modelstatus = ModelStatus::Missing;
         }
     }
-    return missing_files.empty();
+    return modelstatus;
 }
 
 /// \brief Check if the model is compatible with the current FLM version
 /// \param model_tag the model tag
 /// \return true if the model is compatible, false otherwise
-bool ModelDownloader::check_model_compatibility(const std::string& model_tag, bool sub_process_mode) {
+ModelDownloader::ModelStatus ModelDownloader::check_model_compatibility(const std::string& model_tag, bool sub_process_mode) {
     auto [new_model_tag, model_info] = supported_models.get_model_info(model_tag);
     LM_Config config;
     config.from_pretrained(this->supported_models.get_model_path(new_model_tag));
@@ -61,53 +62,53 @@ bool ModelDownloader::check_model_compatibility(const std::string& model_tag, bo
     uint32_t local_version_u32 = l_l * 1000000 + m_l * 1000 + r_l;
     uint32_t required_version_u32 = l_r * 1000000 + m_r * 1000 + r_r;
     uint32_t flm_version_u32 = l_f * 1000000 + m_f * 1000 + r_f;
-    bool is_future_version = false;
+
     if (local_version_u32 > flm_version_u32) {
-        is_future_version = true;
-    }
-    bool is_compatible = true;
-    if (local_version_u32 < required_version_u32) {
-        is_compatible = false;
-    }
-    if (!sub_process_mode) {
-        if (is_future_version) {
-            header_print("WARNING", "Local model version: " + flm_version + " > " + __FLM_VERSION__);
-            header_print("WARNING", "This model may not be compatible with the current FLM version.");
+        if (!sub_process_mode) {
+            header_print("WARNING", "Local model " + model_tag + " version: " + flm_version + " > " + __FLM_VERSION__);
             header_print("WARNING", "Please update FLM to the latest version.");
-            exit(0);
         }
-        if (!is_compatible) {
-            header_print("FLM", "Local model " + model_tag + " version: " + flm_version + " < " + flm_min_version);
-            return false;
-        }
+        return ModelStatus::Incompatible;
     }
-    return is_compatible;
+    if (local_version_u32 < required_version_u32) {
+        if (!sub_process_mode) {
+            header_print("WARNING", "Local model " + model_tag + " version: " + flm_version + " < " + flm_min_version);
+            header_print("FLM", "Re-pulling latest model...");
+        }
+        return ModelStatus::Outdated;
+    }
+    return ModelStatus::Ready;
 }
 /// \brief Pull the model
 /// \param model_tag the model tag
 /// \param force_redownload true if the model should be downloaded even if it is already downloaded
 /// \return true if the model is downloaded, false otherwise
-bool ModelDownloader::pull_model(const std::string& model_tag, bool force_redownload) {
+bool ModelDownloader::pull_model(const std::string& model_tag, bool use_modelscope, bool force_redownload) {
     try {
         // Get model info
         auto [new_model_tag, model_info] = supported_models.get_model_info(model_tag);
         std::string model_name = model_info["name"];
-        std::string base_url = model_info["url"];
+        std::string model_server = use_modelscope ? "ModelScope" : "HuggingFace";
         
+        header_print("FLM", "Pulling model from " + model_server + "...");
         header_print("FLM", "Model: " + new_model_tag);
         header_print("FLM", "Name: " + model_name);
-        
-        // Check if model is already downloaded
-        if (!force_redownload && is_model_downloaded(new_model_tag)) {
-            header_print("FLM", "Model already downloaded. Use --force to re-download.");
-            return true;
-        }
 
-        // If force, verify existing files and remove only corrupted ones,
-        // instead of wiping the whole model directory. Files that pass
-        // verification will be reused; missing/corrupted ones get re-downloaded.
-        if (force_redownload) {
-            verify_and_clean_files(new_model_tag);
+        ModelDownloader::ModelStatus status = is_model_downloaded(new_model_tag);
+        switch (status) {
+            case ModelStatus::Ready:
+                if (!force_redownload) {
+                    header_print("FLM", "Model already downloaded. Use --force to re-download.");
+                    return true;
+                }
+                verify_and_clean_files(new_model_tag, use_modelscope);
+                break;
+            case ModelStatus::Missing:
+                break;
+            case ModelStatus::Outdated:
+                break;
+            case ModelStatus::Incompatible:
+                return true;
         }
         
         // Get missing files
@@ -136,7 +137,7 @@ bool ModelDownloader::pull_model(const std::string& model_tag, bool force_redown
         }
         
         // Build download list
-        auto download_list = build_download_list(new_model_tag);
+        auto download_list = build_download_list(new_model_tag, use_modelscope);
         auto downloads = download_list.first;
         float sum_fize_size = download_list.second;
         if (downloads.empty()) {
@@ -284,14 +285,14 @@ std::string ModelDownloader::get_model_file_path(const std::string& model_path, 
 /// \brief Build the download list
 /// \param model_tag the model tag
 /// \return the download list
-std::pair<nlohmann::json, float> ModelDownloader::build_download_list(const std::string& model_tag) {
+std::pair<nlohmann::json, float> ModelDownloader::build_download_list(const std::string& model_tag, bool modelscope) {
     
     nlohmann::json downloads = nlohmann::json::array();
     float sum_file_size = 0;
 
     try {
         auto [new_model_tag, model_info] = supported_models.get_model_info(model_tag);
-        std::string base_url = model_info["url"];
+        std::string base_url = modelscope ? model_info["ms_url"] : model_info["url"];
         std::string model_name = model_info["name"];
         std::string file_url = model_info["file_url"];
         std::vector<std::string> model_files = model_info["files"];
@@ -300,9 +301,18 @@ std::pair<nlohmann::json, float> ModelDownloader::build_download_list(const std:
         std::string model_path = supported_models.get_model_path(new_model_tag);
         std::filesystem::create_directories(model_path);
         
+        nlohmann::json hf_model_infos;
         // GET HF api/models
-        std::string hf_response = download_utils::download_string(file_url);
-        nlohmann::json hf_model_infos = nlohmann::json::parse(hf_response);
+        // if (modelscope == 0) {
+        //     std::string hf_response = download_utils::download_string(file_url);
+        //     hf_model_infos = nlohmann::json::parse(hf_response);
+        // }
+        // else {
+        std::string model_info_path = utils::find_model_info();
+        std::ifstream model_info_file(model_info_path);
+        nlohmann::json model_info_json = nlohmann::json::parse(model_info_file);
+        hf_model_infos = model_info_json.at(new_model_tag);
+        // }
 
         for (const auto& filename : model_files) {
             auto it = std::find_if(
@@ -327,6 +337,7 @@ std::pair<nlohmann::json, float> ModelDownloader::build_download_list(const std:
                 else {
                     url = base_url + "/resolve/main/" + filename + "?download=true";
                 }
+                // header_print("URL", url);
                 bool is_lfs = file.contains("lfs");
                 std::string oid = is_lfs ? file["lfs"]["oid"] : file["oid"];
                 float file_size = static_cast<float>(file["size"]) / 1024 / 1024;
@@ -408,22 +419,28 @@ bool ModelDownloader::remove_model(const std::string& model_tag, bool sub_proces
 /// \brief Check hash of model files
 /// \param model_tag the model tag
 /// \return true if all files are present and compatible, false otherwise
-bool ModelDownloader::check_model(const std::string& model_tag, bool sub_process_mode) {
+bool ModelDownloader::check_model(const std::string& model_tag, bool use_modelscope, bool sub_process_mode) {
     auto [new_model_tag, model_info] = supported_models.get_model_info(model_tag);
     header_print("FLM", "Checking model: " + new_model_tag + "...\n");
 
-    if (!is_model_downloaded(new_model_tag, sub_process_mode)) {
-        header_print("FLM", "Model not exist or not compatible: " + new_model_tag);
-        header_print("FLM", "Please use `flm pull " + new_model_tag + "` to download the model.");
-        return true;
-    }
-    else {
-        bool ok = verify_and_clean_files(new_model_tag, sub_process_mode);
-        if (!ok) {
-            header_print("FLM", "Model check completed with errors. Please use `flm pull " + new_model_tag + "` to re-download corrupted files.");
-        }
-        else {
-            header_print("FLM", "Model check completed successfully. All files are present and compatible.");
+    ModelStatus status = is_model_downloaded(new_model_tag, sub_process_mode);
+    switch (status) {
+        case ModelStatus::Missing:
+            header_print("FLM", "Model not found: " + new_model_tag);
+            header_print("FLM", "Use `flm pull " + new_model_tag + "` to download it.");
+            return true;
+        case ModelStatus::Incompatible:
+            header_print("FLM", "Model is incompatible with this version of FastFlowLM: " + new_model_tag);
+            header_print("FLM", "Use `flm pull " + new_model_tag + "` to re-download it.");
+            return true;
+        case ModelStatus::Outdated:
+        case ModelStatus::Ready: {
+            bool ok = verify_and_clean_files(new_model_tag, use_modelscope, sub_process_mode);
+            if (!ok)
+                header_print("FLM", "Model check completed with errors. Use `flm pull " + new_model_tag + "` to re-download corrupted files.");
+            else
+                header_print("FLM", "Model check completed successfully. All files are present and compatible.");
+            return true;
         }
     }
     return true;
@@ -434,7 +451,7 @@ bool ModelDownloader::check_model(const std::string& model_tag, bool sub_process
 /// \param model_tag the model tag
 /// \param sub_process_mode if true, suppress informational logging
 /// \return true if all files passed verification, false otherwise
-bool ModelDownloader::verify_and_clean_files(const std::string& model_tag, bool sub_process_mode) {
+bool ModelDownloader::verify_and_clean_files(const std::string& model_tag, bool use_modelscope, bool sub_process_mode) {
     bool any_error = false;
     try {
         auto [new_model_tag, model_info] = supported_models.get_model_info(model_tag);
@@ -442,9 +459,18 @@ bool ModelDownloader::verify_and_clean_files(const std::string& model_tag, bool 
         std::string model_path = supported_models.get_model_path(new_model_tag);
         std::string file_url = model_info["file_url"];
 
+        nlohmann::json hf_model_infos;
         // GET HF api/models
-        std::string hf_response = download_utils::download_string(file_url);
-        nlohmann::json hf_model_infos = nlohmann::json::parse(hf_response);
+        // if (use_modelscope == 0) {
+        //     std::string hf_response = download_utils::download_string(file_url);
+        //     hf_model_infos = nlohmann::json::parse(hf_response);
+        // }
+        // else {
+        std::string model_info_path = utils::find_model_info();
+        std::ifstream model_info_file(model_info_path);
+        nlohmann::json model_info_json = nlohmann::json::parse(model_info_file);
+        hf_model_infos = model_info_json.at(new_model_tag);
+        // }
 
         for (const auto& filename : model_files) {
             if (!sub_process_mode) {

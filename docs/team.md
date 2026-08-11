@@ -17,7 +17,7 @@ sections:
         href: "mailto:info@fastflowlm.com"
         style: primary
       - label: "Join Discord"
-        href: "https://discord.gg/z24t23HsHF?utm_source=site"
+        href: "https://discord.com/invite/jtWZdMJ8ee?utm_source=site"
         style: ghost
         external: true
     right:
@@ -85,7 +85,7 @@ sections:
           href: "mailto:info@fastflowlm.com"
           style: primary
         - label: "Open an issue"
-          href: "https://github.com/FastFlowLM/FastFlowLM/issues/new"
+          href: "https://github.com/ROCm/FastFlowLM/issues/new"
           style: ghost
           external: true
 ---

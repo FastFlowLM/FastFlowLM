@@ -21,5 +21,6 @@ parent: Models
 - For detailed usage instructions, please refer to:
     - HuggingFace: [FastFlowLM/smolvla](https://huggingface.co/FastFlowLM/smolvla)
     - ModelScope: [amd/smolvla](https://modelscope.cn/models/amd/smolvla)
+- For measured inference latency on Strix Point, see [SmolVLA benchmarks](/docs/benchmarks/smolvla_results/).
 
 ---

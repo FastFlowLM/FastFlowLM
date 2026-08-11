@@ -96,7 +96,7 @@ sections:
       href: "https://youtu.be/TT7WZOeqxQY?si=DUpdyw_xNBYfEZNz"
       kicker: "Qwen3.6-MoE on NPU"
       body: |
-        The fastest Qwen3.6-35B-A3B MoE implementation on any NPU—built for both Windows and Linux (Linux in this deomo).
+        The fastest Qwen3.6-35B-A3B MoE implementation on any NPU—built for both Windows and Linux (Linux in this demo).
 
   - type: media
     variant: alt

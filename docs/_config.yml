@@ -123,7 +123,7 @@ docs_nav:
       - label: EmbeddingGemma
         url: "/docs/models/embeddinggemma/"
       - label: SmolVLA
-        url: "/docs/models/smolvla"
+        url: "/docs/models/smolvla/"
   - label: Benchmarks
     children:
       - label: Overview
@@ -150,3 +150,5 @@ docs_nav:
         url: "/docs/benchmarks/phi4_results/"
       - label: Nanbeige4.1
         url: "/docs/benchmarks/nanbeige4.1_results/"
+      - label: SmolVLA
+        url: "/docs/benchmarks/smolvla_results/"

@@ -231,7 +231,7 @@ static void check_and_notify_new_version() {
     const std::string latest = latest_opt.value();
     if (compare_semver(latest, current) > 0) {
         header_print("FLM", "New version detected! (current v" << current << ", latest " << latest << ")");
-        header_print("FLM", "Download link: https://github.com/ROCm/FastFlowLM/releases/latest/download/flm-setup.exe");
+        header_print("FLM", "Download link: https://github.com/ROCm/FastFlowLM/releases/latest/download/flm-setup.msi");
     }
 }
 #else
@@ -304,7 +304,7 @@ static void check_and_notify_new_version() {
     const std::string latest = latest_opt.value();
     if (compare_semver(latest, current) > 0) {
         header_print("FLM", "New version detected! (current v" << current << ", latest " << latest << ")");
-        header_print("FLM", "Download link: https://github.com/ROCm/FastFlowLM/releases/latest/download/flm-setup.exe");
+        header_print("FLM", "Download link: https://github.com/ROCm/FastFlowLM/releases/latest/download/flm-setup.msi");
     }
 }
 #endif

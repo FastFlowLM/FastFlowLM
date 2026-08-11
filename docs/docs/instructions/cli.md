@@ -542,10 +542,16 @@ Example:
 
 Use the FLM benchmarking tool to measure a model's performance across different context lengths.
 
-Each benchmark tests context lengths from `1k` to `32k`, running `8` iterations at each length.
+Each benchmark tests context lengths from `1k` to `32k`, running `2` iterations at each length.
 
 ```shell
 flm bench llama3.2:1b
+```
+
+Change the iteration times by `bench-iteratons`:
+
+```shell
+flm bench llama3.2:1b --bench-iteratons 4
 ```
 
 FLM prints the results in your terminal and also saves them as a CSV file in the current folder for later reference.

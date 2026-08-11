@@ -27,3 +27,4 @@ has_children: true
 - [Nanbeige](nanbeige/)
 - [Whisper](whisper/)
 - [Embedding Gemma](embeddinggemma/)
+- [SmolVLA](smolvla/)

@@ -1,4 +1,4 @@
-# 📜 History of FastFlowLM (FLM)
+# 📜 The Story of FastFlowLM (FLM)
 
 From a 2025 university research project to the NPU-first runtime for AMD Ryzen™ AI — now part of AMD.
 
@@ -6,7 +6,7 @@ From a 2025 university research project to the NPU-first runtime for AMD Ryzen�
 
 ## 🎓 2025 — A University Project
 
-Modern AMD Ryzen™ AI laptops all shipped with a capable, power-efficient NPU. Almost nobody could run an LLM on it. The silicon sat idle while inference ran on the CPU and GPU.
+Modern AMD Ryzen™ AI laptops all shipped with a capable, power-efficient NPU. Almost nobody could run an LLM on it with good performance and long context length.
 
 FastFlowLM started as an **NSF-funded university research project** aimed squarely at that gap. The bet: closing it required co-designing kernels around the NPU's dataflow architecture from the ground up — not porting an existing runtime onto it.
 
@@ -14,11 +14,9 @@ What began as federally funded lab work became **FastFlowLM, Inc.** in 2025, and
 
 ### Founders
 
-- **[Tao Wei](https://www.clemson.edu/cecas/departments/ece/faculty_staff/faculty/twei.html)** — Professor of ECE, Clemson University; directs the NEXT Lab (domain-specific accelerators, reconfigurable computing, applied ML). Leads FLM kernel strategy.
-- **[Ken Qing Yang](https://web.uri.edu/ecbe/meet/qing-ken-yang/)** — Distinguished Engineering Professor, University of Rhode Island. 30+ years in computer architecture; serial entrepreneur behind four deep-tech startups, including VeloBit (acquired by Western Digital) and [DapuStor](https://en.dapustor.com/).
-- **[Zhenyu (Alfred) Xu](https://scholar.google.com/citations?hl=en&user=iuIZeGYAAAAJ)** — Research Assistant Professor, Clemson University. Accelerator design and on-device AI inference, with hardware–software co-optimization across FPGA, CGRA, and AI accelerators.
-
-The wider founding team brought four PhDs and three B.S. graduates in Electrical and Computer Engineering.
+- **[Tao Wei](https://www.linkedin.com/in/tao-wei-734a121b/)** — Professor of ECE, Clemson University; directs the NEXT Lab (domain-specific accelerators, reconfigurable computing, applied ML). Leads FLM kernel strategy.
+- **[Ken Qing Yang](https://www.linkedin.com/in/ken-qing-yang-3b30331)** — Distinguished Engineering Professor, University of Rhode Island. 30+ years in computer architecture; serial entrepreneur behind four deep-tech startups, including VeloBit (acquired by Western Digital) and [DapuStor](https://en.dapustor.com/).
+- **[Zhenyu (Alfred) Xu](https://www.linkedin.com/in/zhenyu-xu-327bb71b4)** — Research Assistant Professor, Clemson University. Accelerator design and on-device AI inference, with hardware–software co-optimization across FPGA, CGRA, and AI accelerators.
 
 ---
 

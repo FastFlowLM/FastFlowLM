@@ -11,7 +11,7 @@
         efficiency than GPU-first stacks.
       </p>
       <div class="btn-row">
-        <a class="btn btn--primary" href="https://github.com/ROCm/FastFlowLM/releases/latest" target="_blank" rel="noreferrer">Download FastFlowLM</a>
+        <a class="btn btn--primary" href="https://github.com/ROCm/FastFlowLM/releases/latest/download/flm-setup.msi" target="_blank" rel="noreferrer">Download FastFlowLM</a>
         <a class="btn btn--ghost" href="https://github.com/ROCm/FastFlowLM" target="_blank"
           rel="noreferrer">GitHub</a>
         <a class="btn btn--ghost" href="{{ '/benchmarks/' | relative_url }}">Benchmarks</a>
@@ -42,8 +42,9 @@
           <span class="code-card__dot"></span>
           <span class="code-card__title">fastflow.ps1</span>
         </div>
-        <pre><code>Expand-Archive fastflowlm_windows_amd64.zip -DestinationPath flm
-cd flm
+        <pre><code>Invoke-WebRequest https://github.com/ROCm/FastFlowLM/releases/latest/download/flm-setup.msi `
+  -OutFile flm-setup.msi
+Start-Process .\flm-setup.msi -Wait
 
 flm pull llama3.2:1b
 flm run llama3.2:1b

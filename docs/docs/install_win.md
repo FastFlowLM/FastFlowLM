@@ -31,9 +31,14 @@ You must have AMD NPU driver **version number >= 32.0.203.304** (`.304` is the m
 
 ## 💾 Install FastFlowLM (Windows)
 
-The FLM Windows package is available on the [releases page](https://github.com/ROCm/FastFlowLM/releases/latest).
+A packaged FLM Windows installer is available here:  
+[**flm-setup.msi**](https://github.com/ROCm/FastFlowLM/releases/latest/download/flm-setup.msi)
 
-Download `fastflowlm_<version>_windows_amd64.zip`, extract it, and run `flm.exe` from the extracted folder.
+> To install silently, open PowerShell, navigate (`cd`) to the download folder, and run:
+
+```shell
+.\flm-setup.msi /qn
+```
 
 If you see **"Windows protected your PC"**, click **More info**, then select **Run anyway**.
 

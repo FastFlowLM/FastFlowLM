@@ -23,7 +23,7 @@ Run large language models — now with **Vision**, **Audio**, **Embedding** and 
 
 ## 🔗 Quick Links
 
-  🔽 **[Download](https://github.com/ROCm/FastFlowLM/releases/latest/download/flm-setup.exe)** | 📊 **[Benchmarks](https://fastflowlm.com/docs/benchmarks/)** | 📦 **[Model List](https://fastflowlm.com/docs/models/)**  
+  🔽 **[Download](https://github.com/ROCm/FastFlowLM/releases/latest)** | 📊 **[Benchmarks](https://fastflowlm.com/docs/benchmarks/)** | 📦 **[Model List](https://fastflowlm.com/docs/models/)**  
 
   🐧 **[Linux Getting Started Guide](./docs/linux-getting-started.md)**
 
@@ -33,7 +33,7 @@ Run large language models — now with **Vision**, **Audio**, **Embedding** and 
 
 ## 🚀 Quick Start
 
-A packaged FLM Windows installer is available here: [**flm-setup.exe**](https://github.com/ROCm/FastFlowLM/releases/latest/download/flm-setup.exe). For more details, see the [release notes](https://github.com/ROCm/FastFlowLM/releases/).
+FLM Windows and Linux packages are available on the [releases page](https://github.com/ROCm/FastFlowLM/releases/latest). For more details, see the [release notes](https://github.com/ROCm/FastFlowLM/releases/).
 
 📺 [**Watch the quick start video (Windows)**](https://www.youtube.com/watch?v=mYOfDNkyBII)
 

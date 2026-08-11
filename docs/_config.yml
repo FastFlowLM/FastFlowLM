@@ -122,6 +122,8 @@ docs_nav:
         url: "/docs/models/whisper/"
       - label: EmbeddingGemma
         url: "/docs/models/embeddinggemma/"
+      - label: SmolVLA
+        url: "/docs/models/smolvla"
   - label: Benchmarks
     children:
       - label: Overview

@@ -80,7 +80,7 @@ flm serve llama3.2:1b
 
 ## 📰 In the News
 
-- 08/11/2026 🎉 FLM is now part of **[ROCm](https://github.com/ROCm/FastFlowLM)** (v1.0.0) — the repo has moved to AMD's open-source ROCm organization. Read **[our story](./flm_story.md)**.
+- 08/11/2026 🎉 FLM is now part of **[ROCm](https://github.com/ROCm/FastFlowLM)** (v1.0.0) — the repo has moved to AMD's open-source ROCm organization.
 
 - 08/11/2026 🎉 FLM releases its first **SmolVLA** model (v1.0.0) — a Vision-Language-Action robotics policy running on the NPU. See the **[model card](https://fastflowlm.com/docs/models/smolvla/)** and **[benchmarks](https://fastflowlm.com/docs/benchmarks/smolvla_results/)**.
 

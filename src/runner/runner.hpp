@@ -1,5 +1,5 @@
 /*!
- *  Copyright (c) 2023 by Contributors
+ *  Copyright (c) 2026 Advanced Micro Devices, Inc.
  * \file main.cpp
  * \brief Main entry point for the FLM application
  * \author FastFlowLM Team

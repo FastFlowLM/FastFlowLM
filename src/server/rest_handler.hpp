@@ -1,5 +1,5 @@
 ﻿/*!
- *  Copyright (c) 2023 by Contributors
+ *  Copyright (c) 2026 Advanced Micro Devices, Inc.
  * \file rest_handler.hpp
  * \brief RestHandler class and related declarations
  * \author FastFlowLM Team

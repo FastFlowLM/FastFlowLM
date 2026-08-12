@@ -1,5 +1,5 @@
 /*
-*  Copyright (c) 2025 by Contributors
+*  Copyright (c) 2026 Advanced Micro Devices, Inc.
 *  \file runner.cpp
 *  \brief Runner implementation for interactive model execution
 *  \author FastFlowLM Team

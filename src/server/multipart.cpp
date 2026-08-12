@@ -1,5 +1,5 @@
 ﻿/*!
- *  Copyright (c) 2023 by Contributors
+ *  Copyright (c) 2026 Advanced Micro Devices, Inc.
  * \file multipart.cpp
  * \brief MultiPart/form-data Parser
  * \author FastFlowLM Team

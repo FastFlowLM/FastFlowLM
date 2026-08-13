@@ -40,7 +40,7 @@ HEADERS += ../../include/AutoModel/modeling_qwen3_5_omni.hpp
 # 1: images
 # 2: audios
 # 3: omni
-TYPE ?= 3
+TYPE ?= 0
 
 
 ifeq ($(WSL), 0)
@@ -73,7 +73,7 @@ clean:
 
 test: $(BUILD_DIR)/test_qwen3_5_omni_npu
 	cp ../../model_list.json $(BUILD_DIR)/model_list.json
-	cd $(BUILD_DIR) && export LD_LIBRARY_PATH=../../../lib && ./test_qwen3_5_omni_npu --model qwen3.5-omni --type $(TYPE)
+	cd $(BUILD_DIR) && export LD_LIBRARY_PATH=$(abspath $(LIB_DIR)):$$LD_LIBRARY_PATH && ./test_qwen3_5_omni_npu --model qwen3.5-omni --type $(TYPE)
 
 -include $(DEPS)
 .PHONY: all clean test

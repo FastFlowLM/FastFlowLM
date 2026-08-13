@@ -57,7 +57,7 @@ clean:
 
 test: $(BUILD_DIR)/test_qwen3_6_moe_npu
 	cp ../../model_list.json $(BUILD_DIR)/model_list.json
-	cd $(BUILD_DIR) && export LD_LIBRARY_PATH=../../../lib && ./test_qwen3_6_moe_npu --model qwen3.6-moe -s 1
+	cd $(BUILD_DIR) && export LD_LIBRARY_PATH=../../../lib/xrt && ./test_qwen3_6_moe_npu --model qwen3.6-moe -s 1
 
 -include $(DEPS)
 .PHONY: all clean test

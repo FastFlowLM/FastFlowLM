@@ -135,6 +135,41 @@
                 ],
                 "footprint": 9.1
             }
+        },        
+        "qwen3.5-omni": {
+            "4b": {
+                "name": "Qwen3.5-OMNI-NPU2",
+                "url": "https://huggingface.co/amd/Qwen3.5-OMNI-NPU2",
+                "file_url": "https://huggingface.co/api/models/amd/Qwen3.5-OMNI-NPU2/tree/main",
+                "size": 400000000,
+                "flm_min_version": "0.9.45",
+                "files": [
+                    "config.json",
+                    "model.q4nx",
+                    "tokenizer.json",
+                    "tokenizer_config.json",
+                    "chat_template.jinja",
+                    "vision_weight.q4nx",
+                    "audio_weight.q4nx"
+                ],
+                "vlm": true,
+                "asr": true,
+                "default_context_length": 32768,
+                "max_prefill_len": 4096,
+                "details": {
+                    "format": "NPU2",
+                    "family": "qwen3.5-omni",
+                    "think": true,
+                    "parameter_size": "4B",
+                    "quantization_level": "Q8_0"
+                },
+                "label": [
+                    "vision",
+                    "audio",
+                    "reasoning"
+                ],
+                "footprint": 1.4
+            }
         },
         "qwen3.5": {
             "0.8b": {

@@ -36,11 +36,11 @@ sections:
         external: true
     stats:
       - label: "Runtime size"
-        value: "~16 MB"
+        value: "~17 MB"
       - label: "Context"
         value: "Up to 256k tokens"
       - label: "Supported chips"
-        value: "Ryzen™ AI (Strix, Strix Halo, Kraken, Gorgon)"
+        value: "Ryzen™ AI (Strix, Strix Halo, Kraken, Gorgon Point)"
     right:
       carousel:
         slides:
@@ -72,7 +72,7 @@ sections:
                   label: "Power Efficiency"
                 - value: "256k"
                   label: "Context Tokens"
-                - value: "~16MB"
+                - value: "~17 MB"
                   label: "Runtime Size"
           - title: "Multi‑Modal AI Support"
             description: "Run language models, vision models, audio processing, embeddings, and support Mixture‑of‑Experts (MoE) architectures."
@@ -108,12 +108,12 @@ sections:
       href: "https://youtu.be/sZt1WyNoL2U?si=7U3z6u6E9KF6G_Dd"
       kicker: "GPT-OSS on NPU"
       body: |
-        Runs GPT-OSS-20B at 19 TPS (token per second) with 10× GPU efficiency — the fastest MoE on any NPU.
+        Runs GPT-OSS-20B at 19 TPS (tokens per second) with 10× GPU efficiency — the fastest MoE on any NPU.
 
   - type: media
     variant: alt
     kicker: "Gemma3 (Vision) on NPU"
-    title: "Gemma3 (Vision) understand and describe the image"
+    title: "Gemma3 (Vision) understands and describes the image"
     media:
       src: "/assets/gemma3_4b.gif"
       alt: "Gemma3 vision model understanding an image"
@@ -152,7 +152,7 @@ sections:
       kicker: "Install"
       title: "From download to first token in under a minute"
       body: |
-        FastFlowLM ships as a 16 MB runtime with an Ollama-style CLI and a server compatible with the OpenAI API.
+        FastFlowLM ships as a 17 MB runtime with an Ollama-style CLI and a server compatible with the OpenAI API.
         No drivers, no guesswork—just run the installer, pull a model, and start chatting.
       items:
         - heading: "Zero-conf installer"
@@ -178,7 +178,7 @@ sections:
     title: "One runtime, every Ryzen-ready model"
     body: |
       Pull curated FastFlowLM recipes.
-      The runtime streams tokens via OpenAI-compatible API, so existing apps work without rewrites.
+      The runtime streams tokens via an OpenAI-compatible API, so existing apps work without rewrites.
     cards:
       - label: "Flagship reasoning"
         title: "GPT-OSS · DeepSeek-R1 · Qwen3"

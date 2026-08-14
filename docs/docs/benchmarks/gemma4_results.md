@@ -2,7 +2,7 @@
 layout: docs
 title: Gemma 4
 parent: Benchmarks
-nav_order: 3
+nav_order: 4
 ---
 
 ## ⚡ Performance and Efficiency Benchmarks
@@ -35,8 +35,7 @@ AMD Ryzen™ AI 7 350 (Kraken Point) with 32 GB DRAM; performance is comparable 
 | **Gemma 4 E2B**  | NPU (FLM)    | 22.6	| 21.7	| 20.0	| 17.5	| 14.1 |	10.1 |
 | **Gemma 4 E4B**  | NPU (FLM)    | 12.6 | 12.3 | 11.6 | 10.6 | 9.0 | 6.8 |
 
-> OOC: Out Of Context Length  
-> Each LLM has a maximum supported context window. For example, the gemma4:1b model supports up to 32k tokens.
+> Each LLM has a maximum supported context window. For example, the gemma4-it:e2b model supports up to 128k tokens.
 
 ---
 

@@ -58,7 +58,7 @@ sections:
           - label: "DapuStor"
             url: "https://en.dapustor.com/"
       - name: "Zhenyu (Alfred) Xu"
-        role: "Co-founder"
+        role: "Co-Founder"
         image: "/assets/zhenyu.png"
         bio: |
           Research Assistant Professor · Clemson University. Focused on domain-specific accelerator design, reconfigurable computing, and efficient on-device AI inference.

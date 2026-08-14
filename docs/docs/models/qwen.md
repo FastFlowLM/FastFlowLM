@@ -168,7 +168,7 @@ flm run qwen3vl-it:3b -r 1
 flm serve qwen3vl-it:3b -r 1
 ```
 
-The `-r` option determines image's height:
+The `-r` option determines the image's height:
 
 - 0: original size 
 - 1: height = 480 px 
@@ -233,7 +233,7 @@ flm run qwen2.5vl-it:3b -r 1
 flm serve qwen2.5vl-it:3b -r 1
 ```
 
-The `-r` option determines image's height:
+The `-r` option determines the image's height:
 
 - 0: original size 
 - 1: height = 480 px 
@@ -279,7 +279,7 @@ flm run qwen3.5:0.8b -r 1
 flm serve qwen3.5:0.8b -r 1
 ```
 
-The `-r` option determines image's height:
+The `-r` option determines the image's height:
 
 - 0: original size 
 - 1: height = 480 px 
@@ -326,7 +326,7 @@ flm run qwen3.5:2b -r 1
 flm serve qwen3.5:2b -r 1
 ```
 
-The `-r` option determines image's height:
+The `-r` option determines the image's height:
 
 - 0: original size 
 - 1: height = 480 px 
@@ -373,7 +373,7 @@ flm run qwen3.5:4b -r 1
 flm serve qwen3.5:4b -r 1
 ```
 
-The `-r` option determines image's height:
+The `-r` option determines the image's height:
 
 - 0: original size 
 - 1: height = 480 px 
@@ -420,7 +420,7 @@ flm run qwen3.5:9b -r 1
 flm serve qwen3.5:9b -r 1
 ```
 
-The `-r` option determines image's height:
+The `-r` option determines the image's height:
 
 - 0: original size 
 - 1: height = 480 px 
@@ -467,7 +467,7 @@ flm run qwen3.6-moe:35b-a3b -r 1
 flm run qwen3.6-moe:35b-a3b -r 1
 ```
 
-The `-r` option determines image's height:
+The `-r` option determines the image's height:
 
 - 0: original size 
 - 1: height = 480 px 
@@ -479,6 +479,6 @@ The `-r` option determines image's height:
 
 📝 **Note**
 
-- Optimal sampling parameters for generation vary depending on the task. Check the [Qwen3.5-9B model card](https://huggingface.co/Qwen/Qwen3.6-35B-A3B#using-qwen36-via-the-chat-completions-api) for details.
+- Optimal sampling parameters for generation vary depending on the task. Check the [Qwen3.6-35B-A3B model card](https://huggingface.co/Qwen/Qwen3.6-35B-A3B#using-qwen36-via-the-chat-completions-api) for details.
 - Image understanding adapts to image size. Image TTFT can range from under 1 second to ~200 seconds depending on resolution. Use lower-resolution images (720p or below) unless high resolution is required (e.g. OCR on small text).
 - Video understanding is not supported yet.

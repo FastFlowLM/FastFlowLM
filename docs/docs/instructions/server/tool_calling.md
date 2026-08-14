@@ -271,7 +271,7 @@ print(resp2.choices[0].message.content)
 ```
 
 ## 🕸️ How to use tool calling with FLM in Open WebUI (Stream Mode Only)
-### 🛠️ How to setup and use a tool
+### 🛠️ How to set up and use a tool
 
 1. Follow the quick Open WebUI setup guide [here](https://fastflowlm.com/docs/instructions/server/webui/#-run-open-webui-with-fastflowlm).
 
@@ -325,7 +325,7 @@ Here we recommend some useful tools and walk you through their step‑by‑step 
    - Save your changes and copy the generated API key.
 
 
-2. Refer to the [tool-setup-guide](#how-to-setup-and-use-a-tool) to add and activate the `Play YouTube Video` tool.
+2. Refer to the [tool-setup-guide](#how-to-set-up-and-use-a-tool) to add and activate the `Play YouTube Video` tool.
 
 3. Use your `YouTube Data API v3` key:
     - In the **left sidebar** of Open WebUI, navigate to `Workspace`.

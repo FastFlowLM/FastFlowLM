@@ -7,7 +7,7 @@ parent: Models
 
 ## 🧩 Model Card: [whisper-large-v3-turbo](https://huggingface.co/openai/whisper-large-v3-turbo)
 
-- **Type:** Speach-to-Text (ASR: Automatic Speech Recognition)
+- **Type:** Speech-to-Text (ASR: Automatic Speech Recognition)
 - **Think:** No
 - **Tool Calling Support:** No
 - **Base Model:** [openai/whisper-large-v3-turbo](https://huggingface.co/openai/whisper-large-v3-turbo)
@@ -16,8 +16,8 @@ parent: Models
 
 ▶️ Run with FastFlowLM in PowerShell:  
 
-> ASR model requires to use with an LLM (load concurrently) for CLI Mode.
-> ASR model can be used as an independent ASR model in Server Mode (flm v0.9.21 and after).
+> The ASR model must be used with an LLM (loaded concurrently) in CLI Mode.
+> The ASR model can be used as an independent ASR model in Server Mode (flm v0.9.21 and after).
 
 ### CLI Mode   
 

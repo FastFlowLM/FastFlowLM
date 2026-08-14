@@ -2,7 +2,7 @@
 layout: docs
 title: SmolVLA
 parent: Benchmarks
-nav_order: 9
+nav_order: 12
 ---
 
 ## ⚡ Performance and Efficiency Benchmarks
@@ -19,7 +19,7 @@ This section reports the performance on NPU with FastFlowLM (FLM).
 
 ### **Test System:** 
 
-AMD Ryzen™ AI 9 370 (Strix Point) with 32 GB DRAM; performance is comparable to other Strix Point and Strix Halo Point systems.
+AMD Ryzen™ AI 9 370 (Strix Point) with 32 GB DRAM; performance is comparable to other Strix Point and Strix Halo systems.
 
 ---
 

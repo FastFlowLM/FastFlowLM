@@ -52,7 +52,7 @@ flm run llama3.2:1b
 > - Internet access to HuggingFace is required to download the optimized model kernels.
 > - Sometimes downloads from HuggingFace may get corrupted. If this happens, run `flm pull <model_tag> --force` (e.g. `flm pull llama3.2:1b --force`) to re-download and fix them.
 > - By default, models are stored in:
->   - **Windows**: `C:\Users\<USER>\Documents\flm\models\`
+>   - **Windows**: `C:\Users\<USER>\.flm\models\`
 >   - **Linux**: `~/.config/flm/`
 > - During installation on Windows, you can select a different base folder (e.g., if you choose `C:\Users\<USER>\flm`, models will be saved under `C:\Users\<USER>\flm\models\`).
 > - On Linux, you can override the default location by setting the `FLM_MODEL_PATH` environment variable.
@@ -72,7 +72,7 @@ To start the local server (**Server Mode**):
 ```powershell
 flm serve llama3.2:1b
 ```
-> The model tag (e.g., `llama3.2:1b`) sets the initial model, which is optional. If another model is requested, FastFlowLM will automatically switch to it. Local server is on port 52625 (default).  
+> The model tag (e.g., `llama3.2:1b`) sets the initial model, which is optional. If another model is requested, FastFlowLM will automatically switch to it. The local server runs on port 52625 (default).  
 
 **[![FastFlowLM Docs](https://img.shields.io/badge/FastFlowLM-Detailed%20Instructions-red?style=flat&logo=readthedocs)](https://fastflowlm.com/docs/instructions/)**
 
@@ -151,7 +151,7 @@ For developers who want to build FastFlowLM from source, we provide CMake preset
 
 ### Build Instructions
 
-More details on the exact procedure, with dependencies to be installed, for linux can be found in [linux-getting-started.md](docs/linux-getting-started.md).
+More details on the exact procedure, with dependencies to be installed, for Linux can be found in [linux-getting-started.md](docs/linux-getting-started.md).
 
 1.  **Clone the repository:**
 

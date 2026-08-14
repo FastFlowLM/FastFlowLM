@@ -61,7 +61,7 @@ flm run llama3.2:1b
 
 ### ⬇️ Pull a Model (Download Only)
 
-Download a model from Hugging Face without launching it:
+Download a model from HuggingFace without launching it:
 
 ```shell
 flm pull llama3.2:3b
@@ -79,7 +79,7 @@ flm pull llama3.2:3b --force
 
 | Platform | Default Path |
 |----------|-------------|
-| Windows  | `C:\Users\username\Documents\flm\models` |
+| Windows  | `C:\Users\<USER>\.flm\models` |
 | Linux    | `~/.config/flm/models` |
 
 #### 🔧 Changing the Model Storage Path
@@ -175,7 +175,7 @@ flm check llama3.2:3b
 
 ### 🚀 Start Server Mode (Local)
 
-Launch FastFlowLM as a local REST API server (also support OpenAI API):
+Launch FastFlowLM as a local REST API server (also supports the OpenAI API):
 
 ```shell
 flm serve llama3.2:1b
@@ -472,7 +472,7 @@ Example:
 
 👉 [Download a sample prompt (around 40k tokens)](https://github.com/ROCm/FastFlowLM/blob/main/assets/alice_in_wonderland.txt)  
 
-> ⚠️ **Caution:** a model’s supported context length is limited by available DRAM capacity. For example, with **32 GB** of DRAM, **LLaMA 3.1:8B** cannot run beyond a **32K** context length. For the full **128K** context, we recommend larger memory system.
+> ⚠️ **Caution:** a model’s supported context length is limited by available DRAM capacity. For example, with **32 GB** of DRAM, **LLaMA 3.1:8B** cannot run beyond a **32K** context length. For the full **128K** context, we recommend a larger memory system.
 
 If DRAM is heavily used by other programs while running **FastFlowLM**, you may encounter errors due to insufficient memory, such as:
 
@@ -548,10 +548,10 @@ Each benchmark tests context lengths from `1k` to `32k`, running `2` iterations 
 flm bench llama3.2:1b
 ```
 
-Change the iteration times by `bench-iteratons`:
+Change the iteration times by `bench-iterations`:
 
 ```shell
-flm bench llama3.2:1b --bench-iteratons 4
+flm bench llama3.2:1b --bench-iterations 4
 ```
 
 FLM prints the results in your terminal and also saves them as a CSV file in the current folder for later reference.

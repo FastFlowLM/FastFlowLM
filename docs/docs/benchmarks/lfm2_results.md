@@ -2,7 +2,7 @@
 layout: docs
 title: LiquidAI/LFM2
 parent: Benchmarks
-nav_order: 5
+nav_order: 7
 ---
 
 ## ⚡ Performance and Efficiency Benchmarks
@@ -48,7 +48,7 @@ AMD Ryzen™ AI 7 350 (Kraken Point) with 32 GB DRAM; performance is comparable 
 
 ### **Test System 2:** 
 
-AMD Ryzen™ AI 9 370 (Strix Point) with 32 GB DRAM; performance is comparable to other Strix Point and Strix Halo Point systems.
+AMD Ryzen™ AI 9 370 (Strix Point) with 32 GB DRAM; performance is comparable to other Strix Point and Strix Halo systems.
 
 <div style="display:flex; flex-wrap:wrap;">
   <img src="/assets/bench/lfm2_decoding_stx.png" style="width:15%; min-width:300px; margin:4px;">
@@ -70,7 +70,7 @@ AMD Ryzen™ AI 9 370 (Strix Point) with 32 GB DRAM; performance is comparable t
 
 | **Model**        | **HW**       | **1k** | **2k** | **4k** | **8k** | **16k** | **32k** |
 |------------------|--------------------|--------:|--------:|--------:|--------:|---------:|---------:|
-| **LFM2-1.2B**  | NPU (FLM)    | 1487	| 1992	| 2436	| 2518	| 2257	| 1839
+| **LFM2-1.2B**  | NPU (FLM)    | 1487	| 1992	| 2436	| 2518	| 2257	| 1839 |
 | **LFM2-2.6B**  | NPU (FLM)    | 715	| 932	| 1107	|	1206	|	1152	|	1008	|
 
 ---

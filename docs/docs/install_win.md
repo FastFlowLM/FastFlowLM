@@ -68,7 +68,7 @@ flm serve gemma3:4b --pmode balanced
 
 ## 🧪 Quick Test (CLI Mode)
 
-After installation, do a quick test to see if FastFlowLM is properly installed. Open **PowerShell** (`Win + X → I`), and run a model in terminal (CLI mode):
+After installation, do a quick test to see if FastFlowLM is properly installed. Open **PowerShell** (`Win + X → I`), and run a model in the terminal (CLI mode):
 
 ```shell
 flm run llama3.2:1b
@@ -76,7 +76,7 @@ flm run llama3.2:1b
 
 > **Notes:**
 > - Internet access to HuggingFace is required to download the optimized model kernels.  
-> - By default, models are stored in: `C:\Users\<USER>\flm\models\`  
+> - By default, models are stored in: `C:\Users\<USER>\.flm\models\`  
 > - During installation, you can select a different base folder (e.g., if you choose `C:\Users\<USER>\Documents\flm`, models will be saved under `C:\Users\<USER>\Documents\flm\models\`).
 > - ⚠️ If HuggingFace is not directly accessible in your region, you can manually download the model (e.g., [hf-mirror](https://hf-mirror.com/models?search=fastflowlm)) and place it in the directory.
 

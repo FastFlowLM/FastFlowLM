@@ -2,7 +2,7 @@
 layout: docs
 title: Nanbeige4.1
 parent: Benchmarks
-nav_order: 8
+nav_order: 11
 ---
 
 ## ⚡ Performance and Efficiency Benchmarks

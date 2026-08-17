@@ -9,7 +9,7 @@
 #include <utility>
 gemma4e_image_t Gemma4e::load_image(const std::string &filename)
 {
-    gemma4e_image_t empty_result;
+    gemma4e_image_t empty_result{};
     image_data_t decoded;
     image_data_t reordered;
     if (!image_reader_.load_image(filename, decoded))
@@ -35,7 +35,7 @@ gemma4e_image_t Gemma4e::load_image(const std::string &filename)
 
 gemma4e_image_t Gemma4e::load_image_base64(const std::string &base64_string)
 {
-    gemma4e_image_t empty_result;
+    gemma4e_image_t empty_result{};
     image_data_t decoded;
     image_data_t reordered;
     if (!image_reader_.load_image_base64(base64_string, decoded))

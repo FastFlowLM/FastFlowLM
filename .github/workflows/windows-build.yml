@@ -98,34 +98,6 @@ jobs:
           cd inno
           .\get_files.bat
 
-      - name: Setup .NET SDK
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '8.0.x'
-
-      - name: Ensure WiX Toolset is installed
-        shell: powershell
-        run: |
-          $ErrorActionPreference = "Stop"
-
-          # dotnet global tools land here; make sure this run and subsequent
-          # steps can find `wix` on PATH regardless of prior runner state.
-          $toolsDir = Join-Path $env:USERPROFILE ".dotnet\tools"
-          if (-not (Test-Path $toolsDir)) {
-            New-Item -ItemType Directory -Force $toolsDir | Out-Null
-          }
-          Add-Content -Path $env:GITHUB_PATH -Value $toolsDir
-          $env:PATH = "$toolsDir;$env:PATH"
-
-          if (-not (Get-Command wix -ErrorAction SilentlyContinue)) {
-            dotnet tool install --global wix --version 5.*
-          }
-
-          # Best-effort: the UI extension may already be cached from a previous run.
-          $ErrorActionPreference = "Continue"
-          wix extension add WixToolset.UI.wixext 2>&1 | Out-String | Write-Host
-          $ErrorActionPreference = "Stop"
-
       - name: Build MSI installer
         shell: powershell
         run: |

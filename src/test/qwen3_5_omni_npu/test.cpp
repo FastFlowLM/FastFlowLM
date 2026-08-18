@@ -24,7 +24,7 @@ int main(int argc, char* argv[]) {
     desc.add_options()("type,t", arg_utils::po::value<int>()->default_value(0), "\t0: text mode\n\t1: image only\n\t2: audio only:\n\t3: omni mode\n\t");
     desc.add_options()("Preemption,p", arg_utils::po::value<bool>()->default_value(false), "Preemption");
     desc.add_options()("Greedy,g", arg_utils::po::value<bool>()->default_value(true), "Greedy decoding");
-    desc.add_options()("Length,l", arg_utils::po::value<int>()->default_value(8192), "Max generation length");
+    desc.add_options()("Length,l", arg_utils::po::value<int>()->default_value(32), "Max generation length");
     arg_utils::po::store(arg_utils::po::parse_command_line(argc, argv, desc), vm);
 
     std::string tag = vm["model"].as<std::string>();
@@ -99,7 +99,9 @@ int main(int argc, char* argv[]) {
     // call so the driver-side wiring (tokenization, image/audio preprocessing,
     // soft-token expansion) can be exercised without a hard crash.
     try {
-        std::string response = chat->generate_with_prompt(meta_info, uniformed_input, length_limit, std::cout);
+        chat->insert(meta_info, uniformed_input);
+        std::cout << "Prefill Done!" << std::endl;
+        std::string response = chat->generate(meta_info, 1024, std::cout);
     } catch (const std::exception& e) {
         header_print("FLM", "Engine path not available yet: " << e.what());
     }

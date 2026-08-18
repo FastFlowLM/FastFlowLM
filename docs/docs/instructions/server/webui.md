@@ -169,7 +169,7 @@ flm serve llama3.2:1b
 ```
 
 You can now use `FastFlowLM` directly in Open WebUI.
-> When switching models, it may take longer time to replace the model in memory.
+> When switching models, it may take a longer time to replace the model in memory.
 
 ---
 
@@ -209,7 +209,7 @@ docker compose pull
 
 - Want login? Set `WEBUI_AUTH=true`
 - You must keep FastFlowLM server running
-- For persistent chat history, the volume `openwebui-data` stores user data
+- For persistent chat history, the volume `open-webui-data` stores user data
 
 ---
 
@@ -240,7 +240,7 @@ A step-by-step guide to launching FastFlowLM and interacting with multiple model
 
 ### 🌐 Step 1: Run Open WebUI with FastFlowLM
 
-Follow the quick setup at [here](https://fastflowlm.com/docs/instructions/server/webui/).
+Follow the quick setup [here](https://fastflowlm.com/docs/instructions/server/webui/).
 
 ---
 
@@ -263,7 +263,7 @@ Type anything you're curious about in the input box.
 
 ⚠️ Please note:
 
-- Each model will reply in sequences (not all at once)..
+- Each model will reply in sequence (not all at once).
 - The flm server dynamically loads each model based on your selection.
 
 ---
@@ -332,7 +332,7 @@ With your **API Key** and **Search Engine ID** from Step 1, follow these steps:
 
 1. Start a new chat and select your preferred model (e.g., qwen3-it:4b).
 > ⚠️ **Note:** not all models handle web search well.
-2. Under the chat input box, Click `integrations`, and toggle **Web Search** to activate it .
+2. Under the chat input box, Click `integrations`, and toggle **Web Search** to activate it.
 - 🔄 You’ll need to activate this **every time you start a new chat**. 
 3. Ask anything you're curious about—real-time search will enhance your answers!
 
@@ -354,18 +354,18 @@ In this example, the knowledge base is the **Open WebUI documentation**. With Fa
 
 1. Download the latest `Open WebUI` **[documentation](https://github.com/open-webui/docs/archive/refs/heads/main.zip)**.
 2. Extract the `docs-main.zip` file to get all documentation files.
-3. In the extracted folder, locate all files with `.md` and `.mdx`extensions (tip: `Ctrl+F` and search for `*.md*`).
+3. In the extracted folder, locate all files with `.md` and `.mdx` extensions (tip: `Ctrl+F` and search for `*.md*`).
 
 ---
 
 ### 🌐 Step 2: Run Open WebUI with FastFlowLM 
 
-Follow the quick setup at **[here](#-run-open-webui-with-fastflowlm)**.
+Follow the quick setup guide **[here](#-run-open-webui-with-fastflowlm)**.
 
 ---
-### 🧠 Step 3: Create a Knowledge Bases
+### 🧠 Step 3: Create a Knowledge Base
 
-1. In Open WebUI,from the **top-left** menu, navigate to **Workspace** > **Knowledge** (top bar) > Click `+` symbol on the right side to **Create a Knowledge Base**.
+1. In Open WebUI, from the **top-left** menu, navigate to **Workspace** > **Knowledge** (top bar) > Click `+` symbol on the right side to **Create a Knowledge Base**.
 2. Enter `What are you working on?` → `Open WebUI Documentation`
 3. Enter `What are you trying to achieve?`→ `Assistance`.
 4. Click on **`Create Knowledge`**.
@@ -375,7 +375,7 @@ Follow the quick setup at **[here](#-run-open-webui-with-fastflowlm)**.
 
 ### 🧩 Step 4: Create and Configure the Model
 
-1. Go to **left-top** menu, navigate to **Workspace** > **Models** (top bar) > Click `+` symbol on the right side to **Add New Model**
+1. Go to the **top-left** menu, navigate to **Workspace** > **Models** (top bar) > Click `+` symbol on the right side to **Add New Model**
 2. Configure the Model:
 	- **Model Name**: Enter a name, e.g. `FLM_RAG`
 	- **Base Model**: Choose from the available list, e.g., gemma3:4b

@@ -26,5 +26,5 @@ has_children: true
 - [Phi](phi/)
 - [Nanbeige](nanbeige/)
 - [Whisper](whisper/)
-- [Embedding Gemma](embeddinggemma/)
+- [EmbeddingGemma](embeddinggemma/)
 - [SmolVLA](smolvla/)

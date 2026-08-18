@@ -58,7 +58,7 @@ AMD Ryzen™ AI 7 350 (Kraken Point) with 32 GB DRAM; performance is comparable 
 |                  | CPU          | 10.3   | 7.7    | 7.6    | 6.7    | 5.8     | OOM     | OOM     | OOM      | CPU          |                  | -->
 <!-- > **Note:** 
 - The official release of Ryzen™ AI Software limits context length to 2,048 tokens, thus "*NA*" is used in the table (NPU-only mode). 
-- The hybrid mode of Ryzen™ AI Software uses iGPU for decoding. Its performance is simliar to iGPU (LM Studio). Also, it limits context length to 2,048, thus, we did not include hybrid mode for comparison.  -->
+- The hybrid mode of Ryzen™ AI Software uses iGPU for decoding. Its performance is similar to iGPU (LM Studio). Also, it limits context length to 2,048, thus, we did not include hybrid mode for comparison.  -->
 > OOM: Out Of Memory  
 > Only <50% system DRAM can be accessed by NPU  
 > On systems with more than 32 GB DRAM, longer context lengths are supported. FLM supports the full context length available for each model.  

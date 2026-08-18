@@ -77,15 +77,24 @@ bool Qwen3VL::insert(chat_meta_info_t& meta_info, lm_uniform_input_t& input, std
         // time_utils::time_point preprocess_start = time_utils::now();
         for(const auto& img_str : input.images){
             qwen3vl_image_t image = this->load_image(img_str);
-            
+            if (image.width <= 0 || image.height <= 0) {
+                header_print("ERROR", "Skipping image that failed to load: " << img_str);
+                continue;
+            }
+
             preprocess_image(image, image_payload._data__processed);
+            if (image.grid_h <= 0 || image.grid_w <= 0) {
+                header_print("ERROR", "Skipping image that failed to preprocess: " << img_str);
+                continue;
+            }
             // Push the image AFTER preprocessing so grid_h and grid_w are set
             image_payload.images.push_back(image);
             image_payload.num_images++;
-        } 
+        }
     }
     if (!input.messages.empty()) { // already a formated messages, usually from REST API
         json qwenvl_message = json::array();
+        int total_images = 0;
         for (const auto& item : input.messages) {
             if (!item.contains("images")) {
                 qwenvl_message.push_back(item);
@@ -94,6 +103,29 @@ bool Qwen3VL::insert(chat_meta_info_t& meta_info, lm_uniform_input_t& input, std
 
             json newContent = json::array();
             for (const auto& img : item["images"]) {
+                std::string img_str = img.get<std::string>();
+
+                // Decode/preprocess up front so an invalid image (e.g. bad
+                // base64) never gets an image-soft-token placeholder in the
+                // template below; otherwise image_payload.images would fall
+                // out of sync with the placeholders and the prompt would
+                // still try to prefill a nonexistent image.
+                qwen3vl_image_t image = this->load_image_base64(img_str);
+                if (image.width <= 0 || image.height <= 0) {
+                    header_print("ERROR", "Skipping invalid base64 image; prefilling language only for this item");
+                    continue;
+                }
+
+                preprocess_image(image, image_payload._data__processed);
+                if (image.grid_h <= 0 || image.grid_w <= 0) {
+                    header_print("ERROR", "Skipping image that failed to preprocess");
+                    continue;
+                }
+
+                image_payload.images.push_back(image);
+                image_payload.num_images++;
+                total_images++;
+
                 newContent.push_back({
                     {"type", "image"},
                     {"image", img}
@@ -112,22 +144,6 @@ bool Qwen3VL::insert(chat_meta_info_t& meta_info, lm_uniform_input_t& input, std
             qwenvl_message.push_back(newItem);
         }
         templated_text = this->apply_chat_template(qwenvl_message, input.tools);
-        int total_images = 0;
-        for (auto& message : qwenvl_message) {
-            auto content = message.value("content", nlohmann::ordered_json::array());
-            for (auto& item : content) {
-                if (item.contains("type") && item["type"] == "image") {
-                    std::string img_str = item.value("image", "");
-                    if (!img_str.empty()) {
-                        total_images++;
-                    }
-                    qwen3vl_image_t image = this->load_image_base64(img_str);
-                    preprocess_image(image, image_payload._data__processed);
-                    image_payload.images.push_back(image);
-                    image_payload.num_images++;
-                }
-            }
-        }
         header_print("FLM", "Total images: " << total_images);
     }
     else if (!input.prompt.empty()) { // a pure text, usually from the cli

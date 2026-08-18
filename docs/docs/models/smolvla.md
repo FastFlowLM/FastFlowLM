@@ -1,7 +1,7 @@
 ---
 layout: docs
 title: SmolVLA
-nav_order: 12
+nav_order: 13
 parent: Models
 ---
 

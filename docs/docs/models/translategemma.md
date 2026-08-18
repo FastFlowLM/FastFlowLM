@@ -1,7 +1,7 @@
 ---
 layout: docs
 title: TranslateGemma
-nav_order: 11
+nav_order: 12
 parent: Models
 ---
 
@@ -38,5 +38,5 @@ TranslateGemma expects a single **user message** with this structure:
 
 🦙Refer to the Ollama model library for detailed usage [examples](https://ollama.com/library/translategemma#:~:text=text%20to%20translate.-,Examples,-English%20to%20Spanish).
 
-- [Reaseach Blog](https://blog.google/innovation-and-ai/technology/developers-tools/translategemma/)
+- [Research Blog](https://blog.google/innovation-and-ai/technology/developers-tools/translategemma/)
 - [Technical Report](https://arxiv.org/pdf/2601.09012)

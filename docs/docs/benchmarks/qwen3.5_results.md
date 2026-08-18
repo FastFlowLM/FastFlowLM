@@ -2,7 +2,7 @@
 layout: docs
 title: Qwen 3.5
 parent: Benchmarks
-nav_order: 7
+nav_order: 9
 ---
 
 ## ⚡ Performance and Efficiency Benchmarks

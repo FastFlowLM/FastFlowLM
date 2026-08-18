@@ -212,7 +212,7 @@ You can load a full `.txt` file as a prompt — useful for long documents or tes
 
 👉 [Download the sample prompt](https://github.com/ROCm/FastFlowLM/blob/main/assets/alice_in_wonderland.txt)  
 
-Download to Downloads folder. This contains over 38k token, thus may take longer to prompt. FastFlowLM supports full context length (32k–128k), making it ideal for processing long documents like this
+Download to Downloads folder. This contains over 38k tokens, so it may take longer to prompt. FastFlowLM supports full context length (32k–128k), making it ideal for processing long documents like this
 
 ```python
 # Use a text file to prompt
@@ -357,7 +357,7 @@ gc.collect()
 
 ## 🎙️ Example: Multi-Modal Input
 
-Send an image and an audio file together with a text prompt to multimodal interface of `Gemma 4`.
+Send an image and an audio file together with a text prompt to the multimodal interface of `Gemma 4`.
 
 ```python
 import base64

@@ -58,21 +58,23 @@ int main(int argc, char* argv[]) {
         uniformed_input.prompt = "What are these?";
         uniformed_input.images.push_back("../../../tb_files/panda.png");
         uniformed_input.images.push_back("../../../tb_files/puppy.png");
-        // uniformed_input.images.push_back("../../../tb_files/mj_icon.jpg");
-        // uniformed_input.images.push_back("../../../tb_files/google_icon.png");
-        // uniformed_input.images.push_back("../../../tb_files/pcb.jpg");
+        uniformed_input.images.push_back("../../../tb_files/mj_icon.jpg");
+        uniformed_input.images.push_back("../../../tb_files/google_icon.png");
+        uniformed_input.images.push_back("../../../tb_files/pcb.jpg");
         std::cout << "Prompt: " << uniformed_input.prompt << std::endl;
         std::cout << "Response: ";
         chat->start_total_timer();
         chat->insert(meta_info, uniformed_input);
+        std::cout << "Prefill Done!" << std::endl;
         std::string response = chat->generate(meta_info, 1024, std::cout);
         chat->stop_total_timer();
         std::cout << std::endl;
         std::cout << std::endl;
 
-        // return 0;
         std::cout << chat->show_profile() << std::endl;
         chat->clear_context(); 
+
+        return 0;
 
         meta_info.restore_allowed = true;
         uniformed_input.prompt = "How far is the previous city from Beijing?";

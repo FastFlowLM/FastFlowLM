@@ -98,18 +98,31 @@ jobs:
           cd inno
           .\get_files.bat
 
-      - name: Ensure WiX Toolset is installed
+
+      - name: Add WiX to PATH
         shell: powershell
         run: |
-          $ErrorActionPreference = "Stop"
-          if (-not (Get-Command wix -ErrorAction SilentlyContinue)) {
-            dotnet tool install --global wix --version 5.*
+          $wixToolsPath = "C:\Users\zani\.dotnet\tools"
+
+          if (-not (Test-Path "$wixToolsPath\wix.exe")) {
+            throw "WiX was not found at $wixToolsPath\wix.exe"
           }
 
-          # Best-effort: the UI extension may already be cached from a previous run.
-          $ErrorActionPreference = "Continue"
-          wix extension add WixToolset.UI.wixext 2>&1 | Out-String | Write-Host
-          $ErrorActionPreference = "Stop"
+          $wixToolsPath | Out-File `
+            -FilePath $env:GITHUB_PATH `
+            -Encoding utf8 `
+            -Append
+
+      - name: Verify WiX
+        shell: powershell
+        run: |
+          Write-Host "Runner identity: $(whoami)"
+          Write-Host "Runner profile: $env:USERPROFILE"
+
+          $wix = Get-Command wix -ErrorAction Stop
+          Write-Host "Using WiX: $($wix.Source)"
+          wix --version
+
 
       - name: Build MSI installer
         shell: powershell

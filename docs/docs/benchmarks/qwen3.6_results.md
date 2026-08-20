@@ -42,7 +42,7 @@ AMD Ryzen™ AI 7 350 (Kraken Point) with 96 GB DRAM; performance is comparable 
 |------------------|--------------------|--------:|--------:|--------:|--------:|---------:|---------:|
 | **Qwen3.6-35B-A3B**    | NPU (FLM)    | 102.45 | 144.8 | 202.45 | 245.99 | 277.09 | 280.97 | 
 
-<!-- ---
+---
 
 ### 🚀 Prefill TTFT with Image Input (Seconds)
 
@@ -52,14 +52,14 @@ Prefill time-to-first-token (TTFT) for Qwen3.6-35B-A3B on NPU (FastFlowLM) with 
 
 | Model        | HW  | 720p (1280×720) | 1080p (1920×1080) | 
 |--------------|-----------|----------------:|------------------:|
-| **Qwen3.6-35B-A3B**  | NPU (FLM) |             |            |
+| **Qwen3.6-35B-A3B**  | NPU (FLM) |       11.3      |      17.8      |
 
 
 **High Resolution Images:**
 
 | Model        | HW  | 2K (2560×1440) | 4K (3840×2160) |
 |--------------|-----------|---------------:|---------------:|
-| **Qwen3.6-35B-A3B**  | NPU (FLM) |             |                |
+| **Qwen3.6-35B-A3B**  | NPU (FLM) |      28.5       |    59.2            |
 
 
-> This test uses a short prompt: “Describe this image.” -->
+> This test uses a short prompt: “Describe this image.”

@@ -58,18 +58,18 @@ Prefill time-to-first-token (TTFT) for Qwen3.5-4B on NPU (FastFlowLM) with diffe
 
 | Model        | HW  | 720p (1280×720) | 1080p (1920×1080) | 
 |--------------|-----------|----------------:|------------------:|
-| Qwen3.5-0.8B  | NPU (FLM) |            1.6 |               2.9 |
-| Qwen3.5-2B  | NPU (FLM) |            2.4 |               4.8 |
-| Qwen3.5-4B  | NPU (FLM) |            3.7 |               7.5 |
-| Qwen3.5-9B  | NPU (FLM) |            4.8 |               9.6 |
+| Qwen3.5-0.8B  | NPU (FLM) |            1.3 |               2.6 |
+| Qwen3.5-2B  | NPU (FLM) |            2.1 |               4.6 |
+| Qwen3.5-4B  | NPU (FLM) |            3.4 |               6.8 |
+| Qwen3.5-9B  | NPU (FLM) |            4.4 |               9.4 |
 
 **High Resolution Images:**
 
 | Model        | HW  | 2K (2560×1440) | 4K (3840×2160) |
 |--------------|-----------|---------------:|---------------:|
-| Qwen3.5-0.8B  | NPU (FLM) |            5.3 |               15.2 |
-| Qwen3.5-2B  | NPU (FLM) |           9.6 |             30.5 |
-| Qwen3.5-4B  | NPU (FLM) |           14.7 |             41.3 |
-| Qwen3.5-9B  | NPU (FLM) |           18.0 |             50.8 |
+| Qwen3.5-0.8B  | NPU (FLM) |            5.0 |               13.3 |
+| Qwen3.5-2B  | NPU (FLM) |           9.1 |             29.1 |
+| Qwen3.5-4B  | NPU (FLM) |           12.6 |             36.1 |
+| Qwen3.5-9B  | NPU (FLM) |           16.2 |             47.3 |
 
 > This test uses a short prompt: “Describe this image.”

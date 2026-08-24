@@ -1066,8 +1066,7 @@ StreamResult Gemma4e::parse_stream_content_impl(const std::string content, bool 
 
                 result.type = StreamEventType::TOOL_DONE;
                 
-                static int tool_counter = 0;
-                result.tool_id = "call_" + std::to_string(std::time(nullptr)) + "_" + std::to_string(tool_counter++);
+                result.tool_id = "call_" + std::to_string(std::time(nullptr));
                 auto parsed_tool = parse_gemma4e_tool_content(tool_content);
                 result.tool_name = parsed_tool.first;
                 result.tool_args_str = parsed_tool.second.dump();

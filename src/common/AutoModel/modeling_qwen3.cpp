@@ -423,7 +423,6 @@ StreamResult Qwen3_IT::parse_stream_content(const std::string content) {
             auto j = nlohmann::json::parse(tool_name_);
 
             result.type = StreamEventType::TOOL_DONE;
-            //result.tool_id = generate_id();
             result.tool_id = "call_" + std::to_string(std::time(nullptr));
 
             if (j.contains("name")) {

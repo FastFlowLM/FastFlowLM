@@ -369,7 +369,7 @@ StreamResult AutoModel::_shared_think_tool_calling_pasrsed(const std::string con
                     auto j = nlohmann::json::parse(tool_name_);
 
                     result.type = StreamEventType::TOOL_DONE;
-                    result.tool_id = "generate_id()";
+                    result.tool_id = "call_" + std::to_string(std::time(nullptr));
 
                     if (j.contains("name")) {
                         result.tool_name = j["name"].get<std::string>();

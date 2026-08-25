@@ -341,7 +341,7 @@ StreamResult Nanbeige::parse_stream_content(const std::string content) {
                 try {
                     auto j = nlohmann::json::parse(tool_content);
                     result.type = StreamEventType::TOOL_DONE;
-                    result.tool_id = "generate_id()";
+                    result.tool_id = "call_" + std::to_string(std::time(nullptr));
 
                     if (j.contains("name")) {
                         result.tool_name = j["name"].get<std::string>();

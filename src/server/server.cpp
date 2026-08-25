@@ -948,6 +948,32 @@ std::unique_ptr<WebServer> create_lm_server(model_list& models, ModelDownloader&
             rest_handler->handle_version(request_json, send_response, send_streaming_response);
         });
     
+    // Add health check endpoint
+    server->register_handler("GET", "/health",
+        [](const http::request<http::string_body>& req,
+           std::function<void(const json&)> send_response,
+           std::function<void(const json&, bool)> send_streaming_response,
+           std::shared_ptr<HttpSession> session,
+           std::shared_ptr<CancellationToken> cancellation_token) {
+            json response = {
+                {"status", "ok"}
+            };
+            send_response(response);
+        });
+
+    // Add health check endpoint
+    server->register_handler("GET", "/v1/health",
+        [](const http::request<http::string_body>& req,
+           std::function<void(const json&)> send_response,
+           std::function<void(const json&, bool)> send_streaming_response,
+           std::shared_ptr<HttpSession> session,
+           std::shared_ptr<CancellationToken> cancellation_token) {
+            json response = {
+                {"status", "ok"}
+            };
+            send_response(response);
+        });
+
     // Add NPU status endpoint
     server->register_handler("GET", "/api/npu/status",
         [](const http::request<http::string_body>& req,

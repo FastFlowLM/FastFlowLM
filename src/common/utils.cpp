@@ -60,12 +60,25 @@ std::string find_model_list() {
 std::string find_model_info() {
     std::string install_prefix = CMAKE_INSTALL_PREFIX;
 
-    // 1. Check FLM_CONFIG_PATH environment variable
+    // 1. Check FLM_MODELINFO_PATH environment variable
     const char* env_path = std::getenv("FLM_MODELINFO_PATH");
     if (env_path && *env_path) {
         if (std::filesystem::exists(env_path)) {
             std::cerr << "[FLM]  Using custom model info path: " << env_path << std::endl;
             return env_path;
+        }
+    }
+
+    // 2. Stay next to an explicitly configured model_list.json. A relocated
+    // install points FLM_CONFIG_PATH at its own share/flm; without this the
+    // lookup falls through to the baked-in prefix below and we end up sizing
+    // and hash-checking downloads against a different (stale) revision.
+    const char* config_path = std::getenv("FLM_CONFIG_PATH");
+    if (config_path && *config_path) {
+        std::filesystem::path sibling =
+            std::filesystem::path(config_path).parent_path() / "model_info.json";
+        if (std::filesystem::exists(sibling)) {
+            return sibling.string();
         }
     }
 
@@ -78,6 +91,12 @@ std::string find_model_info() {
     std::string exe_relative_path = exe_dir + "/model_info.json";
     if (std::filesystem::exists(exe_relative_path)) {
         return exe_relative_path;
+    }
+
+    // Relocatable installed bundle, independent of its original prefix.
+    std::string bundle_path = exe_dir + "/../share/flm/model_info.json";
+    if (std::filesystem::exists(bundle_path)) {
+        return bundle_path;
     }
 
     // Linux: install

@@ -73,7 +73,7 @@ ModelDownloader::ModelStatus ModelDownloader::check_model_compatibility(const st
     if (local_version_u32 < required_version_u32) {
         if (!sub_process_mode) {
             header_print("WARNING", "Local model " + model_tag + " version: " + flm_version + " < " + flm_min_version);
-            header_print("FLM", "Re-pulling latest model...");
+            // header_print("FLM", "Re-pulling latest model...");
         }
         return ModelStatus::Outdated;
     }

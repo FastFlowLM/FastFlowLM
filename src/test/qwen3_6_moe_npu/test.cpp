@@ -55,6 +55,7 @@ int main(int argc, char* argv[]) {
     chat->configure_parameter("enable_think", false);
 
     if (short_prompt) {
+        // uniformed_input.prompt = "Hello";
         uniformed_input.prompt = "What are these?";
         uniformed_input.images.push_back("../../../tb_files/panda.png");
         uniformed_input.images.push_back("../../../tb_files/puppy.png");
@@ -103,7 +104,7 @@ int main(int argc, char* argv[]) {
       chat->clear_context();            
     }
     else{
-        std::ifstream file("../../../../prompt.txt", std::ios::binary);
+        std::ifstream file("/scratch/alfxu/FastFlowLM/src/tb_files/8k.txt", std::ios::binary);
         if (!file.is_open()) {
             std::cout << "Failed to open prompt file" << std::endl;
             return 1;
@@ -117,6 +118,9 @@ int main(int argc, char* argv[]) {
         std::cout << "Prompt: " << uniformed_input.prompt << std::endl;
         std::cout << "Response: ";
         chat->insert(meta_info, uniformed_input);
+        chat->generate(meta_info, 32, std::cout);
+        chat->stop_total_timer();
+
     }
 
     std::cout << std::endl;

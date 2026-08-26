@@ -81,7 +81,7 @@ int main(int argc, char* argv[]) {
         std::cout << "Response: " << std::endl;
         chat->start_total_timer();
         bool success = chat->insert(meta_info, uniformed_input);
-        std::string response = chat->generate(meta_info, 1024, std::cout);
+        std::string response = chat->generate(meta_info, 32, std::cout);
         chat->stop_total_timer();
         std::cout << std::endl;
         std::cout << std::endl;

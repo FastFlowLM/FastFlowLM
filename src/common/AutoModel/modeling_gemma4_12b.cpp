@@ -1,0 +1,784 @@
+/// \file modeling_gemma4_12b.cpp
+/// \brief Gemma4_12B class
+/// \author FastFlowLM Team
+/// \date 2026-08-25
+/// \version 0.9.45
+/// \note This is a source file for the Gemma4_12B class (text-only interface).
+
+#include "AutoModel/modeling_gemma4_12b.hpp"
+#include "metrices.hpp"
+
+namespace {
+std::string trim_gemma4_12b_tool_value(std::string value) {
+    size_t start = value.find_first_not_of(" \t\r\n");
+    if (start == std::string::npos) {
+        return "";
+    }
+
+    size_t end = value.find_last_not_of(" \t\r\n");
+    return value.substr(start, end - start + 1);
+}
+
+// --- Gemma4 tool-args parser --------------------------------------------------
+// The model emits relaxed JSON for tool arguments:
+//   - keys are bare identifiers (e.g. `name:`) — sometimes also "..." quoted
+//   - string values are delimited by <|"|>...<|"|>, but the model frequently
+//     omits the opener and/or replaces the closer with a plain `"`
+//   - values can also be objects {..}, arrays [..], booleans, null, or numbers
+//   - inside a string value, raw `"`, raw newlines, and even the literal
+//     substring `<|"|>` can appear as content
+//
+// We rewrite the input into well-formed JSON via recursive-descent.
+struct Gemma4_12BArgsParser {
+    const std::string& s;
+    size_t i = 0;
+    static constexpr size_t marker_len = 5;
+    static constexpr const char* quote_marker_lit = "<|\"|>";
+
+    explicit Gemma4_12BArgsParser(const std::string& src) : s(src) {}
+
+    void skip_ws() {
+        while (i < s.size() &&
+               std::isspace(static_cast<unsigned char>(s[i]))) ++i;
+    }
+    void skip_ws_at(size_t& pos) const {
+        while (pos < s.size() &&
+               std::isspace(static_cast<unsigned char>(s[pos]))) ++pos;
+    }
+    bool match_marker(size_t pos) const {
+        return pos + marker_len <= s.size() &&
+               s.compare(pos, marker_len, quote_marker_lit) == 0;
+    }
+
+    static void json_escape_char(std::string& out, char c) {
+        switch (c) {
+            case '"':  out.append("\\\""); break;
+            case '\\': out.append("\\\\"); break;
+            case '\n': out.append("\\n");  break;
+            case '\r': out.append("\\r");  break;
+            case '\t': out.append("\\t");  break;
+            case '\b': out.append("\\b");  break;
+            case '\f': out.append("\\f");  break;
+            default:
+                if (static_cast<unsigned char>(c) < 0x20) {
+                    char buf[8];
+                    std::snprintf(buf, sizeof(buf), "\\u%04x",
+                                  static_cast<unsigned char>(c));
+                    out.append(buf);
+                } else {
+                    out.push_back(c);
+                }
+                break;
+        }
+    }
+
+    bool match_word(const char* w, size_t len) const {
+        if (i + len > s.size()) return false;
+        if (s.compare(i, len, w) != 0) return false;
+        if (i + len == s.size()) return true;
+        unsigned char nc = static_cast<unsigned char>(s[i + len]);
+        return !(std::isalnum(nc) || nc == '_');
+    }
+
+    // Parse one JSON value. `terminators` is the set of chars that end a
+    // bare (undelimited) string at depth 0 (e.g. ",}" inside an object,
+    // ",]" inside an array, "" at the very top).
+    std::string parse_value(const std::string& terminators) {
+        skip_ws();
+        if (i >= s.size()) return "null";
+        char c = s[i];
+        if (c == '{') return parse_object();
+        if (c == '[') return parse_array();
+        if (match_word("true",  4)) { i += 4; return "true";  }
+        if (match_word("false", 5)) { i += 5; return "false"; }
+        if (match_word("null",  4)) { i += 4; return "null";  }
+        if (c == '-' || (c >= '0' && c <= '9')) return parse_number();
+        return parse_string(terminators);
+    }
+
+    std::string parse_number() {
+        size_t start = i;
+        if (s[i] == '-') ++i;
+        while (i < s.size()) {
+            char c = s[i];
+            if ((c >= '0' && c <= '9') || c == '.' ||
+                c == 'e' || c == 'E' || c == '+' || c == '-') ++i;
+            else break;
+        }
+        return s.substr(start, i - start);
+    }
+
+    std::string parse_key() {
+        skip_ws();
+        std::string key;
+        if (i >= s.size()) return key;
+        if (match_marker(i)) {
+            i += marker_len;
+            while (i < s.size() && !match_marker(i)) key.push_back(s[i++]);
+            if (match_marker(i)) i += marker_len;
+        } else if (s[i] == '"') {
+            ++i;
+            while (i < s.size() && s[i] != '"') {
+                if (s[i] == '\\' && i + 1 < s.size()) {
+                    key.push_back(s[i]);
+                    key.push_back(s[i + 1]);
+                    i += 2;
+                } else {
+                    key.push_back(s[i++]);
+                }
+            }
+            if (i < s.size() && s[i] == '"') ++i;
+        } else {
+            while (i < s.size() &&
+                   (std::isalnum(static_cast<unsigned char>(s[i])) ||
+                    s[i] == '_')) {
+                key.push_back(s[i++]);
+            }
+        }
+        return key;
+    }
+
+    std::string parse_object() {
+        // assumes s[i] == '{'
+        ++i;
+        std::string out = "{";
+        bool first = true;
+        while (i < s.size()) {
+            skip_ws();
+            if (i >= s.size()) break;
+            if (s[i] == '}') { ++i; break; }
+
+            std::string key = parse_key();
+            if (key.empty()) {
+                // can't make progress; bail
+                if (i < s.size() && s[i] == '}') { ++i; }
+                break;
+            }
+            skip_ws();
+            if (i < s.size() && s[i] == ':') ++i;
+
+            std::string val = parse_value(",}");
+
+            if (!first) out.push_back(',');
+            first = false;
+            out.push_back('"');
+            for (char kc : key) json_escape_char(out, kc);
+            out.append("\":");
+            out.append(val);
+
+            skip_ws();
+            if (i < s.size() && s[i] == ',') ++i;
+        }
+        out.push_back('}');
+        return out;
+    }
+
+    std::string parse_array() {
+        // assumes s[i] == '['
+        ++i;
+        std::string out = "[";
+        bool first = true;
+        while (i < s.size()) {
+            skip_ws();
+            if (i >= s.size()) break;
+            if (s[i] == ']') { ++i; break; }
+
+            std::string val = parse_value(",]");
+            if (!first) out.push_back(',');
+            first = false;
+            out.append(val);
+
+            skip_ws();
+            if (i < s.size() && s[i] == ',') ++i;
+        }
+        out.push_back(']');
+        return out;
+    }
+
+    // Parse a string value. Accepts three forms:
+    //   - <|"|>...<|"|>  (or <|"|>...")  -- marker opener, marker or " closer
+    //   - "..."                          -- regular JSON string
+    //   - bare text                      -- ends at depth-0 terminator
+    std::string parse_string(const std::string& terminators) {
+        enum Mode { MARKER, QUOTE, BARE };
+        Mode mode = BARE;
+        if (match_marker(i)) { mode = MARKER; i += marker_len; }
+        else if (s[i] == '"') { mode = QUOTE; ++i; }
+
+        auto is_terminator = [&](size_t pos) {
+            size_t k = pos;
+            skip_ws_at(k);
+            if (k >= s.size()) return true;
+            return terminators.find(s[k]) != std::string::npos;
+        };
+
+        // QUOTE-mode only: honor JSON-style backslash escapes verbatim.
+        auto consume_quote_escape = [&](std::string& out) {
+            // s[i] == '\\'
+            if (i + 1 >= s.size()) {
+                json_escape_char(out, s[i]);
+                ++i;
+                return;
+            }
+            char nc = s[i + 1];
+            switch (nc) {
+                case '"': case '\\': case '/':
+                case 'b': case 'f': case 'n': case 'r': case 't':
+                    out.push_back('\\');
+                    out.push_back(nc);
+                    i += 2;
+                    return;
+                case 'u': {
+                    if (i + 5 < s.size() &&
+                        std::isxdigit(static_cast<unsigned char>(s[i + 2])) &&
+                        std::isxdigit(static_cast<unsigned char>(s[i + 3])) &&
+                        std::isxdigit(static_cast<unsigned char>(s[i + 4])) &&
+                        std::isxdigit(static_cast<unsigned char>(s[i + 5]))) {
+                        out.append(s, i, 6);
+                        i += 6;
+                        return;
+                    }
+                    break;
+                }
+                default: break;
+            }
+            json_escape_char(out, s[i]);
+            ++i;
+        };
+
+        // For MARKER and BARE modes we first collect the raw content, then
+        // JSON-encode it. Backslash policy is decided per-string:
+        //   - if every `\` is followed by a valid JSON escape char, treat
+        //     them as escapes (so e.g. `\n` becomes a real newline)
+        //   - otherwise treat every `\` as a literal char (so Windows paths
+        //     like `C:\Users\nock9\Desktop\abc.txt` are preserved verbatim)
+        auto is_escape_char = [](char c) {
+            return c == '"' || c == '\\' || c == '/' ||
+                   c == 'b' || c == 'f' || c == 'n' ||
+                   c == 'r' || c == 't' || c == 'u';
+        };
+        auto encode_raw = [&](const std::string& raw, std::string& out) {
+            bool all_valid = true;
+            for (size_t k = 0; k < raw.size(); ++k) {
+                if (raw[k] == '\\') {
+                    if (k + 1 >= raw.size() || !is_escape_char(raw[k + 1])) {
+                        all_valid = false;
+                        break;
+                    }
+                    ++k;
+                }
+            }
+            for (size_t k = 0; k < raw.size(); ++k) {
+                char c = raw[k];
+                if (c == '\\' && all_valid && k + 1 < raw.size()) {
+                    char nc = raw[k + 1];
+                    if (nc == 'u' && k + 5 < raw.size() &&
+                        std::isxdigit(static_cast<unsigned char>(raw[k + 2])) &&
+                        std::isxdigit(static_cast<unsigned char>(raw[k + 3])) &&
+                        std::isxdigit(static_cast<unsigned char>(raw[k + 4])) &&
+                        std::isxdigit(static_cast<unsigned char>(raw[k + 5]))) {
+                        out.append(raw, k, 6);
+                        k += 5;
+                    } else {
+                        out.push_back('\\');
+                        out.push_back(nc);
+                        ++k;
+                    }
+                } else {
+                    json_escape_char(out, c);
+                }
+            }
+        };
+
+        std::string value;
+        std::string raw;       // used in MARKER / BARE modes
+        int depth = 0;
+        while (i < s.size()) {
+            if (mode == MARKER) {
+                if (match_marker(i)) {
+                    size_t after = i + marker_len;
+                    if (is_terminator(after)) { i = after; break; }
+                    raw.append(quote_marker_lit, marker_len);
+                    i = after;
+                    continue;
+                }
+                if (s[i] == '"' || s[i] == '`') {
+                    // The model occasionally substitutes a plain `"` or even
+                    // a backtick `` ` `` for the closing <|"|> marker. Treat
+                    // either as a close only when followed by a terminator,
+                    // so they remain valid string content otherwise.
+                    if (is_terminator(i + 1)) { ++i; break; }
+                    raw.push_back(s[i]);
+                    ++i;
+                    continue;
+                }
+                raw.push_back(s[i]);
+                ++i;
+                continue;
+            }
+            if (mode == QUOTE) {
+                char c = s[i];
+                if (c == '\\') {
+                    consume_quote_escape(value);
+                    continue;
+                }
+                if (c == '"') { ++i; break; }
+                json_escape_char(value, c);
+                ++i;
+                continue;
+            }
+            // BARE
+            if (match_marker(i)) {
+                size_t after = i + marker_len;
+                if (depth == 0 && is_terminator(after)) { i = after; break; }
+                raw.append(quote_marker_lit, marker_len);
+                i = after;
+                continue;
+            }
+            char c = s[i];
+            if (depth == 0 && terminators.find(c) != std::string::npos) break;
+            if (c == '{' || c == '[' || c == '(') ++depth;
+            else if ((c == '}' || c == ']' || c == ')') && depth > 0) --depth;
+            raw.push_back(c);
+            ++i;
+        }
+
+        if (mode != QUOTE) {
+            encode_raw(raw, value);
+        }
+
+        std::string out = "\"";
+        out.append(value);
+        out.push_back('"');
+        return out;
+    }
+};
+
+std::pair<std::string, json> parse_gemma4_12b_tool_content(std::string tool_content) {
+    tool_content = trim_gemma4_12b_tool_value(tool_content);
+
+    const std::string prefix = "call:";
+    if (tool_content.find(prefix) == 0) {
+        tool_content = trim_gemma4_12b_tool_value(tool_content.substr(prefix.length()));
+    }
+
+    // only has tool name but no args
+    size_t brace_pos = tool_content.find('{');
+    if (brace_pos == std::string::npos) {
+        return {trim_gemma4_12b_tool_value(tool_content), json::object()};
+    }
+
+    std::string tool_name = trim_gemma4_12b_tool_value(tool_content.substr(0, brace_pos));
+    std::string args_str = trim_gemma4_12b_tool_value(tool_content.substr(brace_pos));
+
+    // Rewrite the relaxed args into well-formed JSON via recursive-descent.
+    Gemma4_12BArgsParser parser(args_str);
+    parser.skip_ws();
+    std::string normalized;
+    if (parser.i < args_str.size() && args_str[parser.i] == '{') {
+        normalized = parser.parse_object();
+    } else {
+        // Unexpected shape; wrap whatever we get into an object so the
+        // downstream JSON parse step still has a sensible structure.
+        normalized = parser.parse_value("");
+    }
+
+    // Final: parse to a real JSON object; fall back to empty object on failure.
+    json args_json = json::object();
+    try {
+        args_json = json::parse(normalized);
+    } catch (const std::exception& e) {
+        std::cerr << "[WARNING] Failed to parse tool args as JSON: "
+                  << e.what() << std::endl;
+        std::cerr << "Raw args: " << normalized << std::endl;
+    }
+
+    return {tool_name, args_json};
+}
+}
+
+
+/************              Gemma4_12B family            **************/
+Gemma4_12B::Gemma4_12B(flm_rt::device* npu_device_inst) : AutoModel(npu_device_inst, "Gemma4_12B") {}
+
+void Gemma4_12B::load_model(std::string model_path, json model_info, int default_context_length, bool enable_preemption) {
+
+    this->_shared_load_model(model_path, model_info, default_context_length, enable_preemption);
+
+    this->q4nx = std::make_unique<Q4NX>(this->model_path);
+    this->lm_engine = std::make_unique<gemma4_12b_npu>(*this->lm_config, this->npu.get(), this->MAX_L);
+
+    this->lm_engine->load_weights(*this->q4nx);
+    // free the q4nx
+    this->q4nx.reset();
+    this->lm_engine->clear_context();
+    this->setup_tokenizer(model_path);
+    this->sampler.reset();
+
+    sampler_config config;
+    config.top_k = 64;
+    config.top_p = 0.95;
+    config.min_p = 0.0;
+    config.temperature = 1.0;
+    config.rep_penalty = 1.0;
+    config.freq_penalty = 1.0;
+    config.pre_penalty = 1.0f;
+
+    this->set_sampler(config);
+    for (size_t i = 0; i < PROFILER_TYPE_NUM; i++) {
+        this->profiler_list[i].reset();
+    }
+}
+
+void Gemma4_12B::setup_tokenizer(std::string model_path) {
+    auto tokenizer_config = this->_shared_setup_tokenizer(model_path);
+}
+
+std::string Gemma4_12B::apply_chat_template(nlohmann::ordered_json& messages, nlohmann::ordered_json tools) {
+    // The Gemma4 template emits unquoted keys (argument_needle:<|"|>...<|"|>), which minja's
+    // capability probe does not recognize, so it would wrongly polyfill tool calls into a
+    // generic JSON blob. The template handles tools/tool_calls/tool_responses natively.
+    minja::chat_template_options opt;
+    opt.polyfill_tools = false;
+    opt.polyfill_tool_calls = false;
+    opt.polyfill_tool_responses = false;
+    opt.polyfill_object_arguments = false;
+
+    // The template raises if tool_calls[].function.arguments is a string, but OpenAI-style
+    // clients send it serialized. Deserialize it here (what polyfill_object_arguments would do).
+    nlohmann::ordered_json normalized = messages;
+    for (auto& message : normalized) {
+        if (!message.is_object() || !message.contains("tool_calls")) continue;
+        for (auto& tool_call : message["tool_calls"]) {
+            if (!tool_call.is_object() || !tool_call.contains("function")) continue;
+            auto& function = tool_call["function"];
+            if (!function.is_object() || !function.contains("arguments")) continue;
+            auto& arguments = function["arguments"];
+            if (!arguments.is_string()) continue;
+            auto raw = arguments.get<std::string>();
+            if (raw.empty()) {
+                arguments = nlohmann::ordered_json::object();
+                continue;
+            }
+            auto parsed = nlohmann::ordered_json::parse(raw, nullptr, /* allow_exceptions= */ false);
+            if (parsed.is_object()) arguments = parsed;
+        }
+    }
+
+    minja::chat_template_inputs inputs;
+    inputs.add_generation_prompt = true;
+    inputs.messages = normalized;
+    inputs.extra_context = this->extra_context;
+    inputs.extra_context["enable_thinking"] = this->enable_think;
+    if (!tools.empty())
+        inputs.tools = tools;
+    return this->chat_tmpl->apply(inputs, opt);
+}
+
+bool Gemma4_12B::insert(chat_meta_info_t& meta_info, lm_uniform_input_t& input, std::function<bool()> is_cancelled) {
+    this->profiler_list[TKOEN_ENCODE_TIME].start();
+    std::string templated_text;
+
+    if (input.messages.empty() && input.prompt.empty()) {
+        header_print("WARNING", "No messages or prompt provided");
+        return false;
+    }
+
+    // Text-only front-end: any image/audio payload is dropped with a warning.
+    if (!input.images.empty() || !input.audios.empty()) {
+        header_print("WARNING", "Gemma4-12B text-only interface: ignoring "
+            << input.images.size() << " image(s) and "
+            << input.audios.size() << " audio(s)");
+    }
+
+    if (!input.messages.empty()) { // already a formated messages, usually from REST API
+        nlohmann::ordered_json text_messages = nlohmann::ordered_json::array();
+        bool dropped_modal = false;
+        for (const auto& item : input.messages) {
+            if (!item.contains("images") && !item.contains("audios")) {
+                text_messages.push_back(item);
+                continue;
+            }
+            dropped_modal = true;
+            nlohmann::ordered_json text_only_item = item;
+            text_only_item.erase("images");
+            text_only_item.erase("audios");
+            text_messages.push_back(text_only_item);
+        }
+        if (dropped_modal) {
+            header_print("WARNING", "Gemma4-12B text-only interface: stripped image/audio entries from messages");
+        }
+        templated_text = this->apply_chat_template(text_messages, input.tools);
+    }
+    else { // a pure text, usually from the cli
+        nlohmann::ordered_json messages;
+        messages.push_back({ {"role", "user"}, {"content", input.prompt} });
+        templated_text = this->apply_chat_template(messages, input.tools);
+    }
+
+    std::vector<int> tokens = this->tokenizer->encode(templated_text);
+
+    this->profiler_list[TKOEN_ENCODE_TIME].stop(tokens.size());
+
+    // hardware
+    int restore_idx = -1;
+    gemma4_12b_npu *gemma4_12b_engine = dynamic_cast<gemma4_12b_npu*>(this->lm_engine.get());
+
+    if (meta_info.restore_allowed) {
+        restore_idx = gemma4_12b_engine->restore();
+        this->total_tokens = restore_idx;
+        this->token_history = checkpoint_his; // restore the token history to be consistent with the restored KV cache, which is crucial for correct functioning of _shared_insert's prefix-matching logic
+    }
+
+    bool success = this->_shared_insert(meta_info, tokens, is_cancelled, nullptr);
+
+    checkpoint_his = token_history;
+    int checkpoint_idx = gemma4_12b_engine->checkpoint();
+    return success;
+}
+
+std::string Gemma4_12B::generate(chat_meta_info_t& meta_info, int length_limit, std::ostream& os, std::function<bool()> is_cancelled) {
+    std::string result = this->_shared_generate(meta_info, length_limit, os, is_cancelled);
+
+    if (!this->enable_think) {
+        gemma4_12b_npu *gemma4_12b_engine = dynamic_cast<gemma4_12b_npu*>(this->lm_engine.get());
+        int checkpoint_idx = gemma4_12b_engine->checkpoint();
+        // copy the token history at the checkpoint except the last one token, which is the start
+        // token for generation and should not be included in the checkpoint history
+        checkpoint_his = token_history;
+        if (!checkpoint_his.empty()) {
+            checkpoint_his.pop_back();
+        }
+    }
+
+    return result;
+}
+
+std::string Gemma4_12B::generate_with_prompt(chat_meta_info_t& meta_info, lm_uniform_input_t& input, int length_limit, std::ostream& os) {
+    if (!this->insert(meta_info, input)) {
+        return "";
+    }
+    if (this->enable_think) {
+        os << "<think>\n" << std::flush;
+    }
+    return this->generate(meta_info, length_limit, os);
+}
+
+// Non-stream
+NonStreamResult Gemma4_12B::parse_nstream_content(const std::string response_text) {
+    NonStreamResult result;
+
+    std::string think_start_tag = "<|channel>thought";
+    std::string think_end_tag = "<channel|>";
+    std::string tool_start_tag = "<|tool_call>";
+    std::string tool_end_tag = "<tool_call|>";
+    std::string tool_resp_tag = "<|tool_response>";
+
+    size_t think_start_pos = response_text.find(think_start_tag);
+    size_t think_end_pos = response_text.find(think_end_tag);
+    size_t tool_start_pos = response_text.find(tool_start_tag);
+    size_t tool_end_pos = response_text.find(tool_end_tag, tool_start_pos == std::string::npos ? 0 : tool_start_pos + tool_start_tag.length());
+
+    bool is_reasoning = (think_start_pos != std::string::npos && think_end_pos != std::string::npos && think_end_pos > think_start_pos);
+    bool is_tool = (tool_start_pos != std::string::npos);
+
+    // 1. Parse Reasoning Content
+    if (is_reasoning) {
+        size_t start = think_start_pos + think_start_tag.length();
+        result.reasoning_content = response_text.substr(start, think_end_pos - start);
+    }
+
+    // 2. Parse Tool Calling
+    if (is_tool) {
+        size_t search_from = 0;
+        while (true) {
+            size_t start_pos = response_text.find(tool_start_tag, search_from);
+            if (start_pos == std::string::npos) break;
+
+            size_t block_content_start = start_pos + tool_start_tag.length();
+            size_t end_pos = response_text.find(tool_end_tag, block_content_start);
+
+            size_t block_end;
+            if (end_pos != std::string::npos) {
+                block_end = end_pos;
+                search_from = end_pos + tool_end_tag.length();
+            } else {
+                size_t resp_pos = response_text.find(tool_resp_tag, block_content_start);
+                block_end = (resp_pos != std::string::npos) ? resp_pos : response_text.length();
+                search_from = block_end;
+            }
+
+            std::string tool_content = response_text.substr(block_content_start, block_end - block_content_start);
+            auto parsed_tool = parse_gemma4_12b_tool_content(tool_content);
+            result.tool_calls_list.emplace_back(parsed_tool.first, parsed_tool.second.dump());
+        }
+
+        if (!result.tool_calls_list.empty()) {
+            result.tool_name = result.tool_calls_list[0].first;
+            result.tool_args = result.tool_calls_list[0].second;
+        }
+    }
+    // 3. Parse Normal Content
+    else {
+        if (is_reasoning) {
+            // Content is whatever comes AFTER the reasoning block
+            result.content = response_text.substr(think_end_pos + think_end_tag.length());
+        } else {
+            // No reasoning, no tools -> the whole text is content
+            result.content = response_text;
+        }
+
+        // Cleanup: Strip out <|tool_response> if the model accidentally hallucinated it into plain text
+        size_t resp_pos = 0;
+        while ((resp_pos = result.content.find(tool_resp_tag, resp_pos)) != std::string::npos) {
+            result.content.erase(resp_pos, tool_resp_tag.length());
+        }
+    }
+
+    return result;
+}
+
+
+// Stream
+StreamResult Gemma4_12B::parse_stream_content(const std::string content) {
+    return parse_stream_content_impl(content, false);
+}
+
+StreamResult Gemma4_12B::parse_stream_content_final(const std::string content) {
+    return parse_stream_content_impl(content, true);
+}
+
+StreamResult Gemma4_12B::parse_stream_content_impl(const std::string content, bool is_final) {
+    const std::string MARKER_THINK_START = "<|channel>thought";
+    const std::string MARKER_THINK_END = "<channel|>";
+    const std::string MARKER_TOOL_START = "<|tool_call>";
+    const std::string MARKER_TOOL_END = "<tool_call|>";
+    const std::string MARKER_TOOL_RESP = "<|tool_response>";
+
+    StreamResult result;
+    buffer_ += content;
+
+    while (true) {
+        if (is_in_tool_block_) {
+            size_t tool_end_pos = buffer_.find(MARKER_TOOL_END);
+            size_t tool_resp_pos = buffer_.find(MARKER_TOOL_RESP);
+
+            if (tool_end_pos != std::string::npos || tool_resp_pos != std::string::npos || (is_final && !buffer_.empty())) {
+                size_t actual_end_pos = buffer_.size();
+                size_t skip_length = 0;
+
+                if (tool_end_pos != std::string::npos) {
+                    actual_end_pos = tool_end_pos;
+                    skip_length = MARKER_TOOL_END.length();
+                }
+                if (tool_resp_pos != std::string::npos && tool_resp_pos < actual_end_pos) {
+                    actual_end_pos = tool_resp_pos;
+                    skip_length = MARKER_TOOL_RESP.length();
+                }
+
+                std::string tool_content = buffer_.substr(0, actual_end_pos);
+
+                buffer_ = buffer_.substr(actual_end_pos + skip_length);
+                is_in_tool_block_ = false;
+
+                result.type = StreamEventType::TOOL_DONE;
+
+                static int tool_counter = 0;
+                result.tool_id = "call_" + std::to_string(std::time(nullptr)) + "_" + std::to_string(tool_counter++);
+                auto parsed_tool = parse_gemma4_12b_tool_content(tool_content);
+                result.tool_name = parsed_tool.first;
+                result.tool_args_str = parsed_tool.second.dump();
+                return result;
+            }
+            else {
+                result.type = StreamEventType::WAITING;
+                return result;
+            }
+        }
+
+        // Find the earliest occurring marker in the buffer to avoid skipping tags
+        size_t pos_tool_start = buffer_.find(MARKER_TOOL_START);
+        size_t pos_tool_resp  = buffer_.find(MARKER_TOOL_RESP);
+        size_t pos_think      = std::string::npos;
+
+        if (current_mode_ == StreamEventType::CONTENT) {
+            pos_think = buffer_.find(MARKER_THINK_START);
+        }
+        else if (current_mode_ == StreamEventType::REASONING) {
+            pos_think = buffer_.find(MARKER_THINK_END);
+        }
+
+        size_t min_pos = std::string::npos;
+        if (pos_tool_start != std::string::npos) min_pos = std::min(min_pos, pos_tool_start);
+        if (pos_tool_resp != std::string::npos)  min_pos = std::min(min_pos, pos_tool_resp);
+        if (pos_think != std::string::npos)      min_pos = std::min(min_pos, pos_think);
+
+        // Flush the text content before the earliest marker
+        if (min_pos != std::string::npos && min_pos > 0) {
+            result.content = buffer_.substr(0, min_pos);
+            result.type = current_mode_;
+            buffer_ = buffer_.substr(min_pos);
+            return result;
+        }
+
+        // Process the exact marker located at index 0
+        if (min_pos == 0) {
+            if (pos_tool_resp == 0) {
+                buffer_ = buffer_.substr(MARKER_TOOL_RESP.length());
+                continue;
+            }
+            if (pos_tool_start == 0) {
+                is_in_tool_block_ = true;
+                buffer_ = buffer_.substr(MARKER_TOOL_START.length());
+                continue;
+            }
+            if (pos_think == 0) {
+                if (current_mode_ == StreamEventType::CONTENT) {
+                    buffer_ = buffer_.substr(MARKER_THINK_START.length());
+                    current_mode_ = StreamEventType::REASONING;
+                } else {
+                    buffer_ = buffer_.substr(MARKER_THINK_END.length());
+                    current_mode_ = StreamEventType::CONTENT;
+                }
+                continue;
+            }
+        }
+
+        // Safe Flush Mechanism
+        std::vector<std::string> active_markers;
+        active_markers.push_back(MARKER_TOOL_START);
+        active_markers.push_back(MARKER_TOOL_RESP);
+
+        if (current_mode_ == StreamEventType::CONTENT) {
+            active_markers.push_back(MARKER_THINK_START);
+        }
+        else if (current_mode_ == StreamEventType::REASONING) {
+            active_markers.push_back(MARKER_THINK_END);
+        }
+
+        size_t safe_flush_len = buffer_.length();
+        for (const auto& marker : active_markers) {
+            for (size_t i = 1; i <= marker.length() && i <= buffer_.length(); ++i) {
+                if (buffer_.compare(buffer_.length() - i, i, marker, 0, i) == 0) {
+                    safe_flush_len = std::min(safe_flush_len, buffer_.length() - i);
+                }
+            }
+        }
+
+        if (safe_flush_len > 0) {
+            result.content = buffer_.substr(0, safe_flush_len);
+            result.type = current_mode_;
+            buffer_ = buffer_.substr(safe_flush_len);
+            return result;
+        }
+        else if (buffer_.length() > 0) {
+            result.type = StreamEventType::WAITING;
+            return result;
+        }
+
+        break;
+    }
+
+    result.type = current_mode_;
+    return result;
+}

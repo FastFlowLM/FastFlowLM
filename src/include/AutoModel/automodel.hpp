@@ -29,6 +29,7 @@
 #include "models/gemma/gemma_npu.hpp"
 #include "models/gemma_text/gemma_text_npu.hpp"
 #include "models/gemma4e/gemma4e_npu.hpp"
+#include "models/gemma4_12b/gemma4_12b_npu.hpp"
 #include "models/lfm2/lfm2_npu.hpp"
 #include "models/phi4/phi4_npu.hpp"
 #include "models/gpt_oss/gpt_oss_npu.hpp"

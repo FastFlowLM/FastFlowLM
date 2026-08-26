@@ -136,6 +136,39 @@
                 "footprint": 9.1
             }
         },
+        "gemma4-12b": {
+            "12b": {
+                "name": "Gemma4-12B-IT-NPU2",
+                "url": "https://huggingface.co/FastFlowLM/Gemma4-12B-IT-NPU2",
+                "file_url": "https://huggingface.co/api/models/FastFlowLM/Gemma4-12B-IT-NPU2/tree/main",
+                "ms_url": "https://modelscope.cn/models/amd/Gemma4-12B-IT-NPU2",
+                "size": 12000000000,
+                "flm_min_version": "0.9.45",
+                "files": [
+                    "config.json",
+                    "model.q4nx",
+                    "tokenizer.json",
+                    "tokenizer_config.json",
+                    "chat_template.jinja"
+                ],
+                "vlm": false,
+                "asr": false,
+                "default_context_length": 32768,
+                "max_prefill_len": 4096,
+                "details": {
+                    "format": "NPU2",
+                    "family": "gemma4-12b",
+                    "think": true,
+                    "parameter_size": "12B",
+                    "quantization_level": "Q4_1"
+                },
+                "label": [
+                    "reasoning",
+                    "tool-calling"
+                ],
+                "footprint": 10.5
+            }
+        },
         "qwen3.5": {
             "0.8b": {
                 "name": "Qwen3.5-0.8B-NPU2",

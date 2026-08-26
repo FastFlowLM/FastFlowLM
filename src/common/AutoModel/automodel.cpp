@@ -96,13 +96,25 @@ nlohmann::json AutoModel::_shared_setup_tokenizer(std::string model_path) {
     );
 
     if (this->has_bos_token) {
+        if (!tokenizer_config["bos_token_id"].is_number_integer()) {
+            header_print("ERROR", "bos_token is set in tokenizer_config.json but bos_token_id is missing or not an integer");
+            exit(1);
+        }
         this->bos_token_id = tokenizer_config["bos_token_id"].get<int>();
     }
     else {
         this->bos_token_id = -1;
     }
     this->eos_token = tokenizer_config["eos_token"].get<std::string>();
+    if (!tokenizer_config["eos_token_id"].is_array()) {
+        header_print("ERROR", "eos_token_id is missing or not an array in tokenizer_config.json");
+        exit(1);
+    }
     for (auto& token : tokenizer_config["eos_token_id"]) {
+        if (!token.is_number_integer()) {
+            header_print("ERROR", "eos_token_id must be an array of integers in tokenizer_config.json");
+            exit(1);
+        }
         this->eos_token_ids.push_back(token.get<int>());
     }
     this->user_system_prompt = "";

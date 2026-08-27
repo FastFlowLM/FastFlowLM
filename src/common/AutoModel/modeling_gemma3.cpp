@@ -8,7 +8,7 @@
 #include "AutoModel/modeling_gemma3.hpp"
 
 /************              Gemma3 family            **************/
-Gemma3::Gemma3(xrt::device* npu_device_inst) : AutoModel(npu_device_inst, "Gemma3") {}
+Gemma3::Gemma3(flm_rt::device* npu_device_inst) : AutoModel(npu_device_inst, "Gemma3") {}
 
 void Gemma3::load_model(std::string model_path, json model_info, int default_context_length, bool enable_preemption) {
     this->_shared_load_model(model_path, model_info, default_context_length, enable_preemption);
@@ -60,8 +60,8 @@ bool Gemma3::insert(chat_meta_info_t& meta_info, lm_uniform_input_t& input, std:
         return false;
     }
     if (!input.messages.empty()) { // already a formated messages, usually from REST API
-        templated_text = this->apply_chat_template(input.messages);
-        // std::cout << "Templated text after applying chat template: \n" << templated_text << std::endl; // Debug print
+        // Templating happens below, together with image decoding, so that a
+        // failed image never gets an image-token placeholder in the prompt.
     }
     else if (!input.prompt.empty()) { // a pure text, usually from the cli
         nlohmann::ordered_json messages;
@@ -84,27 +84,49 @@ bool Gemma3::insert(chat_meta_info_t& meta_info, lm_uniform_input_t& input, std:
 
     bytes pixel_values;
     if (!input.messages.empty()) {
+        // Decode/preprocess images up front and drop any that fail (e.g. bad
+        // base64) from a filtered copy of the messages before templating, so
+        // a failed image never gets an image-token placeholder; otherwise
+        // pixel blocks (each a fixed 896x896 slot) would fall out of sync
+        // with the placeholders and the prompt would still try to prefill a
+        // nonexistent image.
+        nlohmann::ordered_json filtered_messages = nlohmann::ordered_json::array();
+        std::vector<bytes> valid_pixel_blocks;
         int total_images = 0;
-        for (auto& message : input.messages){
+        for (auto& message : input.messages) {
             nlohmann::ordered_json::array_t images = message.value("images", nlohmann::ordered_json::array());
-            if (images.size() > 0){
-                total_images += images.size();
+            if (images.empty()) {
+                filtered_messages.push_back(message);
+                continue;
             }
+
+            nlohmann::ordered_json filtered_message = message;
+            filtered_message["images"] = nlohmann::ordered_json::array();
+            for (auto& image : images) {
+                std::string image_str = image.get<std::string>();
+                bytes image_rgb = load_image_base64(image_str);
+                if (image_rgb.size() == 0) {
+                    header_print("ERROR", "Skipping invalid base64 image; prefilling language only for this item");
+                    continue;
+                }
+                buffer<bf16> pv = preprocess_image(image_rgb);
+                bytes pv_bytes(pv.size() * sizeof(bf16));
+                memcpy(pv_bytes.data(), pv.data(), pv_bytes.size());
+                valid_pixel_blocks.push_back(std::move(pv_bytes));
+                filtered_message["images"].push_back(image);
+                total_images++;
+            }
+            filtered_messages.push_back(filtered_message);
         }
         header_print("FLM", "Total images: " << total_images);
-        // temporary solution
-        if (total_images > 0){
+        templated_text = this->apply_chat_template(filtered_messages);
+
+        if (total_images > 0) {
             pixel_values.resize(3 * 896 * 896 * sizeof(bf16) * total_images);
             uint8_t* pixel_values_ptr = pixel_values.data();
-            for (auto& message : input.messages){
-                nlohmann::ordered_json::array_t images = message.value("images", nlohmann::ordered_json::array());
-                for (auto& image : images){
-                    std::string image_str = image.get<std::string>();
-                    bytes image_rgb = load_image_base64(image_str);
-                    buffer<bf16> pv = preprocess_image(image_rgb);
-                    memcpy(pixel_values_ptr, pv.data(), pv.size() * sizeof(bf16));
-                    pixel_values_ptr += pv.size() * sizeof(bf16);
-                }
+            for (auto& block : valid_pixel_blocks) {
+                memcpy(pixel_values_ptr, block.data(), block.size());
+                pixel_values_ptr += block.size();
             }
         }
     }

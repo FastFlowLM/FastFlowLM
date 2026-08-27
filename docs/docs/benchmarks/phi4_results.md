@@ -2,7 +2,7 @@
 layout: docs
 title: Phi4
 parent: Benchmarks
-nav_order: 4
+nav_order: 6
 ---
 
 ## ⚡ Performance and Efficiency Benchmarks

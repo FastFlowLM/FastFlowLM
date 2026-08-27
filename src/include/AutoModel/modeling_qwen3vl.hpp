@@ -44,7 +44,7 @@ private:
     void preprocess_image(qwen3vl_image_t& image,  std::vector<bf16> &pixel_values);
 
 public:
-    Qwen3VL(xrt::device* npu_device_inst);
+    Qwen3VL(flm_rt::device* npu_device_inst);
 
     void load_model(std::string model_path, json model_inf, int default_context_length = -1, bool enable_preemption = false) override;
     //void toggle_enable_think() override;
@@ -114,7 +114,7 @@ class Qwen3VL_Thinking : public Qwen3VL {
         int think_marker_id;
     
     public:
-        Qwen3VL_Thinking(xrt::device* npu_device_inst) : Qwen3VL(npu_device_inst) {
+        Qwen3VL_Thinking(flm_rt::device* npu_device_inst) : Qwen3VL(npu_device_inst) {
     
         }
         std::string generate(chat_meta_info_t& meta_info, int length_limit, std::ostream& os, std::function<bool()> is_cancelled = [] { return false; }) override;

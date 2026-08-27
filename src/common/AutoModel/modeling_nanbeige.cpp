@@ -8,7 +8,7 @@
 #include "AutoModel/modeling_nanbeige.hpp"
 
 /************              Nanbeige family            **************/
-Nanbeige::Nanbeige(xrt::device* npu_device_inst) : AutoModel(npu_device_inst, "Nanbeige") {}
+Nanbeige::Nanbeige(flm_rt::device* npu_device_inst) : AutoModel(npu_device_inst, "Nanbeige") {}
 
 void Nanbeige::load_model(std::string model_path, json model_info, int default_context_length, bool enable_preemption) {
     this->_shared_load_model(model_path, model_info, default_context_length, enable_preemption);
@@ -341,7 +341,7 @@ StreamResult Nanbeige::parse_stream_content(const std::string content) {
                 try {
                     auto j = nlohmann::json::parse(tool_content);
                     result.type = StreamEventType::TOOL_DONE;
-                    result.tool_id = "generate_id()";
+                    result.tool_id = "call_" + std::to_string(std::time(nullptr));
 
                     if (j.contains("name")) {
                         result.tool_name = j["name"].get<std::string>();

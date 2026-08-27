@@ -18,7 +18,7 @@ inline std::string complete_simple_embedding_tag(std::string model_tag) {
 }
 
 
-inline std::pair<std::string, std::unique_ptr<AutoEmbeddingModel>> get_auto_embedding_model(const std::string& model_tag, xrt::device* npu_device_inst) {
+inline std::pair<std::string, std::unique_ptr<AutoEmbeddingModel>> get_auto_embedding_model(const std::string& model_tag, flm_rt::device* npu_device_inst) {
 
 #ifndef FASTFLOWLM_LINUX_LIMITED_MODELS
     static std::unordered_set<std::string> gemma_embed_tags = {

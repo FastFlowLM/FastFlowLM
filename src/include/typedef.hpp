@@ -13,6 +13,9 @@
 #include <math.h>
 #include <codecvt>
 #include <locale>
+#ifdef _WIN32
+#include <windows.h>
+#endif
 #include "biovault_bfloat16.h"
 
 typedef float f32;

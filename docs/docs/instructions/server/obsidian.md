@@ -31,7 +31,7 @@ Before starting, ensure you have the following installed:
 
 ### Start FLM server
 
-Run the following command in your powershell to launch the FastFlowLM server:
+Run the following command in PowerShell to launch the FastFlowLM server:
 
 `flm serve llama3.2:1b`
 
@@ -49,7 +49,7 @@ Run the following command in your powershell to launch the FastFlowLM server:
 8. On the **Model** line, click the **🔄** icon to load available models, then select your preferred model (e.g. llama3.2:1b).
 9. Click **Save**.
 
-#### Option B: OpenAI API
+#### Option B: Ollama API
 
 1. Click **⚙️** to open the setting panel.
 2. Under **Community Plugins** section (left), click **AI Providers**.
@@ -74,7 +74,7 @@ Run the following command in your powershell to launch the FastFlowLM server:
 
 1. On setting panel (Click **⚙️** to open the setting panel if you are not on setting panel).
 2. Under the **Options** section (left), click **Community Plugins**.
-3. Under **Installed Plugins** (right), find **Local GPT** row, then click **⊕** to add Hotkeys.
+3. Under **Installed Plugins** (right), find the **Local GPT** row, then click **⊕** to add Hotkeys.
 4. For each action, click **⊕** on the right side and assign a hotkey.
 
 For example:  

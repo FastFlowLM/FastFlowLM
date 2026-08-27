@@ -53,7 +53,7 @@ protected:
 	std::unique_ptr<Q4NX> q4nx = nullptr;
 	bool is_model_loaded = false;
 	std::string current_model = "";
-	xrt::device* npu_device_inst = nullptr;
+	flm_rt::device* npu_device_inst = nullptr;
 	std::unique_ptr<npu_xclbin_manager> npu = nullptr;
 	bool enable_preemption = false;
 
@@ -69,7 +69,7 @@ public:
 	//************ Shared by all models *************/
 	virtual ~AutoEmbeddingModel() = default;
 
-	AutoEmbeddingModel(xrt::device* npu_device_inst, std::string current_model = "");
+	AutoEmbeddingModel(flm_rt::device* npu_device_inst, std::string current_model = "");
 	/// \brief Get the current model
 	/// \return the current model
 	std::string get_current_model();

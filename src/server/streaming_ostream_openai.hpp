@@ -1,5 +1,5 @@
 /*!
- *  Copyright (c) 2023 by Contributors
+ *  Copyright (c) 2026 Advanced Micro Devices, Inc.
  * \file streaming_ostream.hpp
  * \brief Custom ostream for streaming
  * \author FastFlowLM Team
@@ -413,7 +413,6 @@ private:
     ///@param content the content
     ///@param is_final the is final
     void send_response(const std::string& content, bool is_final, bool parser_final = false) {
-        static int index = 0;
         json response;
 
         StreamResult result = parser_final
@@ -528,6 +527,8 @@ private:
     ///@brief First chunk flag
     bool first_chunk;
     stop_reason_t stream_stop_reason = stop_reason_t::EOT_DETECTED;
+    ///@brief tool_calls delta index, scoped to this stream
+    int index = 0;
 
     std::unique_ptr<harmony_filter> harmony_filter_inst;
 };

@@ -112,7 +112,7 @@ The hero section is typically used at the top of a page for the main headline an
       style: ghost
   stats:
     - label: "Runtime size"
-      value: "~16 MB"
+      value: "~17 MB"
     - label: "Context"
       value: "Up to 256k tokens"
 ```

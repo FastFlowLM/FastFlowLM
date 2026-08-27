@@ -1,5 +1,5 @@
 /*!
- *  Copyright (c) 2025 by Contributors
+ *  Copyright (c) 2026 Advanced Micro Devices, Inc.
  * \file cli_wide.hpp
  * \brief CLI interactive input handling
  * \author FastFlowLM Team

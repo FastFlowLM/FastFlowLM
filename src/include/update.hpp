@@ -1,5 +1,5 @@
 /*
-*  Copyright (c) 2025 by Contributors
+*  Copyright (c) 2026 Advanced Micro Devices, Inc.
 *  \file update.hpp
 *  \brief Detect new version
 *  \author FastFlowLM Team
@@ -156,7 +156,7 @@ static std::string fetch_path_with_timeout_flag(HINTERNET hSession,
 
 
 
-// FastFlowLM/FastFlowLM
+// ROCm/FastFlowLM
 static std::optional<std::string> http_get_latest_tag_from_github(bool& timed_out) {
     timed_out = false;
 
@@ -176,7 +176,7 @@ static std::optional<std::string> http_get_latest_tag_from_github(bool& timed_ou
     {
         bool t = false;
         std::string body = fetch_path_with_timeout_flag(hSession, host, port,
-            L"/repos/FastFlowLM/FastFlowLM/releases/latest", t);
+            L"/repos/ROCm/FastFlowLM/releases/latest", t);
         timed_out = timed_out || t;
         if (!body.empty()) {
             try {
@@ -194,7 +194,7 @@ static std::optional<std::string> http_get_latest_tag_from_github(bool& timed_ou
     {
         bool t = false;
         std::string body = fetch_path_with_timeout_flag(hSession, host, port,
-            L"/repos/FastFlowLM/FastFlowLM/tags?per_page=1", t);
+            L"/repos/ROCm/FastFlowLM/tags?per_page=1", t);
         timed_out = timed_out || t;
         if (!body.empty()) {
             try {
@@ -231,7 +231,7 @@ static void check_and_notify_new_version() {
     const std::string latest = latest_opt.value();
     if (compare_semver(latest, current) > 0) {
         header_print("FLM", "New version detected! (current v" << current << ", latest " << latest << ")");
-        header_print("FLM", "Download link: https://github.com/FastFlowLM/FastFlowLM/releases/latest/download/flm-setup.exe");
+        header_print("FLM", "Download link: https://github.com/ROCm/FastFlowLM/releases/latest/download/flm-setup.msi");
     }
 }
 #else
@@ -241,7 +241,7 @@ static size_t curl_write_cb(char* ptr, size_t size, size_t nmemb, void* userdata
     return size * nmemb;
 }
 
-// FastFlowLM/FastFlowLM (non-Windows)
+// ROCm/FastFlowLM (non-Windows)
 static std::optional<std::string> http_get_latest_tag_from_github(bool& timed_out) {
     timed_out = false;
     auto fetch_url = [&](const char* url) -> std::optional<std::string> {
@@ -266,7 +266,7 @@ static std::optional<std::string> http_get_latest_tag_from_github(bool& timed_ou
         return body;
     };
 
-    if (auto body = fetch_url("https://api.github.com/repos/FastFlowLM/FastFlowLM/releases/latest")) {
+    if (auto body = fetch_url("https://api.github.com/repos/ROCm/FastFlowLM/releases/latest")) {
         try {
             auto j = nlohmann::json::parse(*body);
             if (j.contains("tag_name") && j["tag_name"].is_string()) {
@@ -275,7 +275,7 @@ static std::optional<std::string> http_get_latest_tag_from_github(bool& timed_ou
         } catch (...) {}
     }
 
-    if (auto body = fetch_url("https://api.github.com/repos/FastFlowLM/FastFlowLM/tags?per_page=1")) {
+    if (auto body = fetch_url("https://api.github.com/repos/ROCm/FastFlowLM/tags?per_page=1")) {
         try {
             auto j = nlohmann::json::parse(*body);
             if (j.is_array() && !j.empty() && j[0].contains("name") && j[0]["name"].is_string()) {
@@ -304,7 +304,7 @@ static void check_and_notify_new_version() {
     const std::string latest = latest_opt.value();
     if (compare_semver(latest, current) > 0) {
         header_print("FLM", "New version detected! (current v" << current << ", latest " << latest << ")");
-        header_print("FLM", "Download link: https://github.com/FastFlowLM/FastFlowLM/releases/latest/download/flm-setup.exe");
+        header_print("FLM", "Download link: https://github.com/ROCm/FastFlowLM/releases/latest/download/flm-setup.msi");
     }
 }
 #endif

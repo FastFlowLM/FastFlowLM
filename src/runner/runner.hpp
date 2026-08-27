@@ -1,5 +1,5 @@
 /*!
- *  Copyright (c) 2023 by Contributors
+ *  Copyright (c) 2026 Advanced Micro Devices, Inc.
  * \file main.cpp
  * \brief Main entry point for the FLM application
  * \author FastFlowLM Team
@@ -67,7 +67,7 @@ class Runner {
         int img_pre_resize;
         // CLI instance for interactive input
         CLIWide cli;
-        xrt::device npu_device_inst;
+        flm_rt::device npu_device_inst;
 
         /// \brief Command functions
         void cmd_set(std::vector<std::string>& input_list);

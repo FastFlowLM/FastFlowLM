@@ -10,7 +10,7 @@
 #include "model_list.hpp"
 #include "utils/vm_args.hpp"
 
-xrt::device npu_device_global;
+flm_rt::device npu_device_global;
 
 
 int main(int argc, char* argv[]) {
@@ -46,7 +46,7 @@ int main(int argc, char* argv[]) {
     std::cout << "Model path: " << model_path << std::endl;
 
     std::unique_ptr<AutoModel> chat = std::make_unique<GPT_OSS>(&npu_device_global);
-    npu_device_global = xrt::device(0); 
+    npu_device_global = flm_rt::device(0); 
 
     try {
         chat->load_model(model_path, model_info, -1, preemption);

@@ -17,8 +17,8 @@ parent: Models
 
 ▶️ Run with FastFlowLM in PowerShell:  
 
-> Embedding model requires to use with an LLM (load concurrently) for Server Mode.
-> Embedding model does not work under CLI Mode.
+> The embedding model must be used with an LLM (loaded concurrently) in Server Mode.
+> The embedding model does not work in CLI Mode.
 
 ### Server Mode 
 

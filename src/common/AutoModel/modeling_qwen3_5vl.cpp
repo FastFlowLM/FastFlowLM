@@ -11,13 +11,13 @@
 
 
 /************              Qwen3_5VL family            **************/
-Qwen3_5VL::Qwen3_5VL(xrt::device* npu_device_inst) : AutoModel(npu_device_inst, "Qwen3_5VL") {}
+Qwen3_5VL::Qwen3_5VL(flm_rt::device* npu_device_inst) : AutoModel(npu_device_inst, "Qwen3_5VL") {}
 
 void Qwen3_5VL::load_model(std::string model_path, json model_info, int default_context_length, bool enable_preemption) {
     this->_shared_load_model(model_path, model_info, default_context_length, enable_preemption);
     
     this->q4nx = std::make_unique<Q4NX>(this->model_path);
-    // lm_config->model_type == qwen3
+    // lm_config->get<std::string>("model_type", "") == qwen3
     this->lm_engine = std::make_unique<qwen3_5vl_npu>(*this->lm_config, this->npu.get(), this->MAX_L);
 
     this->lm_engine->load_weights(*this->q4nx);
@@ -80,15 +80,24 @@ bool Qwen3_5VL::insert(chat_meta_info_t& meta_info, lm_uniform_input_t& input, s
         // time_utils::time_point preprocess_start = time_utils::now();
         for(const auto& img_str : input.images){
             qwen3_5vl_image_t image = this->load_image(img_str);
-            
+            if (image.width <= 0 || image.height <= 0) {
+                header_print("ERROR", "Skipping image that failed to load: " << img_str);
+                continue;
+            }
+
             preprocess_image(image, image_payload._data__processed);
+            if (image.grid_h <= 0 || image.grid_w <= 0) {
+                header_print("ERROR", "Skipping image that failed to preprocess: " << img_str);
+                continue;
+            }
             // Push the image AFTER preprocessing so grid_h and grid_w are set
             image_payload.images.push_back(image);
             image_payload.num_images++;
-        } 
+        }
     }
     if (!input.messages.empty()) { // already a formated messages, usually from REST API
         json qwenvl_message = json::array();
+        int total_images = 0;
         for (const auto& item : input.messages) {
             if (!item.contains("images")) {
                 qwenvl_message.push_back(item);
@@ -97,6 +106,29 @@ bool Qwen3_5VL::insert(chat_meta_info_t& meta_info, lm_uniform_input_t& input, s
 
             json newContent = json::array();
             for (const auto& img : item["images"]) {
+                std::string img_str = img.get<std::string>();
+
+                // Decode/preprocess up front so an invalid image (e.g. bad
+                // base64) never gets an image-soft-token placeholder in the
+                // template below; otherwise image_payload.images would fall
+                // out of sync with the placeholders and the prompt would
+                // still try to prefill a nonexistent image.
+                qwen3_5vl_image_t image = this->load_image_base64(img_str);
+                if (image.width <= 0 || image.height <= 0) {
+                    header_print("ERROR", "Skipping invalid base64 image; prefilling language only for this item");
+                    continue;
+                }
+
+                preprocess_image(image, image_payload._data__processed);
+                if (image.grid_h <= 0 || image.grid_w <= 0) {
+                    header_print("ERROR", "Skipping image that failed to preprocess");
+                    continue;
+                }
+
+                image_payload.images.push_back(image);
+                image_payload.num_images++;
+                total_images++;
+
                 newContent.push_back({
                     {"type", "image"},
                     {"image", img}
@@ -115,22 +147,6 @@ bool Qwen3_5VL::insert(chat_meta_info_t& meta_info, lm_uniform_input_t& input, s
             qwenvl_message.push_back(newItem);
         }
         templated_text = this->apply_chat_template(qwenvl_message, input.tools);
-        int total_images = 0;
-        for (auto& message : qwenvl_message) {
-            auto content = message.value("content", nlohmann::ordered_json::array());
-            for (auto& item : content) {
-                if (item.contains("type") && item["type"] == "image") {
-                    std::string img_str = item.value("image", "");
-                    if (!img_str.empty()) {
-                        total_images++;
-                    }
-                    qwen3_5vl_image_t image = this->load_image_base64(img_str);
-                    preprocess_image(image, image_payload._data__processed);
-                    image_payload.images.push_back(image);
-                    image_payload.num_images++;
-                }
-            }
-        }
         header_print("FLM", "Total images: " << total_images);
     }
     else if (!input.prompt.empty()) { // a pure text, usually from the cli

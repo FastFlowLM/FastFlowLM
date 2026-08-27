@@ -16,7 +16,6 @@
 #include <stdio.h>
 #include "buffer.hpp"
 #include "utils/debug_utils.hpp"
-#include "xrt/xrt_bo.h"
 
 const int INSTR_PRINT_WIDTH = 80;
 

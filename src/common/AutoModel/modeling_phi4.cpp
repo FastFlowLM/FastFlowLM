@@ -8,7 +8,7 @@
 #include "AutoModel/modeling_phi4.hpp"
 
 /************              Phi4 family            **************/
-Phi4::Phi4(xrt::device* npu_device_inst) : AutoModel(npu_device_inst, "Phi4") {}
+Phi4::Phi4(flm_rt::device* npu_device_inst) : AutoModel(npu_device_inst, "Phi4") {}
 
 void Phi4::load_model(std::string model_path, json model_info, int default_context_length, bool enable_preemption) {
     this->_shared_load_model(model_path, model_info, default_context_length, enable_preemption);

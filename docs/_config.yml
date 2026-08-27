@@ -51,7 +51,7 @@ nav_links:
 
 cta_links:
   - label: GitHub
-    url: "https://github.com/FastFlowLM/FastFlowLM"
+    url: "https://github.com/ROCm/FastFlowLM"
     icon: github
   - label: Discord
     url: "https://discord.com/invite/jtWZdMJ8ee?utm_source=site"
@@ -122,6 +122,8 @@ docs_nav:
         url: "/docs/models/whisper/"
       - label: EmbeddingGemma
         url: "/docs/models/embeddinggemma/"
+      - label: SmolVLA
+        url: "/docs/models/smolvla/"
   - label: Benchmarks
     children:
       - label: Overview
@@ -148,3 +150,5 @@ docs_nav:
         url: "/docs/benchmarks/phi4_results/"
       - label: Nanbeige4.1
         url: "/docs/benchmarks/nanbeige4.1_results/"
+      - label: SmolVLA
+        url: "/docs/benchmarks/smolvla_results/"

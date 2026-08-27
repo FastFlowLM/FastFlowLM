@@ -59,10 +59,11 @@ std::atomic<bool> should_exit(false);
 std::mutex exit_mutex;
 std::condition_variable exit_cv;
 
-#ifndef _WIN32
+#if !defined(FLM_USE_HRX) && !defined(_WIN32)
 ///@brief Preload critical XRT libraries from the executable directory
 ///@details This ensures that dlopen() calls within libraries find the bundled versions
-///@note Only on Linux/Unix; Windows handles DLL loading differently
+///@note Only on Linux/Unix for the XRT backend; Windows handles DLL loading
+///      differently and the HRX backend has no equivalent preload requirement.
 void preload_bundled_libraries() {
     std::string exe_dir = utils::get_executable_directory();
 
@@ -463,8 +464,8 @@ int main(int argc, char* argv[]) {
 #ifdef _WIN32
     SetConsoleOutputCP(CP_UTF8);
     SetConsoleCP(CP_UTF8);
-#else
-    // Preload bundled libraries from executable directory
+#elif !defined(FLM_USE_HRX)
+    // XRT backend: preload bundled XRT libraries from the executable directory.
     preload_bundled_libraries();
 #endif
     
@@ -611,7 +612,7 @@ int main(int argc, char* argv[]) {
         }
 
         if (parsed_args.command == "bench") {
-            benchmarking::BenchmarkResults_t results = benchmarking::run_benchmarks(parsed_args.model_tag, parsed_args.input_file_name, availble_models);
+            benchmarking::BenchmarkResults_t results = benchmarking::run_benchmarks(parsed_args.model_tag, parsed_args.input_file_name, availble_models, parsed_args.iterations);
         }
         else if (parsed_args.command == "run") {
             check_and_notify_new_version();
@@ -645,28 +646,11 @@ int main(int argc, char* argv[]) {
             // server->stop();
         }
         else if (parsed_args.command == "pull") {
-            // Check if the model is already downloaded, if true, the model will not be downloaded
-            // Check if model is already downloaded
-            if (!parsed_args.force_redownload && downloader.is_model_downloaded(parsed_args.model_tag)) {
-                header_print("FLM", "Model is already downloaded.");
-                // Show missing files if any, this will be used to show the missing files
-                auto missing_files = downloader.get_missing_files(parsed_args.model_tag);
-                if (!missing_files.empty()) {
-                    header_print("FLM", "Missing files:");
-                    for (const auto& file : missing_files) {
-                        std::cout << "  - " << file << std::endl;
-                    }
-                } else {
-                    header_print("FLM", "All required files are present.");
-                }
-            } else {
-                // Download the model, this will be used to download the model
                 bool success = downloader.pull_model(parsed_args.model_tag, parsed_args.modelscope, parsed_args.force_redownload);
                 if (!success) {
                     header_print("ERROR", "Failed to pull model: " + parsed_args.model_tag);
-                    return 1;
+                    return 1; 
                 }
-            }
         }
         else if (parsed_args.command == "remove") {
             // Remove the model, this will be used to remove the model
@@ -688,10 +672,11 @@ int main(int argc, char* argv[]) {
                 for (const auto& model : models["models"]) {
                     // Fast path: `list` only needs presence + compatibility,
                     // so skip HF metadata fetch and per-file hash verification.
-                    bool is_present = downloader.is_model_downloaded(model["name"].get<std::string>(), /*parsed_args.sub_process_mode*/true, /*fast_check=*/true);
+                    ModelDownloader::ModelStatus status = downloader.is_model_downloaded(model["name"].get<std::string>(), /*parsed_args.sub_process_mode*/true, /*fast_check=*/true);
+                    bool is_present = (status == ModelDownloader::ModelStatus::Ready);
                     if ((parsed_args.list_filter == "installed") == is_present || parsed_args.list_filter == "all") {
                         nlohmann::json model_entry = model;
-                        model_entry["installed"] = is_present ? true : false;
+                        model_entry["installed"] = is_present;
                         output_json["models"].push_back(model_entry);
                     }
                 }
@@ -703,11 +688,17 @@ int main(int argc, char* argv[]) {
                 bool any_model_listed = false;
                 for (const auto& model : models["models"]) {
                     // Fast path: skip HF metadata fetch and per-file hash verification.
-                    bool is_present = downloader.is_model_downloaded(model["name"].get<std::string>(), parsed_args.sub_process_mode, /*fast_check=*/true);
+                    ModelDownloader::ModelStatus status = downloader.is_model_downloaded(model["name"].get<std::string>(), parsed_args.sub_process_mode, /*fast_check=*/true);
+                    bool is_present = (status == ModelDownloader::ModelStatus::Ready);
                     if ((parsed_args.list_filter == "installed") == is_present || parsed_args.list_filter == "all") {
                         std::cout << "  - " << model["name"].get<std::string>();
                         if (!parsed_args.sub_process_mode) {
-                            std::cout << (is_present ? " ✅" : " ⏬");
+                            switch (status) {
+                                case ModelDownloader::ModelStatus::Ready:        std::cout << " ✅"; break;
+                                case ModelDownloader::ModelStatus::Missing:      std::cout << " ⏬"; break;
+                                case ModelDownloader::ModelStatus::Outdated:     std::cout << " ⚠️"; break;
+                                case ModelDownloader::ModelStatus::Incompatible: std::cout << " ⚠️"; break;
+                            }
                         }
                         std::cout << std::endl;
                         any_model_listed = true;

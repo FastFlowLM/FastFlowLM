@@ -10,7 +10,7 @@
 #include "model_list.hpp"
 #include "utils/vm_args.hpp"
 
-xrt::device npu_device_global;
+flm_rt::device npu_device_global;
 
 int main(int argc, char* argv[]) {
     #ifdef __WINDOWS__
@@ -45,7 +45,7 @@ int main(int argc, char* argv[]) {
     std::cout << "Model path: " << model_path << std::endl;
 
     std::unique_ptr<AutoModel> chat = std::make_unique<Qwen3_6_MOE>(&npu_device_global);
-    npu_device_global = xrt::device(0);
+    npu_device_global = flm_rt::device(0);
 
 
     chat->load_model(model_path, model_info, -1, preemption);
@@ -55,24 +55,27 @@ int main(int argc, char* argv[]) {
     chat->configure_parameter("enable_think", false);
 
     if (short_prompt) {
+        // uniformed_input.prompt = "Hello";
         uniformed_input.prompt = "What are these?";
         uniformed_input.images.push_back("../../../tb_files/panda.png");
         uniformed_input.images.push_back("../../../tb_files/puppy.png");
-        // uniformed_input.images.push_back("../../../tb_files/mj_icon.jpg");
-        // uniformed_input.images.push_back("../../../tb_files/google_icon.png");
-        // uniformed_input.images.push_back("../../../tb_files/pcb.jpg");
+        uniformed_input.images.push_back("../../../tb_files/mj_icon.jpg");
+        uniformed_input.images.push_back("../../../tb_files/google_icon.png");
+        uniformed_input.images.push_back("../../../tb_files/pcb.jpg");
         std::cout << "Prompt: " << uniformed_input.prompt << std::endl;
         std::cout << "Response: ";
         chat->start_total_timer();
         chat->insert(meta_info, uniformed_input);
+        std::cout << "Prefill Done!" << std::endl;
         std::string response = chat->generate(meta_info, 1024, std::cout);
         chat->stop_total_timer();
         std::cout << std::endl;
         std::cout << std::endl;
 
-        // return 0;
         std::cout << chat->show_profile() << std::endl;
         chat->clear_context(); 
+
+        return 0;
 
         meta_info.restore_allowed = true;
         uniformed_input.prompt = "How far is the previous city from Beijing?";
@@ -101,7 +104,7 @@ int main(int argc, char* argv[]) {
       chat->clear_context();            
     }
     else{
-        std::ifstream file("../../../../prompt.txt", std::ios::binary);
+        std::ifstream file("/scratch/alfxu/FastFlowLM/src/tb_files/8k.txt", std::ios::binary);
         if (!file.is_open()) {
             std::cout << "Failed to open prompt file" << std::endl;
             return 1;
@@ -115,6 +118,9 @@ int main(int argc, char* argv[]) {
         std::cout << "Prompt: " << uniformed_input.prompt << std::endl;
         std::cout << "Response: ";
         chat->insert(meta_info, uniformed_input);
+        chat->generate(meta_info, 32, std::cout);
+        chat->stop_total_timer();
+
     }
 
     std::cout << std::endl;

@@ -14,6 +14,7 @@ all:
 	@$(PWSH) "cmake --build build --preset windows-default"
 
 run:
+	@$(PWSH) "Copy-Item 'lib\\xrt\\*.dll' '$(OUT_DIR)' -Force"
 	@$(PWSH) "Copy-Item 'lib\\*.dll' '$(OUT_DIR)' -Force"
 	@$(PWSH) "Copy-Item 'model_list.json' '$(OUT_DIR)' -Force"
 	@$(PWSH) "Copy-Item 'model_info.json' '$(OUT_DIR)' -Force"

@@ -4,7 +4,7 @@
 
 #include "AutoModel/modeling_qwen3_5_omni.hpp"
 
-Qwen3_5_Omni::Qwen3_5_Omni(xrt::device* npu_device_inst)
+Qwen3_5_Omni::Qwen3_5_Omni(flm_rt::device* npu_device_inst)
     : AutoModel(npu_device_inst) {}
 
 /// \brief Pull the thinker-scope vision config (with VL fallbacks).
@@ -75,13 +75,13 @@ void Qwen3_5_Omni::load_model(std::string model_path, json model_info, int defau
     this->lm_config->from_pretrained(this->model_path);
 
     // The omni thinker vocab lives in thinker_config.text_config, so the
-    // top-level "vocab_size" is 0. Resolve it here so every downstream reader
-    // (set_sampler, set_topk, ...) sees the real vocab instead of 0.
+    // top-level "vocab_size" is 0. Republish it at the top level so every
+    // downstream reader (set_sampler, set_topk, ...) sees the real vocab.
     {
-        const auto& jc = this->lm_config->_json_config;
+        auto& jc = this->lm_config->_json_config;
         if (jc.contains("thinker_config") && jc["thinker_config"].contains("text_config")) {
-            this->lm_config->vocab_size =
-                json_u32(jc["thinker_config"]["text_config"], "vocab_size", this->lm_config->vocab_size);
+            jc["vocab_size"] =
+                json_u32(jc["thinker_config"]["text_config"], "vocab_size", this->lm_config->get("vocab_size"));
         }
     }
 
@@ -184,23 +184,45 @@ bool Qwen3_5_Omni::insert(chat_meta_info_t& meta_info, lm_uniform_input_t& input
 
     if (!input.messages.empty()) { // Server Processing
         int total_images = 0;
-        for (auto& message : input.messages) {
+        // Build qwen_messages (used for the template) in the same pass that
+        // decodes images/audio, so an invalid image (e.g. bad base64) never
+        // gets an image-soft-token placeholder; otherwise image_payload would
+        // fall out of sync with the placeholders and the prompt would still
+        // try to prefill a nonexistent image.
+        nlohmann::ordered_json qwen_messages = nlohmann::ordered_json::array();
+        for (const auto& message : input.messages) {
+            if (!message.contains("images") && !message.contains("audios")) {
+                qwen_messages.push_back(message);
+                continue;
+            }
+            nlohmann::ordered_json new_content = nlohmann::ordered_json::array();
             // ---- image preprocessing ----
             if (message.contains("images")) {
                 for (auto& img : message["images"]) {
                     std::string img_str = img.get<std::string>();
-                    if (!img_str.empty()) total_images++;
 
                     qwen3_5_omni_image_t image = this->load_image_base64(img_str);
+                    if (image.width <= 0 || image.height <= 0) {
+                        header_print("ERROR", "Skipping invalid base64 image; prefilling language only for this item");
+                        continue;
+                    }
+
                     std::vector<int> grid_pair;
                     uint32_t valid_patch_size = 0;
                     uint32_t num_soft_tokens = 0;
 
                     this->preprocess_image(image, image_payload._processed_pixel_values, grid_pair, valid_patch_size, num_soft_tokens);
+                    if (grid_pair.size() < 2 || grid_pair[0] <= 0 || grid_pair[1] <= 0) {
+                        header_print("ERROR", "Skipping image that failed to preprocess");
+                        continue;
+                    }
 
                     image_payload.image_grid_h_w.push_back(grid_pair);
                     image_payload.num_soft_tokens_per_image.push_back(num_soft_tokens);
                     image_payload.num_images++;
+                    total_images++;
+
+                    new_content.push_back({{"type", "image"}, {"image", img}});
                 }
             }
             // ---- audio preprocessing ----
@@ -213,6 +235,7 @@ bool Qwen3_5_Omni::insert(chat_meta_info_t& meta_info, lm_uniform_input_t& input
                         return false;
                     }
                     audio_data_list.push_back(audio_data);
+                    new_content.push_back({{"type", "audio"}, {"audio", aud}});
                 }
             }
             if(audio_data_list.size()> 0){
@@ -227,35 +250,16 @@ bool Qwen3_5_Omni::insert(chat_meta_info_t& meta_info, lm_uniform_input_t& input
                         )
                     );
                 }
-            }            
-        }
-        header_print("FLM", "Total images: " << total_images);
+            }
 
-        // ---- build templated text (server) ----
-        nlohmann::ordered_json qwen_messages = nlohmann::ordered_json::array();
-        for (const auto& item : input.messages) {
-            if (!item.contains("images") && !item.contains("audios")) {
-                qwen_messages.push_back(item);
-                continue;
-            }
-            nlohmann::ordered_json new_content = nlohmann::ordered_json::array();
-            if (item.contains("images")) {
-                for (const auto& img : item["images"]) {
-                    new_content.push_back({{"type", "image"}, {"image", img}});
-                }
-            }
-            if (item.contains("audios")) {
-                for (const auto& aud : item["audios"]) {
-                    new_content.push_back({{"type", "audio"}, {"audio", aud}});
-                }
-            }
-            new_content.push_back({{"type", "text"}, {"text", item.value("content", "")}});
+            new_content.push_back({{"type", "text"}, {"text", message.value("content", "")}});
             nlohmann::ordered_json new_item = {
-                {"role", item.value("role", "user")},
+                {"role", message.value("role", "user")},
                 {"content", new_content}
             };
             qwen_messages.push_back(new_item);
         }
+        header_print("FLM", "Total images: " << total_images);
         templated_text = this->apply_chat_template(qwen_messages, input.tools);
     }
     else { // CLI Processing
@@ -694,7 +698,7 @@ buffer<bf16> Qwen3_5_Omni::say(std::string wav_out_path) {
 
 void Qwen3_5_Omni::set_sampler(sampler_config& sampler_config) {
     if (this->sampler != nullptr) this->sampler.reset();
-    this->sampler = std::make_unique<Sampler>((int)this->lm_config->vocab_size, sampler_config);
+    this->sampler = std::make_unique<Sampler>((int)this->lm_config->get("vocab_size"), sampler_config);
 }
 
 void Qwen3_5_Omni::clear_context() {

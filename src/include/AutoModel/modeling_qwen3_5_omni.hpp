@@ -28,7 +28,7 @@
 /************              Qwen3_5_Omni            **************/
 class Qwen3_5_Omni : public AutoModel {
 public:
-    explicit Qwen3_5_Omni(xrt::device* npu_device_inst);
+    explicit Qwen3_5_Omni(flm_rt::device* npu_device_inst);
     ~Qwen3_5_Omni() override = default;
 
     /// \brief Load config + weights and set up tokenizer / sampler.

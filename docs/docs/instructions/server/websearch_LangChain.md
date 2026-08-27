@@ -18,7 +18,7 @@ This project demonstrates how to build a lightweight Retrieval-Augmented Generat
 
 - Windows machine
 - Python 3.9 or later
-- [FastFlowLM](https://github.com/FastFlowLM/FastFlowLM) installed
+- [FastFlowLM](https://github.com/ROCm/FastFlowLM) installed
 - FastFlowLM model served (e.g., `llama3.2:1b`)
 
 ---
@@ -279,7 +279,7 @@ The AMD Ryzen AI series has been launched, offering new features and enhancement
 
 ## 🧠 What’s Happening Behind the Scenes
 
-This Python script combines real-time web search with a local FastFlowLM model for Research-Augmented Generation (RAG). Here's how each step works:
+This Python script combines real-time web search with a local FastFlowLM model for Retrieval-Augmented Generation (RAG). Here's how each step works:
 
 ---
 
@@ -308,7 +308,7 @@ This step pulls **full paragraphs and sentences**, improving retrieval quality.
 The retrieved or scraped content is broken into chunks using `RecursiveCharacterTextSplitter`. Each chunk:
 - Is around 1000 characters (with overlap)
 - Gets embedded using a sentence transformer model via `HuggingFaceEmbeddings`
-- Stored in a `FAISS` vector store for fast similarity search
+- Is stored in a `FAISS` vector store for fast similarity search
 
 ---
 

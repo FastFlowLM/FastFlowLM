@@ -42,7 +42,7 @@ sudo reboot
 ```
 
 #### 4. Install FastFlowLM
-- Download the latest `.deb` package from the [Releases page](https://github.com/FastFlowLM/FastFlowLM/releases):
+- Download the latest `.deb` package from the [Releases page](https://github.com/ROCm/FastFlowLM/releases):
 
 ```sh
 sudo apt install ./fastflowlm*.deb
@@ -127,7 +127,7 @@ In short: if 1.1 firmware breaks probing on stock 6.19, do not keep forcing the 
 
 2. Clone the repository and pull all submodules:
    ```sh
-   git clone --recursive https://github.com/FastFlowLM/FastFlowLM.git
+   git clone --recursive https://github.com/ROCm/FastFlowLM.git
    cd FastFlowLM
    ```
 3. Build:

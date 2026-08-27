@@ -8,7 +8,7 @@
 #include "AutoModel/automodel.hpp"
 
 
-AutoModel::AutoModel(xrt::device* npu_device_inst, std::string current_model) {
+AutoModel::AutoModel(flm_rt::device* npu_device_inst, std::string current_model) {
     this->npu_device_inst = npu_device_inst;
     this->current_model = current_model;
     this->total_tokens = 0;
@@ -163,9 +163,9 @@ bool AutoModel::_shared_insert(chat_meta_info_t& meta_info, std::vector<int>& to
     const size_t idx = this->token_history.size();
     size_t skip_count = 0;
     for (size_t i = 0; i < idx; i++) {
-        if (tokens[i] == this->token_history[i]) {
+        if (i < tokens.size() && tokens[i] == this->token_history[i]) {
             skip_count++;
-        } 
+        }
         else {
             break;
         }
@@ -369,7 +369,7 @@ StreamResult AutoModel::_shared_think_tool_calling_pasrsed(const std::string con
                     auto j = nlohmann::json::parse(tool_name_);
 
                     result.type = StreamEventType::TOOL_DONE;
-                    result.tool_id = "generate_id()";
+                    result.tool_id = "call_" + std::to_string(std::time(nullptr));
 
                     if (j.contains("name")) {
                         result.tool_name = j["name"].get<std::string>();
@@ -483,7 +483,7 @@ void AutoModel::set_sampler(sampler_config& sampler_config) {
     if (this->sampler != nullptr) {
         this->sampler.reset();
     }
-    this->sampler = std::make_unique<Sampler>(this->lm_config->vocab_size, sampler_config);
+    this->sampler = std::make_unique<Sampler>(this->lm_config->get("vocab_size"), sampler_config);
 }
 
 /// \brief Set the max length
@@ -575,9 +575,9 @@ void AutoModel::set_topk(int topk) {
         header_print("WARNING", "Top-k must be greater than 0");
         return;
     }
-    if (topk > this->lm_config->vocab_size) {
-        header_print("WARNING", "Top-k is greater than vocab size, set to vocab size: " << this->lm_config->vocab_size);
-        topk = this->lm_config->vocab_size;
+    if (topk > this->lm_config->get("vocab_size")) {
+        header_print("WARNING", "Top-k is greater than vocab size, set to vocab size: " << this->lm_config->get("vocab_size"));
+        topk = this->lm_config->get("vocab_size");
     }
     
     this->sampler->top_k = topk;

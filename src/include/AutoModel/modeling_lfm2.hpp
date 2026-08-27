@@ -24,7 +24,7 @@ private:
     }
 
 public:
-    LFM2(xrt::device* npu_device_inst);
+    LFM2(flm_rt::device* npu_device_inst);
 
     void load_model(std::string model_path, json model_inf, int default_context_length = -1, bool enable_preemption = false) override;
     //void toggle_enable_think() override;
@@ -53,7 +53,7 @@ private:
     }
 
 public:
-    LFM2_5_TK(xrt::device* npu_device_inst);
+    LFM2_5_TK(flm_rt::device* npu_device_inst);
 
     void load_model(std::string model_path, json model_inf, int default_context_length = -1, bool enable_preemption = false) override;
     //void toggle_enable_think() override;

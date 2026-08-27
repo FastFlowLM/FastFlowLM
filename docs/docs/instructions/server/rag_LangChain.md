@@ -30,7 +30,7 @@ This guide walks you through building a **Retrieval-Augmented Generation (RAG)**
 ### ✅ Install FastFlowLM (local server)
 
 Download from GitHub Releases:  
-👉 https://github.com/FastFlowLM/FastFlowLM
+👉 https://github.com/ROCm/FastFlowLM
 
 Launch the server:
 
@@ -66,8 +66,8 @@ python -m venv rag-env
 pip install -U langchain langchain-community langchain-huggingface sentence-transformers faiss-cpu tiktoken ollama langchain-ollama
 ```
 
-> ✅ We still install `ollama` Python package because **LangChain’s `OllamaLLM` class can be pointed at any local REST backend like FastFlowLM**.  
-> 🔁 `Ollama` and `FastFlowLM` uses the same base URL `base_url="http://127.0.0.1:52625"`. Thus, they are interchangable.
+> ✅ We still install the `ollama` Python package because **LangChain’s `OllamaLLM` class can be pointed at any local REST backend like FastFlowLM**.  
+> 🔁 `Ollama` and `FastFlowLM` use the same base URL `base_url="http://127.0.0.1:52625"`. Thus, they are interchangeable.
 
 ---
 

@@ -7,7 +7,7 @@ has_children: false
 
 # Linux NPU Support
 
-This article will teach you how to run LLMs on your **AMD XDNA 2 NPU** on Linux using **FastFlowLM**.  
+This article will teach you how to run LLMs on your **AMD XDNA2 NPU** on Linux using **FastFlowLM**.  
 Get set up and then show us what you build!
 
 **Date:** March 5, 2026  
@@ -15,7 +15,7 @@ Get set up and then show us what you build!
 
 ## 📢 FastFlowLM Linux Support
 
-[FastFlowLM](https://github.com/FastFlowLM/FastFlowLM) is a lightweight LLM runtime optimized for **AMD NPUs**.  
+[FastFlowLM](https://github.com/ROCm/FastFlowLM) is a lightweight LLM runtime optimized for **AMD NPUs**.  
 Today, FastFlowLM is adding support for **Ubuntu, Arch, and other distros** to enable **fast, low-power LLMs** on **Ryzen™ AI PCs that run Linux**.
 
 This article will help you:
@@ -31,7 +31,7 @@ This article will help you:
 
 ### Supported processors
 
-FastFlowLM on Linux requires an **AMD XDNA 2 NPU**.
+FastFlowLM on Linux requires an **AMD XDNA2 NPU**.
 
 | Ryzen AI family | Codename | Status |
 |---|---|---|
@@ -40,7 +40,7 @@ FastFlowLM on Linux requires an **AMD XDNA 2 NPU**.
 | 400-series | Gorgon Point | Supported |
 | Z2 Extreme | Handheld devices | Supported |
 
-> **Note:** Ryzen AI 7000 / 8000 / 200-series chips have **XDNA 1**, which is **not supported**.
+> **Note:** Ryzen AI 7000 / 8000 / 200-series chips have **XDNA1**, which is **not supported**.
 
 ---
 
@@ -102,7 +102,7 @@ sudo reboot
 ```
 
 #### 4. Install FastFlowLM
-- Download the latest `.deb` package from the [Releases page](https://github.com/FastFlowLM/FastFlowLM/releases):
+- Download the latest `.deb` package from the [Releases page](https://github.com/ROCm/FastFlowLM/releases):
 
 ```sh
 sudo apt install ./fastflowlm*.deb
@@ -168,7 +168,7 @@ If `flm validate` passes but `flm run` fails with `No such device with index '0'
 
 1. Clone the repository:
    ```sh
-   git clone https://github.com/FastFlowLM/FastFlowLM.git
+   git clone https://github.com/ROCm/FastFlowLM.git
    cd FastFlowLM
    ```
 2. Build:
@@ -183,7 +183,7 @@ If `flm validate` passes but `flm run` fails with `No such device with index '0'
 
 **Static Build with Bundled XRT/XDNA**
 
-To build a fully static binary that bundles XRT and XDNA driver (no system XRT required):
+To build a fully static binary that bundles XRT and the XDNA driver (no system XRT required):
 
 ```sh
 cd src
@@ -192,11 +192,11 @@ cmake --build build -j$(nproc)
 sudo cmake --install build
 ```
 
-This will automatically fetch and build XRT (v2.21.75) and XDNA driver from source if not found on your system. The resulting binary is fully self-contained and more portable.
+This will automatically fetch and build XRT (v2.21.75) and the XDNA driver from source if not found on your system. The resulting binary is fully self-contained and more portable.
 
 ---
 
-## 4. Validating NPU Setup
+## 3. Validating NPU Setup
 
 To validate your NPU setup, run:
 ```sh

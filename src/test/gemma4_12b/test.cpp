@@ -57,6 +57,10 @@ int main(int argc, char* argv[]) {
 
         // Phase 0: plain text generation
         uniformed_input.prompt = "Hello, introduce yourself briefly.";
+        uniformed_input.images.push_back("../../../tb_files/panda.png");
+        uniformed_input.images.push_back("../../../tb_files/pcb.jpg");      
+        uniformed_input.audios.push_back("../../../tb_files/Demos_sample-data_journal.wav");     
+        uniformed_input.audios.push_back("../../../tb_files/tenyears_00_curry_128kb.mp3");     
         std::cout << "Prompt: " << uniformed_input.prompt << std::endl;
         std::cout << "Response: " << std::endl;
         chat->start_total_timer();

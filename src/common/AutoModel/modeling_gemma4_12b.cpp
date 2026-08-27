@@ -7,6 +7,7 @@
 
 #include "AutoModel/modeling_gemma4_12b.hpp"
 #include "metrices.hpp"
+#include "error_measure.hpp"
 
 namespace {
 std::string trim_gemma4_12b_tool_value(std::string value) {
@@ -484,6 +485,12 @@ bool Gemma4_12B::insert(chat_meta_info_t& meta_info, lm_uniform_input_t& input, 
         return false;
     }
 
+
+    gemma4_12b_image_payload_t image_payload;
+    gemma4_12b_audio_payload_t audio_payload;
+    audio_payload.num_audios = 0;
+    image_payload.num_images = 0;    
+
     // Text-only front-end: any image/audio payload is dropped with a warning.
     if (!input.images.empty() || !input.audios.empty()) {
         header_print("WARNING", "Gemma4-12B text-only interface: ignoring "
@@ -511,12 +518,183 @@ bool Gemma4_12B::insert(chat_meta_info_t& meta_info, lm_uniform_input_t& input, 
         templated_text = this->apply_chat_template(text_messages, input.tools);
     }
     else { // a pure text, usually from the cli
+        // nlohmann::ordered_json messages;
+        if(input.audios.size() > 0){
+
+            gemma4_12b_npu *gemma4e_engine = dynamic_cast<gemma4_12b_npu*>(this->lm_engine.get());  
+            
+        
+
+
+            for (int i = 0; i < input.audios.size(); i++) {
+                std::string audio_str = input.audios[i];
+             
+                audio_data_t audio_data = this->load_audio(audio_str, gemma4e_engine->GEMMA4_12B_audio_sampling_rate, MonoDownmixMode::RMS); 
+                
+                if (audio_data.channels > 1) {
+                    std::cerr << "only mono audio is supported, but got " << audio_data.original_channels << " channels. Please convert it to mono first." << std::endl;
+                    exit(-1);
+                }
+                std::vector<bf16> audio_processed;
+                int processed_num_frames = 0;
+                extract_waveform_features(
+                    audio_data,
+                    gemma4e_engine->GEMMA4_12B_audio_embed_dim,
+                    audio_processed,
+                    processed_num_frames
+                );
+
+                audio_payload.num_audios++;
+                audio_payload.num_soft_tokens_per_audio.push_back(
+                    processed_num_frames
+                );
+                audio_payload.mel_spectrograms.push_back(
+                    audio_processed
+                );
+                audio_payload.mel_spectrogram_frames_per_audio.push_back(processed_num_frames);
+                audio_payload.mel_spectrogram_bins_per_audio.push_back(gemma4e_engine->GEMMA4_12B_audio_embed_dim);
+
+
+
+
+
+                // {
+                //     SafeTensors referencetensor("/scratch/shdu/transformerExplorer/gemma4_unified_audio_debug.safetensors");
+                //     buffer<float> raw_speech_data_ref;
+
+                //     referencetensor.load_weights(
+                //         raw_speech_data_ref,
+                //         "input_features_" + std::to_string(i)
+                //     );
+     
+                //     print_error_metrics<bf16, float>(
+                //         audio_processed.data(), raw_speech_data_ref.data(),
+                //         1,
+                //         processed_num_frames, gemma4e_engine->GEMMA4_12B_audio_embed_dim,
+                //         processed_num_frames, gemma4e_engine->GEMMA4_12B_audio_embed_dim
+                //     );
+
+                // }
+            }
+        }
+
+        if(input.images.size() > 0){
+
+            for (const auto& img_str : input.images) {
+                gemma4_12b_image_t image = this->load_image(img_str);
+
+                std::vector<bf16> pixel_values;
+                std::pair<int, int> patch_element_per_patch;
+                uint32_t valid_patch_size = 0;
+                uint32_t num_soft_tokens = 0;
+                std::vector<int> image_grid_pairs; 
+
+                preprocess_image(image, patch_element_per_patch, valid_patch_size, pixel_values, image_grid_pairs, num_soft_tokens);
+
+
+         
+                // {
+                //     SafeTensors referencetensor("/scratch/shdu/transformerExplorer/gemma4_unified_image_debug.safetensors");
+                
+                //     buffer<float> pixel_value_ref;
+                //     referencetensor.load_weights(
+                //         pixel_value_ref,
+                //         "pixel_values"
+                //     );
+                //     std::cout << "patch_element_per_patch" << patch_element_per_patch.first <<\
+                //         "  "<< patch_element_per_patch.second << std::endl;
+                //     print_error_metrics<bf16, float>(
+                //         pixel_values.data(), pixel_value_ref.data() + image_payload.num_images*280*6912,
+                //         1,
+                //         patch_element_per_patch.first,patch_element_per_patch.second,
+                //         patch_element_per_patch.first,patch_element_per_patch.second  
+                //     );
+                
+                // }
+
+
+
+                image_payload.image_patch__element_per_patch.push_back(patch_element_per_patch);
+                image_payload.valid_patch_size_per_image.push_back(valid_patch_size);
+                image_payload.pixel_values.push_back(pixel_values);
+                image_payload.image_grid_pairs_per_image.push_back(image_grid_pairs);
+                image_payload.num_soft_tokens_per_image.push_back(num_soft_tokens);
+                image_payload.num_images++;
+   
+
+            
+            }
+            
+
+        }
+
+
+
+        // messages.push_back({ {"role", "user"}, {"content", input.prompt} });
+        // templated_text = this->apply_chat_template(messages, input.tools);
+    }
+    
+
+    if (!input.messages.empty()) { // already a formated messages, usually from REST API
+    }else{
+
         nlohmann::ordered_json messages;
-        messages.push_back({ {"role", "user"}, {"content", input.prompt} });
-        templated_text = this->apply_chat_template(messages, input.tools);
+        nlohmann::ordered_json content;
+        content["role"] = "user";
+        content["content"] = nlohmann::ordered_json::array();
+        
+        for (int i = 0; i < input.images.size(); i++) {
+            content["content"].push_back({{"type", "image"}, {"image", input.images[i]}});
+        }
+        for (int i = 0; i < input.audios.size(); i++) {
+            content["content"].push_back({{"type", "audio"}, {"audio", input.audios[i]}}); // placeholder
+        }
+        
+        content["content"].push_back({{"type", "text"}, {"text", input.prompt}});
+        messages.push_back(content);
+        templated_text = this->apply_chat_template(messages);
+
+
     }
 
-    std::vector<int> tokens = this->tokenizer->encode(templated_text);
+    // update the tokens to include the image tokens
+    std::vector<int> tokens;
+    std::vector<int> tokens_init = this->tokenizer->encode(templated_text);
+
+    int total_image_tokens = 0;
+    for(int i = 0; i < image_payload.num_images; i++){
+        total_image_tokens += image_payload.num_soft_tokens_per_image[i];
+    }
+
+
+    int image_counter = 0;
+    for(int i = 0; i < tokens_init.size(); i++){
+        if (tokens_init[i] == image_token_id) {
+            tokens.push_back(boi_token_id); // the first image soft token id, which is reserved for the model to identify the image position, the rest of the soft tokens for this image will be continuous following this id
+            for (int j = 0; j < image_payload.num_soft_tokens_per_image[image_counter]; j++) {
+                tokens.push_back(image_token_id);
+            }
+            tokens.push_back(eoi_token_id); // a separator token between images, not necessary but can help the model to better distinguish different images
+          
+            image_counter++;
+        } 
+    }
+
+    int audio_counter = 0;
+    for(int i = 0; i < tokens_init.size(); i++){
+        if(tokens_init[i] == audio_token_id){
+            tokens.push_back(boa_token_id);
+
+            for(int j = 0; j < audio_payload.num_soft_tokens_per_audio[audio_counter]; j++){
+                tokens.push_back(audio_token_id);
+            }
+            tokens.push_back(eoa_token_id);
+            audio_counter++;
+ 
+        }
+
+    }
+ 
 
     this->profiler_list[TKOEN_ENCODE_TIME].stop(tokens.size());
 
@@ -530,7 +708,12 @@ bool Gemma4_12B::insert(chat_meta_info_t& meta_info, lm_uniform_input_t& input, 
         this->token_history = checkpoint_his; // restore the token history to be consistent with the restored KV cache, which is crucial for correct functioning of _shared_insert's prefix-matching logic
     }
 
-    bool success = this->_shared_insert(meta_info, tokens, is_cancelled, nullptr);
+
+    gemma4_12b_multi_modal_payload_t multi_modal_payload;
+    multi_modal_payload.image_payload = image_payload;
+    multi_modal_payload.audio_payload = audio_payload;
+
+    bool success = this->_shared_insert(meta_info, tokens_init, is_cancelled, nullptr);
 
     checkpoint_his = token_history;
     int checkpoint_idx = gemma4_12b_engine->checkpoint();

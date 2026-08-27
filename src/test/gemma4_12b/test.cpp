@@ -20,12 +20,14 @@ int main(int argc, char* argv[]) {
     desc.add_options()("model,m", arg_utils::po::value<std::string>()->required(), "Model file");
     desc.add_options()("Short,s", arg_utils::po::value<bool>()->default_value(true), "Short Prompt");
     desc.add_options()("Preemption,p", arg_utils::po::value<bool>()->default_value(false), "Preemption");
-    desc.add_options()("Think,t", arg_utils::po::value<bool>()->default_value(false), "Enable thinking");
+    desc.add_options()("type,t", arg_utils::po::value<int>()->default_value(0), "\t0: text mode\n\t1: image only\n\t2: audio only\n\t3: omni mode\n\t");
+    desc.add_options()("Think,k", arg_utils::po::value<bool>()->default_value(false), "Enable thinking");
     arg_utils::po::store(arg_utils::po::parse_command_line(argc, argv, desc), vm);
 
     std::string tag = vm["model"].as<std::string>();
     bool short_prompt = vm["Short"].as<bool>();
     bool preemption = vm["Preemption"].as<bool>();
+    int type = vm["type"].as<int>();
     bool enable_think = vm["Think"].as<bool>();
 
     std::cout << "Model: " << tag << std::endl;
@@ -54,7 +56,33 @@ int main(int argc, char* argv[]) {
 
     if (short_prompt) {
         std::string response;
-        uniformed_input.prompt = "Hello, who are you?";
+
+        switch (type) {
+            case 0:  // text only
+                uniformed_input.prompt = "Hello, introduce yourself briefly.";
+                break;
+            case 1:  // image only
+                uniformed_input.prompt = "Describe image 1 and image 2.";
+                uniformed_input.images.push_back("../../../tb_files/panda.png");
+                uniformed_input.images.push_back("../../../tb_files/pcb.jpg");
+                break;
+            case 2:  // audio only
+                uniformed_input.prompt = "Transcribe the following speech segment in its original language. Only output the transcription, with no newlines.";
+                uniformed_input.audios.push_back("../../../tb_files/Demos_sample-data_journal.wav");
+                uniformed_input.audios.push_back("../../../tb_files/tenyears_00_curry_128kb.mp3");
+                break;
+            case 3:  // omni: image + audio
+                uniformed_input.prompt = "Answer the question in the audio and further describe what is in the image.";
+                uniformed_input.images.push_back("../../../tb_files/panda.png");
+                uniformed_input.images.push_back("../../../tb_files/pcb.jpg");
+                uniformed_input.audios.push_back("../../../tb_files/Demos_sample-data_journal.wav");
+                uniformed_input.audios.push_back("../../../tb_files/tenyears_00_curry_128kb.mp3");
+                break;
+            default:
+                header_print("info", "Unknown test type, exit 0;");
+                return 0;
+        }
+
         std::cout << "Prompt: " << uniformed_input.prompt << std::endl;
         std::cout << "Response: " << std::endl;
         chat->start_total_timer();

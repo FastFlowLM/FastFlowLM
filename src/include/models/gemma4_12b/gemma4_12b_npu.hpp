@@ -113,44 +113,32 @@ public:
     int checkpoint() override;
     int restore() override;
     // parameters for vision preprocessing in Gemma4e
-    unsigned int GEMMA4_12B_VISION_MAX_POSITION_EMBEDDINGS;
-    unsigned int GEMMA4_12B_POSITION_EMBEDDING_SIZE;
-    unsigned int GEMMA4_12B_VISION_IMAGE_OUTPUT_SIZE;
-    float GEMMA4_12B_VISION_RESCALE_FACTOR;
-    float GEMMA4_12B_VISION_IMAGE_MEAN;
-    float GEMMA4_12B_VISION_IMAGE_STD;
-
+    unsigned int GEMMA4_12B_vision_pooling_kernel_size;
+    unsigned int GEMMA4_12B_vision_patch_size;
+    float GEMMA4_12B_vision_rescale_factor;
+    float GEMMA4_12B_vision_image_mean;
+    float GEMMA4_12B_vision_image_std;
     // parameters for audio preprocessing in Gemma4e
-    unsigned int Audio_MM_TILE_M;
-    unsigned int Audio_MM_TILE_K;
-    unsigned int Audio_MM_TILE_N;
-    int Gemma4_12B_Audio_resample_rate;
-    float Gemma4_12B_Audio_gradient_clipping;
-    unsigned int Gemma4_12B_Audio_Multimodal_Output_SIZE;
-    unsigned int Gemma4_12B_Audio_language_projection_output_size;
-
+    unsigned int GEMMA4_12B_audio_embed_dim;
+    unsigned int GEMMA4_12B_audio_sampling_rate;
     inline void load_vision_preprocess_parameters(LM_Config& config){
         // Note: this should be called by Impl:: constructor
         const nlohmann::json& vc = config.sub("vision_config");
-        GEMMA4_12B_VISION_MAX_POSITION_EMBEDDINGS = vc.value("GEMMA4_12B_VISION_MAX_POSITION_EMBEDDINGS", -1);
-        // GEMMA4_12B_VISION_PATCH_SIZE          = vc.value("GEMMA4_12B_VISION_PATCH_SIZE", -1);
-        GEMMA4_12B_POSITION_EMBEDDING_SIZE    = vc.value("GEMMA4_12B_POSITION_EMBEDDING_SIZE", -1);
-        GEMMA4_12B_VISION_IMAGE_OUTPUT_SIZE   = vc.value("GEMMA4_12B_VISION_IMAGE_OUTPUT_SIZE", -1);
-        GEMMA4_12B_VISION_RESCALE_FACTOR      = vc.value("GEMMA4_12B_VISION_RESCALE_FACTOR", -1.0f);
-        GEMMA4_12B_VISION_IMAGE_MEAN          = vc.value("GEMMA4_12B_VISION_IMAGE_MEAN", -1.0f);
-        GEMMA4_12B_VISION_IMAGE_STD           = vc.value("GEMMA4_12B_VISION_IMAGE_STD", -1.0f);
+        GEMMA4_12B_vision_pooling_kernel_size = vc.value("pooling_kernel_size", 0);
+        GEMMA4_12B_vision_patch_size = vc.value("patch_size", 0);
+        // GEMMA4_12B_VISION_MAX_POSITION_EMBEDDINGS = vc.value("GEMMA4_12B_VISION_MAX_POSITION_EMBEDDINGS", -1);
+        // // GEMMA4_12B_VISION_PATCH_SIZE          = vc.value("GEMMA4_12B_VISION_PATCH_SIZE", -1);
+        // GEMMA4_12B_POSITION_EMBEDDING_SIZE    = vc.value("GEMMA4_12B_POSITION_EMBEDDING_SIZE", -1);
+        // GEMMA4_12B_VISION_IMAGE_OUTPUT_SIZE   = vc.value("GEMMA4_12B_VISION_IMAGE_OUTPUT_SIZE", -1);
+        GEMMA4_12B_vision_rescale_factor      = vc.value("rescale_factor", -1.0f);
+        GEMMA4_12B_vision_image_mean          = vc.value("image_mean", -1.0f);
+        GEMMA4_12B_vision_image_std           = vc.value("image_std", -1.0f);
     }
 
     inline void load_audio_preprocess_parameters(LM_Config& config){
         const nlohmann::json& ac = config.sub("audio_config");
-        Audio_MM_TILE_M = ac.value("Audio_MM_TILE_M", 128);
-        Audio_MM_TILE_K = ac.value("Audio_MM_TILE_K", 512);
-        Audio_MM_TILE_N = ac.value("Audio_MM_TILE_N", 64);
-        Gemma4_12B_Audio_resample_rate = ac.value("Gemma4_12B_Audio_audio_resample_rate", -1);
-        Gemma4_12B_Audio_gradient_clipping = ac.value("Gemma4_12B_Audio_gradient_clipping", -1.0f);
-        Gemma4_12B_Audio_Multimodal_Output_SIZE = ac.value("Gemma4_12B_Audio_Multimodal_Output_SIZE", -1);
-        Gemma4_12B_Audio_language_projection_output_size = ac.value("Gemma4_12B_Audio_language_projection_output_size", -1);
-        // Gemma4_12B_Audio_attention_softcap = ac.value("Gemma4_12B_Audio_attention_softcap", -1.0f);
+        GEMMA4_12B_audio_embed_dim          = ac.value("audio_embed_dim", 0);
+        GEMMA4_12B_audio_sampling_rate      = ac.value("sampling_rate", 0);
     }
 
 private:

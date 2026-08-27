@@ -2,20 +2,31 @@
 # Gemma4-12B NPU Test Makefile
 # =============================================================================
 #
-# Text-only test harness for the Gemma4-12B omni model. Links against the
+# Test harness for the Gemma4-12B omni model. Links against the
 # prebuilt libgemma4_12b_npu engine in ../../lib/$(FLM_RUNTIME).
 #
 # Usage:
 #   make        - Build the test executable
 #   make test   - Build and run it against the gemma4-12b tag
+#
+# Test scenario is selected with -t: 0 text, 1 image, 2 audio, 3 omni.
 #   make clean  - Remove all built files
 #
 # =============================================================================
 -include ../common.mk
 
+# Test scenario: 0 = text, 1 = image, 2 = audio, 3 = omni (image + audio)
+TYPE ?= 0
+
 SOURCES += test.cpp
 SOURCES += ../../common/AutoModel/automodel.cpp
 SOURCES += ../../common/AutoModel/modeling_gemma4_12b.cpp
+SOURCES += ../../common/AutoModel/modeling_gemma4_12b_image.cpp
+SOURCES += ../../common/AutoModel/modeling_gemma4_12b_audio.cpp
+SOURCES += ../../common/image_process_utils/imageproc.cpp
+SOURCES += ../../common/image_process_utils/imageprocAVX512.cpp
+SOURCES += ../../common/image/image_reader.cpp
+SOURCES += ../../common/audio/audio_reader.cpp
 SOURCES += ../../common/tokenizer/tokenizer.cpp
 SOURCES += ../../common/modules/sampler.cpp
 
@@ -25,6 +36,7 @@ HEADERS += ../../include/AutoModel/modeling_gemma4_12b.hpp
 ifeq ($(WSL), 0)
 
 LDFLAGS += -lgemma4_12b_npu
+LDFLAGS += -lavformat -lavcodec -lavutil -lswscale -lswresample
 
 CPP_SOURCES := $(filter %.cpp,$(SOURCES))
 OBJECTS := $(addprefix $(BUILD_DIR)/,$(notdir $(CPP_SOURCES:.cpp=.o)))
@@ -47,7 +59,7 @@ clean:
 
 test: $(BUILD_DIR)/test_gemma4_12b
 	cp ../../model_list.json $(BUILD_DIR)/model_list.json
-	cd $(BUILD_DIR) && ./test_gemma4_12b --model gemma4-12b:12b -s 1
+	cd $(BUILD_DIR) && ./test_gemma4_12b --model gemma4-12b:12b -s 1 -t $(TYPE)
 
 -include $(DEPS)
 .PHONY: all clean test
@@ -72,7 +84,7 @@ clean:
 
 test: directories $(BUILD_DIR)/test_gemma4_12b.exe
 	cp ../../model_list.json $(BUILD_DIR)/model_list.json
-	cd $(BUILD_DIR) && ${PWSH} -Command "\$$env:PATH = '..\..\..\lib;' + \$$env:PATH; .\test_gemma4_12b.exe -m gemma4-12b:12b -s 1 -p 0"
+	cd $(BUILD_DIR) && ${PWSH} -Command "\$$env:PATH = '..\..\..\lib;' + \$$env:PATH; .\test_gemma4_12b.exe -m gemma4-12b:12b -s 1 -p 0 -t $(TYPE)"
 
 .PHONY: all clean test directories
 

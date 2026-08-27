@@ -16,7 +16,11 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
-
+#include "image/image_reader.hpp"
+#include "audio/audio_reader.hpp"
+#include "image_process_utils/imageproc.hpp"
+#include "image_process_utils/imageprocAVX512.hpp"
+#include "tensor_utils/q4_npu_eXpress.hpp"
 /************              Gemma4_12B (text only)            **************/
 class Gemma4_12B : public AutoModel {
 private:
@@ -26,6 +30,48 @@ private:
 
     StreamResult parse_stream_content_impl(const std::string content, bool is_final);
 
+
+
+
+    static constexpr int boi_token_id = 255999; // begin of image token id
+    static constexpr int image_token_id = 258880; // image token id
+    static constexpr int eoi_token_id = 258882; // end of image token id
+
+    static constexpr int boa_token_id = 256000; // begin of audio token id
+    static constexpr int audio_token_id = 258881; // audio token id
+    static constexpr int eoa_token_id = 258883; // end of audio token id
+
+    ImageReader image_reader_;
+    gemma4_12b_image_t load_image(const std::string& filename);
+    gemma4_12b_image_t load_image_base64(const std::string& base64_string);
+
+
+    AudioReader audio_reader_;
+    audio_data_t load_audio(const std::string &filename, int resample_rate, MonoDownmixMode downmix = MonoDownmixMode::NONE);
+    audio_data_t load_audio_base64(const std::string &base64_str, int resample_rate, MonoDownmixMode downmix);
+
+    void extract_waveform_features(audio_data_t& audio, 
+        int audio_samples_per_token,
+        std::vector<bf16> & result_vector,
+        int & num_frames
+    );
+
+    int image_softtoken_budget = 280; // set a default value
+
+    void preprocess_image(
+      gemma4_12b_image_t &image,
+      std::pair<int, int> & patch_element_per_patch,
+      uint32_t & valid_patch_size, // the unpadded size per image
+      std::vector<bf16> &pixel_values,
+      std::vector<int> &image_grid_pairs, // [num_of_position_id][x, y]      
+      uint32_t &num_soft_tokens
+    );
+    std::vector<uint8_t>  aspect_ratio_preserving_resize( 
+        gemma4_12b_image_t& image,
+        int patch_size,
+        int max_patches,
+        int pooling_kernel_size
+    );
 public:
     Gemma4_12B(flm_rt::device* npu_device_inst);
 

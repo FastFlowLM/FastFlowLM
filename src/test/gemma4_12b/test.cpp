@@ -54,38 +54,15 @@ int main(int argc, char* argv[]) {
 
     if (short_prompt) {
         std::string response;
-
-        // Phase 0: plain text generation
-        uniformed_input.prompt = "Hello, introduce yourself briefly.";
+        uniformed_input.prompt = "Hello, who are you?";
         std::cout << "Prompt: " << uniformed_input.prompt << std::endl;
         std::cout << "Response: " << std::endl;
         chat->start_total_timer();
-        response = chat->generate_with_prompt(meta_info, uniformed_input, 8192, std::cout);
+        chat->insert(meta_info, uniformed_input);
+        response = chat->generate(meta_info, 8192, std::cout);
         chat->stop_total_timer();
         std::cout << std::endl << std::endl;
         std::cout << chat->show_profile() << std::endl;
-
-        // Phase 1: follow-up turn on the same context (exercises the prompt cache)
-        uniformed_input.prompt = "Now, name three cities in the United States.";
-        std::cout << "Prompt: " << uniformed_input.prompt << std::endl;
-        std::cout << "Response: " << std::endl;
-        chat->start_total_timer();
-        response = chat->generate_with_prompt(meta_info, uniformed_input, 8192, std::cout);
-        chat->stop_total_timer();
-        std::cout << std::endl << std::endl;
-        std::cout << chat->show_profile() << std::endl;
-        chat->clear_context();
-
-        // Phase 2: a fresh context after clear_context()
-        uniformed_input.prompt = "Write a haiku about an NPU running a large language model.";
-        std::cout << "Prompt: " << uniformed_input.prompt << std::endl;
-        std::cout << "Response: " << std::endl;
-        chat->start_total_timer();
-        response = chat->generate_with_prompt(meta_info, uniformed_input, 8192, std::cout);
-        chat->stop_total_timer();
-        std::cout << std::endl << std::endl;
-        std::cout << chat->show_profile() << std::endl;
-        chat->clear_context();
     }
     else {
         std::ifstream file("../../../../prompt.txt", std::ios::binary);

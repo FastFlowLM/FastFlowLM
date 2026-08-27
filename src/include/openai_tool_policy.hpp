@@ -82,6 +82,14 @@ inline std::vector<json> build_buffered_stream_chunks(
     const json& response,
     const StreamOptions& options) {
     const auto& choice = response["choices"][0];
+    json delta = choice["message"];
+
+    if (delta.contains("tool_calls") && delta["tool_calls"].is_array()) {
+        for (std::size_t i = 0; i < delta["tool_calls"].size(); ++i) {
+            delta["tool_calls"][i]["index"] = i;
+        }
+    }
+
     json content_chunk = {
         {"id", response["id"]},
         {"object", "chat.completion.chunk"},
@@ -89,7 +97,7 @@ inline std::vector<json> build_buffered_stream_chunks(
         {"model", response["model"]},
         {"choices", json::array({{
             {"index", 0},
-            {"delta", choice["message"]},
+            {"delta", std::move(delta)},
             {"finish_reason", nullptr},
         }})},
     };
@@ -107,11 +115,15 @@ inline std::vector<json> build_buffered_stream_chunks(
     };
 
     if (!options.include_usage) {
-        return {std::move(content_chunk), std::move(finish_chunk)};
+        return {
+            std::move(content_chunk),
+            std::move(finish_chunk),
+        };
     }
 
     content_chunk["usage"] = nullptr;
     finish_chunk["usage"] = nullptr;
+
     json usage_chunk = {
         {"id", response["id"]},
         {"object", "chat.completion.chunk"},
@@ -120,7 +132,12 @@ inline std::vector<json> build_buffered_stream_chunks(
         {"choices", json::array()},
         {"usage", response["usage"]},
     };
-    return {std::move(content_chunk), std::move(finish_chunk), std::move(usage_chunk)};
+
+    return {
+        std::move(content_chunk),
+        std::move(finish_chunk),
+        std::move(usage_chunk),
+    };
 }
 
 inline bool valid_function_name(const std::string& name) {

@@ -172,11 +172,11 @@
         "qwen3.5": {
             "0.8b": {
                 "name": "Qwen3.5-0.8B-NPU2",
-                "url": "https://huggingface.co/FastFlowLM/Qwen3.5-0.8B-NPU2",
-                "file_url": "https://huggingface.co/api/models/FastFlowLM/Qwen3.5-0.8B-NPU2/tree/main",
-                "ms_url": "https://modelscope.cn/models/amd/Qwen3.5-0.8B-NPU2",
+                "url": "https://huggingface.co/FastFlowLM/Qwen3.5-0.8B-NPU2/resolve/flm_q4k_high_precision",
+                "file_url": "https://huggingface.co/api/models/FastFlowLM/Qwen3.5-0.8B-NPU2/tree/flm_q4k_high_precision",
+                "ms_url": "https://modelscope.cn/models/amd/Qwen3.5-0.8B-NPU2/resolve/flm_q4k_high_precision",
                 "size": 800000000,
-                "flm_min_version": "0.9.45",
+                "flm_min_version": "1.0.3",
                 "files": [
                     "config.json",
                     "model.q4nx",
@@ -203,11 +203,11 @@
             },
             "2b": {
                 "name": "Qwen3.5-2B-NPU2",
-                "url": "https://huggingface.co/FastFlowLM/Qwen3.5-2B-NPU2",
-                "file_url": "https://huggingface.co/api/models/FastFlowLM/Qwen3.5-2B-NPU2/tree/main",
-                "ms_url": "https://modelscope.cn/models/amd/Qwen3.5-2B-NPU2",
+                "url": "https://huggingface.co/FastFlowLM/Qwen3.5-2B-NPU2/resolve/flm_q4k_high_precision",
+                "file_url": "https://huggingface.co/api/models/FastFlowLM/Qwen3.5-2B-NPU2/tree/flm_q4k_high_precision",
+                "ms_url": "https://modelscope.cn/models/amd/Qwen3.5-2B-NPU2/resolve/flm_q4k_high_precision",
                 "size": 2000000000,
-                "flm_min_version": "0.9.45",
+                "flm_min_version": "1.0.3",
                 "files": [
                     "config.json",
                     "model.q4nx",
@@ -235,11 +235,11 @@
             },
             "4b": {
                 "name": "Qwen3.5-4B-NPU2",
-                "url": "https://huggingface.co/FastFlowLM/Qwen3.5-4B-NPU2",
-                "file_url": "https://huggingface.co/api/models/FastFlowLM/Qwen3.5-4B-NPU2/tree/main",
-                "ms_url": "https://modelscope.cn/models/amd/Qwen3.5-4B-NPU2",
+                "url": "https://huggingface.co/FastFlowLM/Qwen3.5-4B-NPU2/resolve/flm_q4k_high_precision",
+                "file_url": "https://huggingface.co/api/models/FastFlowLM/Qwen3.5-4B-NPU2/tree/flm_q4k_high_precision",
+                "ms_url": "https://modelscope.cn/models/amd/Qwen3.5-4B-NPU2/resolve/flm_q4k_high_precision",
                 "size": 4000000000,
-                "flm_min_version": "0.9.45",
+                "flm_min_version": "1.0.3",
                 "files": [
                     "config.json",
                     "model.q4nx",
@@ -267,11 +267,11 @@
             },
             "9b":{
                 "name": "Qwen3.5-9B-NPU2",
-                "url": "https://huggingface.co/FastFlowLM/Qwen3.5-9B-NPU2",
-                "file_url": "https://huggingface.co/api/models/FastFlowLM/Qwen3.5-9B-NPU2/tree/main",
-                "ms_url": "https://modelscope.cn/models/amd/Qwen3.5-9B-NPU2",
+                "url": "https://huggingface.co/FastFlowLM/Qwen3.5-9B-NPU2/resolve/flm_q4k_high_precision",
+                "file_url": "https://huggingface.co/api/models/FastFlowLM/Qwen3.5-9B-NPU2/tree/flm_q4k_high_precision",
+                "ms_url": "https://modelscope.cn/models/amd/Qwen3.5-9B-NPU2/resolve/flm_q4k_high_precision",
                 "size": 9000000000,
-                "flm_min_version": "0.9.45",
+                "flm_min_version": "1.0.3",
                 "files": [
                     "config.json",
                     "model.q4nx",
@@ -302,11 +302,11 @@
         "qwen3.6-moe": {
             "35b-a3b": {
                 "name": "Qwen3.6-35B-A3B-NPU2",
-                "url": "https://huggingface.co/FastFlowLM/Qwen3.6-35B-A3B-NPU2",
-                "file_url": "https://huggingface.co/api/models/FastFlowLM/Qwen3.6-35B-A3B-NPU2/tree/main",
-                "ms_url": "https://modelscope.cn/models/amd/Qwen3.6-35B-A3B-NPU2",
+                "url": "https://huggingface.co/FastFlowLM/Qwen3.6-35B-A3B-NPU2/resolve/flm_q4k_high_precision",
+                "file_url": "https://huggingface.co/api/models/FastFlowLM/Qwen3.6-35B-A3B-NPU2/tree/flm_q4k_high_precision",
+                "ms_url": "https://modelscope.cn/models/amd/Qwen3.6-35B-A3B-NPU2/resolve/flm_q4k_high_precision",
                 "size": 35000000000,
-                "flm_min_version": "0.9.45",
+                "flm_min_version": "1.0.3",
                 "files": [
                     "config.json",
                     "model.q4nx",

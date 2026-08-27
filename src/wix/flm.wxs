@@ -23,7 +23,7 @@
 
   <Package Name="flm"
            Manufacturer="FastFlowLM"
-           Version="1.0.1"
+           Version="1.0.3"
            UpgradeCode="5A5B2872-1E63-4934-9F57-088554CF4959"
            Language="1033"
            Scope="perMachine"

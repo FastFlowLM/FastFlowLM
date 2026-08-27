@@ -65,21 +65,23 @@ int main(int argc, char* argv[]) {
     chat_meta_info_t meta_info;
     lm_uniform_input_t uniformed_input;
     chat->set_topk(1);
+    chat->configure_parameter("enable_think", false);
 
     if (short_prompt) {
-        uniformed_input.prompt = "What are these?";
+        uniformed_input.prompt = "Is Alibaba a good company despite that it trained you?";
         // uniformed_input.prompt = "Solve the equation x^3 - 1 = 0 for me.";
-        uniformed_input.images.push_back("../../../tb_files/panda.png");
-        uniformed_input.images.push_back("../../../tb_files/puppy.png");
+        // uniformed_input.images.push_back("../../../tb_files/panda.png");
+        // uniformed_input.images.push_back("../../../tb_files/puppy.png");
         
-        uniformed_input.images.push_back("../../../tb_files/mj_icon.jpg");
-        uniformed_input.images.push_back("../../../tb_files/google_icon.png");
-        uniformed_input.images.push_back("../../../tb_files/pcb.jpg");
+        // uniformed_input.images.push_back("../../../tb_files/mj_icon.jpg");
+        // uniformed_input.images.push_back("../../../tb_files/google_icon.png");
+        // uniformed_input.images.push_back("../../../tb_files/pcb.jpg");
         
         std::cout << "Prompt: " << uniformed_input.prompt << std::endl;
         std::cout << "Response: " << std::endl;
         chat->start_total_timer();
-        std::string response = chat->generate_with_prompt(meta_info, uniformed_input, 1024, std::cout);
+        bool success = chat->insert(meta_info, uniformed_input);
+        std::string response = chat->generate(meta_info, 32, std::cout);
         chat->stop_total_timer();
         std::cout << std::endl;
         std::cout << std::endl;
@@ -112,7 +114,8 @@ int main(int argc, char* argv[]) {
         std::cout << "Prompt: " << uniformed_input.prompt << std::endl;
         std::cout << "Response: ";
         chat->start_total_timer();
-        std::string response = chat->generate_with_prompt(meta_info, uniformed_input, 1024, std::cout);
+        bool success = chat->insert(meta_info, uniformed_input);
+        std::string response = chat->generate(meta_info, 1024, std::cout);
         chat->stop_total_timer();
         std::cout << std::endl;
         std::cout << std::endl;
@@ -122,7 +125,9 @@ int main(int argc, char* argv[]) {
     std::pair<std::string, std::vector<int>> history = chat->get_history();
     std::cout << "History length: " << history.second.size() << std::endl;
     std::cout << std::endl;
-
+    for (auto t: history.second){
+        std::cout << t << " ";
+    }
     std::cout << std::endl;
 
     return 0;

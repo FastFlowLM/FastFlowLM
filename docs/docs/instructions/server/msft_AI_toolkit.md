@@ -36,7 +36,7 @@ You’ll now see the **AI Toolkit** icon on the sidebar.
 
 ## 🧠 3. Install FastFlowLM & Pull a Model
 
-Download & install FastFlowLM: (../../install.md)
+1. Download & install [FastFlowLM](../../install_win/)
 
 2. Open **PowerShell**
 
@@ -88,7 +88,7 @@ Click **Enter**
 
 ## 📡 5. Activate Server Mode with a Model
 
-Open powershell, enter
+Open PowerShell, enter
 
 ```shell
 flm serve llama3.2:1b

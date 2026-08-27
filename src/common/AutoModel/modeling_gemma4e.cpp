@@ -477,16 +477,32 @@ bool Gemma4e::insert(chat_meta_info_t& meta_info, lm_uniform_input_t& input, std
     int total_audio_clips = 0;
     std::vector<audio_data_t> audio_data_list;
 
+    nlohmann::ordered_json gemma4_message = nlohmann::ordered_json::array();
     if (!input.messages.empty()) { // Server Processing
+        // Build gemma4_message (used for the template) in the same pass that
+        // decodes images/audio, so an invalid image (e.g. bad base64) never
+        // gets an image-token placeholder; otherwise image_payload would
+        // fall out of sync with the placeholders and the prompt would still
+        // try to prefill a nonexistent image.
         int total_images = 0;
         for (auto& message : input.messages) {
+            if (!message.contains("images") && !message.contains("audios")) {
+                gemma4_message.push_back(message);
+                continue;
+            }
+
+            nlohmann::ordered_json newContent = nlohmann::ordered_json::array();
             // Process Images
             if (message.contains("images")) {
                 for (auto& img : message["images"]) {
                     std::string img_str = img.get<std::string>();
-                    if (!img_str.empty()) total_images++;
-                    
+
                     gemma4e_image_t image = this->load_image_base64(img_str);
+                    if (image.width <= 0 || image.height <= 0) {
+                        header_print("ERROR", "Skipping invalid base64 image; prefilling language only for this item");
+                        continue;
+                    }
+
                     std::vector<bf16> pixel_values;
                     std::pair<int, int> patch_element_per_patch;
                     uint32_t valid_patch_size = 0;
@@ -501,6 +517,9 @@ bool Gemma4e::insert(chat_meta_info_t& meta_info, lm_uniform_input_t& input, std
                     image_payload.image_grid_pairs_per_image.push_back(image_grid_pairs);
                     image_payload.num_soft_tokens_per_image.push_back(num_soft_tokens);
                     image_payload.num_images++;
+                    total_images++;
+
+                    newContent.push_back({{"type", "image"}, {"image", img}});
                 }
             }
             // Process Audios
@@ -520,8 +539,16 @@ bool Gemma4e::insert(chat_meta_info_t& meta_info, lm_uniform_input_t& input, std
                         header_print_g("FLM", "Audio in message is split into " + std::to_string(clipped_audio_data.size()) + " chunks for processing.");
                         std::cout << std::endl;
                     }
+                    newContent.push_back({{"type", "audio"}, {"audio", aud}});
                 }
             }
+            newContent.push_back({{"type", "text"}, {"text", message.value("content", "")}});
+
+            nlohmann::ordered_json newItem = {
+                {"role", message.value("role", "user")},
+                {"content", newContent}
+            };
+            gemma4_message.push_back(newItem);
         }
         header_print("FLM", "Total images: " << total_images);
     }
@@ -608,32 +635,8 @@ bool Gemma4e::insert(chat_meta_info_t& meta_info, lm_uniform_input_t& input, std
         }
     }
     if (!input.messages.empty()) { // already a formated messages, usually from REST API
-        nlohmann::ordered_json gemma4_message = nlohmann::ordered_json::array();
-        for (const auto& item : input.messages) {
-            if (!item.contains("images") && !item.contains("audios")) {
-                gemma4_message.push_back(item);
-                continue;
-            }
-
-            nlohmann::ordered_json newContent = nlohmann::ordered_json::array();
-            if (item.contains("images")) {
-                for (const auto& img : item["images"]) {
-                    newContent.push_back({{"type", "image"}, {"image", img}});
-                }
-            }
-            if (item.contains("audios")) {
-                for (const auto& aud : item["audios"]) {
-                    newContent.push_back({{"type", "audio"}, {"audio", aud}});
-                }
-            }
-            newContent.push_back({{"type", "text"}, {"text", item.value("content", "")}});
-
-            nlohmann::ordered_json newItem = {
-                {"role", item.value("role", "user")},
-                {"content", newContent}
-            };
-            gemma4_message.push_back(newItem);
-        }
+        // gemma4_message was already built above, in the same pass that
+        // decoded images/audio.
         templated_text = this->apply_chat_template(gemma4_message, input.tools);
     }
     else if (!input.prompt.empty()) { // a pure text, usually from the cli
@@ -1063,8 +1066,7 @@ StreamResult Gemma4e::parse_stream_content_impl(const std::string content, bool 
 
                 result.type = StreamEventType::TOOL_DONE;
                 
-                static int tool_counter = 0;
-                result.tool_id = "call_" + std::to_string(std::time(nullptr)) + "_" + std::to_string(tool_counter++);
+                result.tool_id = "call_" + std::to_string(std::time(nullptr));
                 auto parsed_tool = parse_gemma4e_tool_content(tool_content);
                 result.tool_name = parsed_tool.first;
                 result.tool_args_str = parsed_tool.second.dump();

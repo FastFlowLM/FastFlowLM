@@ -23,6 +23,18 @@ inline T cfg_get(const nlohmann::json& jc, const char* key, T default_value){
     return default_value;
 }
 
+/// \brief read a nested object out of a config json
+/// \note Reference-returning counterpart of cfg_get, for walking nested configs
+///       (thinker_config.text_config, ...). Returns a shared empty object when
+///       the key is missing or null, so the JSON_GET below it still defaults.
+inline const nlohmann::json& cfg_sub(const nlohmann::json& jc, const char* key){
+    static const nlohmann::json empty = nlohmann::json::object();
+    if (jc.contains(key) && !jc[key].is_null()){
+        return jc[key];
+    }
+    return empty;
+}
+
 /// \brief LM_Config class
 /// \note Model parameters are NOT cached as members. Everything comes from the
 ///       model's config.json, so every consumer reads what it needs straight out
@@ -51,11 +63,7 @@ class LM_Config{
         /// \brief read a nested config object (vision_config, audio_config, ...)
         /// \return the sub-object, or an empty object when absent/null
         const nlohmann::json& sub(const char* key) const {
-            static const nlohmann::json empty = nlohmann::json::object();
-            if (this->_json_config.contains(key) && !this->_json_config[key].is_null()){
-                return this->_json_config[key];
-            }
-            return empty;
+            return cfg_sub(this->_json_config, key);
         }
 
         /// \brief from pretrained

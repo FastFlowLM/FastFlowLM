@@ -256,7 +256,7 @@ The `-r` option determines the image's height:
 - **Think:** Toggleable
 - **Tool Calling Support:** No  
 - **Base Model:** [Qwen/Qwen3.5-0.8B](https://huggingface.co/Qwen/Qwen3.5-0.8B)
-- **Quantization:** Q4_1
+- **Quantization:** Q4_K
 - **Max Context Length:** 256k tokens  
 - **Default Context Length:** 32k tokens ([change default](https://fastflowlm.com/docs/instructions/cli/#-change-default-context-length-max))  
 - **[Set Context Length at Launch](https://fastflowlm.com/docs/instructions/cli/#-set-context-length-at-launch)**
@@ -303,7 +303,7 @@ The `-r` option determines the image's height:
 - **Think:** Toggleable
 - **Tool Calling Support:** Yes  
 - **Base Model:** [Qwen/Qwen3.5-2B](https://huggingface.co/Qwen/Qwen3.5-2B)
-- **Quantization:** Q4_1
+- **Quantization:** Q4_K
 - **Max Context Length:** 256k tokens  
 - **Default Context Length:** 32k tokens ([change default](https://fastflowlm.com/docs/instructions/cli/#-change-default-context-length-max))  
 - **[Set Context Length at Launch](https://fastflowlm.com/docs/instructions/cli/#-set-context-length-at-launch)**
@@ -350,7 +350,7 @@ The `-r` option determines the image's height:
 - **Think:** Toggleable
 - **Tool Calling Support:** Yes  
 - **Base Model:** [Qwen/Qwen3.5-4B](https://huggingface.co/Qwen/Qwen3.5-4B)
-- **Quantization:** Q4_1
+- **Quantization:** Q4_K
 - **Max Context Length:** 256k tokens  
 - **Default Context Length:** 32k tokens ([change default](https://fastflowlm.com/docs/instructions/cli/#-change-default-context-length-max))  
 - **[Set Context Length at Launch](https://fastflowlm.com/docs/instructions/cli/#-set-context-length-at-launch)**
@@ -397,7 +397,7 @@ The `-r` option determines the image's height:
 - **Think:** Toggleable
 - **Tool Calling Support:** Yes  
 - **Base Model:** [Qwen/Qwen3.5-9B](https://huggingface.co/Qwen/Qwen3.5-9B)
-- **Quantization:** Q4_1
+- **Quantization:** Q4_K
 - **Max Context Length:** 256k tokens  
 - **Default Context Length:** 32k tokens ([change default](https://fastflowlm.com/docs/instructions/cli/#-change-default-context-length-max))  
 - **[Set Context Length at Launch](https://fastflowlm.com/docs/instructions/cli/#-set-context-length-at-launch)**
@@ -444,7 +444,7 @@ The `-r` option determines the image's height:
 - **Think:** Toggleable
 - **Tool Calling Support:** Yes  
 - **Base Model:** [Qwen/Qwen3.6-35B-A3B](https://huggingface.co/Qwen/Qwen3.6-35B-A3B)
-- **Quantization:** Q4_KS
+- **Quantization:** Q4_K
 - **Max Context Length:** 256k tokens  
 - **Default Context Length:** 32k tokens ([change default](https://fastflowlm.com/docs/instructions/cli/#-change-default-context-length-max))  
 - **[Set Context Length at Launch](https://fastflowlm.com/docs/instructions/cli/#-set-context-length-at-launch)**

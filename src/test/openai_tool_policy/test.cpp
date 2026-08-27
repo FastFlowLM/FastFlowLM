@@ -196,7 +196,8 @@ int main() {
     require(minimal.tools.size() == 1);
 
     auto unicode_description = minimal_tool();
-    unicode_description[0]["function"]["description"] = "Meteo pour Sao Paulo, Tokyo, and \U0001f30d";
+    unicode_description[0]["function"]["description"] =
+        std::string("Meteo pour Sao Paulo, Tokyo, and ") + "\xF0\x9F\x8C\x8D";
     const auto unicode = openai_tools::parse_tool_policy({{"tools", unicode_description}});
     require(unicode.tools[0]["function"]["description"] ==
         unicode_description[0]["function"]["description"]);

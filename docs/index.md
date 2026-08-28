@@ -2,14 +2,14 @@
 layout: page
 title: "FastFlowLM"
 permalink: /
-description: "Ollama-style runtime that unlocks AMD Ryzen AI NPUs with instant installs, rich models, and matching docs."
+description: "NPU-native runtime that unlocks AMD Ryzen AI NPUs with instant installs, rich models, and matching docs."
 sections:
   - type: hero
     id: top
     kicker: "NPU-first runtime"
     title: "The fastest, most efficient LLM inference on NPUs"
     body: |
-      FastFlowLM (FLM) delivers an Ollama-style developer experience built exclusively for AMD Ryzen™ AI NPUs. Install in seconds, stream tokens instantly, and run context windows up to 256k — all with dramatically better efficiency than GPU-first stacks.
+      FastFlowLM (FLM) delivers a familiar single-command developer experience built exclusively for AMD Ryzen™ AI NPUs. Install in seconds, stream tokens instantly, and run context windows up to 256k — all with dramatically better efficiency than GPU-first stacks.
       
       The FastFlowLM team is now part of AMD.
     ctas:
@@ -54,7 +54,7 @@ sections:
                 - "Over 10× power efficiency"
                 - "256k ctx"
                 - "Vision · Audio · OMNI · Text"
-          - title: "Ollama‑Style Developer Flow"
+          - title: "Familiar Developer Flow"
             description: "Same simple CLI & API patterns you already know — deeply optimized for NPU performance."
             visual:
               type: "code"
@@ -152,7 +152,7 @@ sections:
       kicker: "Install"
       title: "From download to first token in under a minute"
       body: |
-        FastFlowLM ships as a 17 MB runtime with an Ollama-style CLI and a server compatible with the OpenAI API.
+        FastFlowLM ships as a 17 MB runtime with a familiar single-command CLI and a server compatible with the OpenAI API.
         No drivers, no guesswork—just run the installer, pull a model, and start chatting.
       items:
         - heading: "Zero-conf installer"

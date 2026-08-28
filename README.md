@@ -14,7 +14,7 @@ Run large language models — now with **Vision**, **Audio**, **Embedding** and 
 **No GPU required. Faster and over 10× more power-efficient. Supports context lengths up to 256k tokens. Ultra-Lightweight (17 MB). Installs within 20 seconds.**
 
 📦 **The only out-of-box, NPU-first runtime built exclusively for Ryzen™ AI.**  
-🤝 **Think Ollama — but deeply optimized for NPUs.**  
+🤝 **A familiar single-command CLI — deeply optimized for NPUs.**  
 ✨ **From Idle Silicon to Instant Power — FastFlowLM Makes Ryzen™ AI Shine.**
 
 > FastFlowLM (FLM) supports all Ryzen™ AI Series chips with XDNA2 NPUs (Strix, Strix Halo, Kraken, and Gorgon Point).
@@ -107,7 +107,7 @@ No model rewrites, no tuning — it just works.
 
 - **Runs fully on AMD Ryzen™ AI NPU** — no GPU or CPU load
 - **Lightweight runtime (17 MB)** — installs within **20 seconds**, easy to integrate    
-- **Developer-first flow** — like Ollama, but optimized for NPU  
+- **Developer-first flow** — a familiar single-command CLI, optimized for NPU  
 - **Support for long context windows** — up to 256k tokens (e.g., Qwen3-4B-Thinking-2507)  
 - **No low-level tuning required** — You focus on your app, we handle the rest
 

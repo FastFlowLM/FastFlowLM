@@ -20,7 +20,7 @@ int main(int argc, char* argv[]) {
     desc.add_options()("model,m", arg_utils::po::value<std::string>()->required(), "Model file");
     desc.add_options()("Short,s", arg_utils::po::value<bool>()->default_value(true), "Short Prompt");
     desc.add_options()("Preemption,p", arg_utils::po::value<bool>()->default_value(false), "Preemption");
-    desc.add_options()("type,t", arg_utils::po::value<int>()->default_value(0), "\t0: text mode\n\t1: image only\n\t2: audio only\n\t3: omni mode\n\t");
+    desc.add_options()("type,t", arg_utils::po::value<int>()->default_value(0), "\t0: text mode\n\t1: image only\n\t2: audio only\n\t3: omni mode\n\t4: ocr mode\n\t");
     desc.add_options()("Think,k", arg_utils::po::value<bool>()->default_value(false), "Enable thinking");
     arg_utils::po::store(arg_utils::po::parse_command_line(argc, argv, desc), vm);
 
@@ -67,16 +67,19 @@ int main(int argc, char* argv[]) {
                 uniformed_input.images.push_back("../../../tb_files/pcb.jpg");
                 break;
             case 2:  // audio only
-                uniformed_input.prompt = "Transcribe the following speech segment in its original language. Only output the transcription, with no newlines.";
-                uniformed_input.audios.push_back("../../../tb_files/Demos_sample-data_journal.wav");
-                uniformed_input.audios.push_back("../../../tb_files/tenyears_00_curry_128kb.mp3");
+                uniformed_input.prompt = "Transcribe the following speech segment in its original language. Follow these specific instructions for formatting the answer:\n* Only output the transcription, with no newlines.\n* When transcribing numbers, write the digits, i.e. write 1.7 and not one point seven, and write 3 instead of three.";
+                uniformed_input.audios.push_back("../../../tb_files/nvidia.mp3");
                 break;
             case 3:  // omni: image + audio
                 uniformed_input.prompt = "Answer the question in the audio and further describe what is in the image.";
                 uniformed_input.images.push_back("../../../tb_files/panda.png");
-                uniformed_input.images.push_back("../../../tb_files/pcb.jpg");
+                uniformed_input.images.push_back("../../../tb_files/sekiro.png");
                 uniformed_input.audios.push_back("../../../tb_files/Demos_sample-data_journal.wav");
                 uniformed_input.audios.push_back("../../../tb_files/tenyears_00_curry_128kb.mp3");
+                break;
+            case 4:  // ocr: read the page image and translate it
+                uniformed_input.prompt = "Read all the text in the image and translate it to English. Output only the English translation.";
+                uniformed_input.images.push_back("../../../tb_files/german.png");
                 break;
             default:
                 header_print("info", "Unknown test type, exit 0;");

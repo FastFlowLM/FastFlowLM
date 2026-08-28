@@ -146,6 +146,7 @@
                 "flm_min_version": "0.9.45",
                 "files": [
                     "config.json",
+                    "processor_config.json",
                     "model.q4nx",
                     "tokenizer.json",
                     "tokenizer_config.json",

@@ -8,6 +8,7 @@
 #include "AutoModel/modeling_gemma4_12b.hpp"
 #include "metrices.hpp"
 #include "error_measure.hpp"
+#include <cassert>
 
 namespace {
 std::string trim_gemma4_12b_tool_value(std::string value) {
@@ -412,6 +413,15 @@ void Gemma4_12B::load_model(std::string model_path, json model_info, int default
     this->lm_engine->load_weights(*this->q4nx);
     // free the q4nx
     this->q4nx.reset();
+    // The soft token budget is a preprocessing constant (processor_config.json
+    // image_seq_length / image_processor.max_soft_tokens), read by the engine
+    // along with the rest of the image front end parameters.
+    {
+        gemma4_12b_npu* engine = dynamic_cast<gemma4_12b_npu*>(this->lm_engine.get());
+        if (engine != nullptr && engine->GEMMA4_12B_vision_max_soft_tokens > 0){
+            this->image_softtoken_budget = (int)engine->GEMMA4_12B_vision_max_soft_tokens;
+        }
+    }
     this->lm_engine->clear_context();
     this->setup_tokenizer(model_path);
     this->sampler.reset();
@@ -489,14 +499,14 @@ bool Gemma4_12B::insert(chat_meta_info_t& meta_info, lm_uniform_input_t& input, 
     gemma4_12b_image_payload_t image_payload;
     gemma4_12b_audio_payload_t audio_payload;
     audio_payload.num_audios = 0;
-    image_payload.num_images = 0;    
+    image_payload.num_images = 0;
 
-    // Text-only front-end: any image/audio payload is dropped with a warning.
-    if (!input.images.empty() || !input.audios.empty()) {
-        header_print("WARNING", "Gemma4-12B text-only interface: ignoring "
-            << input.images.size() << " image(s) and "
-            << input.audios.size() << " audio(s)");
-    }
+    // [input.audios.size()] -- how many 30 s chunks each input clip was split
+    // into, so the chat template emits one <|audio|> placeholder per chunk.
+    std::vector<int> audio_chunks_per_input;
+
+    // The prompt (CLI) path below preprocesses images/audios; only the
+    // messages (REST) path is still text-only and strips them.
 
     if (!input.messages.empty()) { // already a formated messages, usually from REST API
         nlohmann::ordered_json text_messages = nlohmann::ordered_json::array();
@@ -535,24 +545,41 @@ bool Gemma4_12B::insert(chat_meta_info_t& meta_info, lm_uniform_input_t& input, 
                     std::cerr << "only mono audio is supported, but got " << audio_data.original_channels << " channels. Please convert it to mono first." << std::endl;
                     exit(-1);
                 }
-                std::vector<bf16> audio_processed;
-                int processed_num_frames = 0;
-                extract_waveform_features(
+                // A clip longer than the 750-soft-token (30 s) cap must be split
+                // into several chunks; each chunk becomes its own audio entry in
+                // the payload and gets its own <|audio> ... <audio|> block below.
+                std::vector<std::vector<bf16>> audio_chunks;
+                std::vector<int> audio_chunk_frames;
+                extract_waveform_features_chunked(
                     audio_data,
-                    gemma4e_engine->GEMMA4_12B_audio_embed_dim,
-                    audio_processed,
-                    processed_num_frames
+                    gemma4e_engine->GEMMA4_12B_audio_samples_per_token,
+                    gemma4e_engine->GEMMA4_12B_audio_max_soft_tokens,
+                    audio_chunks,
+                    audio_chunk_frames
                 );
 
-                audio_payload.num_audios++;
-                audio_payload.num_soft_tokens_per_audio.push_back(
-                    processed_num_frames
-                );
-                audio_payload.mel_spectrograms.push_back(
-                    audio_processed
-                );
-                audio_payload.mel_spectrogram_frames_per_audio.push_back(processed_num_frames);
-                audio_payload.mel_spectrogram_bins_per_audio.push_back(gemma4e_engine->GEMMA4_12B_audio_embed_dim);
+                if (audio_chunks.size() > 1) {
+                    header_print("INFO", "Audio " << i << " is longer than "
+                        << (gemma4e_engine->GEMMA4_12B_audio_max_soft_tokens
+                            * gemma4e_engine->GEMMA4_12B_audio_samples_per_token
+                            / (double)gemma4e_engine->GEMMA4_12B_audio_sampling_rate)
+                        << " s; split into " << audio_chunks.size() << " chunks");
+                }
+
+                audio_chunks_per_input.push_back(static_cast<int>(audio_chunks.size()));
+
+                for (size_t c = 0; c < audio_chunks.size(); c++) {
+                    const int processed_num_frames = audio_chunk_frames[c];
+                    audio_payload.num_audios++;
+                    audio_payload.num_soft_tokens_per_audio.push_back(
+                        processed_num_frames
+                    );
+                    audio_payload.mel_spectrograms.push_back(
+                        std::move(audio_chunks[c])
+                    );
+                    audio_payload.mel_spectrogram_frames_per_audio.push_back(processed_num_frames);
+                    audio_payload.mel_spectrogram_bins_per_audio.push_back(gemma4e_engine->GEMMA4_12B_audio_embed_dim);
+                }
 
 
 
@@ -647,7 +674,14 @@ bool Gemma4_12B::insert(chat_meta_info_t& meta_info, lm_uniform_input_t& input, 
             content["content"].push_back({{"type", "image"}, {"image", input.images[i]}});
         }
         for (int i = 0; i < input.audios.size(); i++) {
-            content["content"].push_back({{"type", "audio"}, {"audio", input.audios[i]}}); // placeholder
+            // One placeholder per 30 s chunk: a clip that was split must produce
+            // as many <|audio|> placeholders as there are payload entries, or the
+            // expansion loop below leaves the trailing chunks unconsumed.
+            const int n_chunks = (i < (int)audio_chunks_per_input.size())
+                ? audio_chunks_per_input[i] : 1;
+            for (int c = 0; c < n_chunks; c++) {
+                content["content"].push_back({{"type", "audio"}, {"audio", input.audios[i]}}); // placeholder
+            }
         }
         
         content["content"].push_back({{"type", "text"}, {"text", input.prompt}});
@@ -666,37 +700,155 @@ bool Gemma4_12B::insert(chat_meta_info_t& meta_info, lm_uniform_input_t& input, 
         total_image_tokens += image_payload.num_soft_tokens_per_image[i];
     }
 
+    int total_audio_tokens = 0;
+    for(int i = 0; i < audio_payload.num_audios; i++){
+        total_audio_tokens += audio_payload.num_soft_tokens_per_audio[i];
+    }
 
+    tokens.reserve(tokens_init.size() + total_image_tokens + total_audio_tokens);
+
+    // Expand each single placeholder into <boi> <soft>*n <eoi> (resp. audio),
+    // keeping every other token -- including the interleaving order of images
+    // and audios as the chat template emitted them.
     int image_counter = 0;
+    int audio_counter = 0;
     for(int i = 0; i < tokens_init.size(); i++){
-        if (tokens_init[i] == image_token_id) {
+        if (tokens_init[i] == image_token_id && image_counter < (int)image_payload.num_images) {
             tokens.push_back(boi_token_id); // the first image soft token id, which is reserved for the model to identify the image position, the rest of the soft tokens for this image will be continuous following this id
             for (int j = 0; j < image_payload.num_soft_tokens_per_image[image_counter]; j++) {
                 tokens.push_back(image_token_id);
             }
             tokens.push_back(eoi_token_id); // a separator token between images, not necessary but can help the model to better distinguish different images
-          
             image_counter++;
-        } 
-    }
-
-    int audio_counter = 0;
-    for(int i = 0; i < tokens_init.size(); i++){
-        if(tokens_init[i] == audio_token_id){
-            tokens.push_back(boa_token_id);
-
-            for(int j = 0; j < audio_payload.num_soft_tokens_per_audio[audio_counter]; j++){
+        }
+        else if (tokens_init[i] == audio_token_id && audio_counter < (int)audio_payload.num_audios) {
+            tokens.push_back(boa_token_id); // the first audio soft token id, which is reserved for the model to identify the audio position, the rest of the soft tokens for this audio will be continuous following this id
+            for (int j = 0; j < audio_payload.num_soft_tokens_per_audio[audio_counter]; j++) {
                 tokens.push_back(audio_token_id);
             }
-            tokens.push_back(eoa_token_id);
+            tokens.push_back(eoa_token_id); // a separator token between audios, not necessary but can help the model to better distinguish different audios
             audio_counter++;
- 
         }
-
+        else {
+            tokens.push_back(tokens_init[i]);
+        }
     }
- 
+    assert(image_counter == (int)image_payload.num_images);
+    assert(audio_counter == (int)audio_payload.num_audios);
 
     this->profiler_list[TKOEN_ENCODE_TIME].stop(tokens.size());
+
+    // ----------------------------------------------------------------------
+    // Prompt-cache aware multi-modal alignment.
+    //
+    // AutoModel::_shared_insert prefix-matches `tokens` against `checkpoint_his`
+    // over the FULL length of `checkpoint_his`. If every token matches, it
+    // erases that prefix before prefilling; otherwise it calls clear_context()
+    // and skips nothing. We must NOT erase `tokens` here -- _shared_insert
+    // needs the untrimmed sequence to run that very check. What we DO need
+    // to fix up locally is the multi-modal payload (which carries
+    // pixels/waveforms for the WHOLE prompt, including images/audios from
+    // earlier turns that are already cached): drop the fully-cached leading
+    // images/audios so the surviving payload aligns with the surviving soft
+    // tokens after _shared_insert performs its own erase.
+    // ----------------------------------------------------------------------
+    size_t prefix_skip_count = 0;
+    {
+        const size_t idx = this->checkpoint_his.size();
+        for (size_t i = 0; i < idx; i++) {
+            if (i < tokens.size() && tokens[i] == this->checkpoint_his[i]) {
+                prefix_skip_count++;
+            } else {
+                break;
+            }
+        }
+        // Must match the entirety of checkpoint_his, otherwise _shared_insert
+        // will clear the context and not skip anything.
+        if (prefix_skip_count != idx) {
+            prefix_skip_count = 0;
+        }
+
+        if (prefix_skip_count > 0 && (image_payload.num_images > 0 || audio_payload.num_audios > 0)) {
+            // Count modal soft-tokens that landed inside the cached prefix.
+            int skipped_image_tokens = 0;
+            int skipped_audio_tokens = 0;
+            for (size_t i = 0; i < prefix_skip_count; i++) {
+                if (tokens[i] == image_token_id) skipped_image_tokens++;
+                else if (tokens[i] == audio_token_id) skipped_audio_tokens++;
+            }
+
+            // Walk images in order; each image's soft-token block is either
+            // entirely inside the cached prefix or not at all (chat-template
+            // boundaries never split a single image's block).
+            size_t images_to_drop = 0;
+            {
+                int consumed = 0;
+                for (unsigned i = 0; i < image_payload.num_images; i++) {
+                    const int n = static_cast<int>(image_payload.num_soft_tokens_per_image[i]);
+                    if (consumed + n <= skipped_image_tokens) {
+                        consumed += n;
+                        images_to_drop++;
+                    } else {
+                        break;
+                    }
+                }
+            }
+
+            // Same for audios.
+            size_t audios_to_drop = 0;
+            {
+                int consumed = 0;
+                for (unsigned i = 0; i < audio_payload.num_audios; i++) {
+                    const int n = static_cast<int>(audio_payload.num_soft_tokens_per_audio[i]);
+                    if (consumed + n <= skipped_audio_tokens) {
+                        consumed += n;
+                        audios_to_drop++;
+                    } else {
+                        break;
+                    }
+                }
+            }
+
+            auto drop_front = [](auto& vec, size_t n) {
+                if (n == 0) return;
+                if (n >= vec.size()) { vec.clear(); return; }
+                vec.erase(vec.begin(), vec.begin() + n);
+            };
+
+            if (images_to_drop > 0) {
+                drop_front(image_payload.image_patch__element_per_patch, images_to_drop);
+                drop_front(image_payload.valid_patch_size_per_image,     images_to_drop);
+                drop_front(image_payload.pixel_values,                   images_to_drop);
+                drop_front(image_payload.image_grid_pairs_per_image,     images_to_drop);
+                drop_front(image_payload.num_soft_tokens_per_image,      images_to_drop);
+                image_payload.num_images -= static_cast<unsigned>(images_to_drop);
+                header_print("FLM",
+                    "Prompt-cache hit: dropped " << images_to_drop
+                    << " cached image(s) from payload");
+            }
+
+            if (audios_to_drop > 0) {
+                drop_front(audio_payload.mel_spectrograms,                 audios_to_drop);
+                drop_front(audio_payload.mel_spectrogram_frames_per_audio, audios_to_drop);
+                drop_front(audio_payload.mel_spectrogram_bins_per_audio,   audios_to_drop);
+                drop_front(audio_payload.num_soft_tokens_per_audio,        audios_to_drop);
+                audio_payload.num_audios -= static_cast<unsigned>(audios_to_drop);
+                header_print("FLM",
+                    "Prompt-cache hit: dropped " << audios_to_drop
+                    << " cached audio(s) from payload");
+            }
+        }
+    }
+
+    // find the last image token index, expressed relative to the tokens that
+    // will SURVIVE _shared_insert's prefix erase (i.e. shifted by -prefix_skip_count).
+    int last_image_token_index = -1;
+    for (int i = static_cast<int>(prefix_skip_count); i < (int)tokens.size(); i++) {
+        if ((tokens[i] == image_token_id || tokens[i] == boi_token_id)) {
+            last_image_token_index = i - static_cast<int>(prefix_skip_count);
+        }
+    }
+    last_image_token_index++; // plus the end of image tokens
 
     // hardware
     int restore_idx = -1;
@@ -713,7 +865,10 @@ bool Gemma4_12B::insert(chat_meta_info_t& meta_info, lm_uniform_input_t& input, 
     multi_modal_payload.image_payload = image_payload;
     multi_modal_payload.audio_payload = audio_payload;
 
-    bool success = this->_shared_insert(meta_info, tokens_init, is_cancelled, nullptr);
+    const bool has_multimodal = image_payload.num_images > 0 || audio_payload.num_audios > 0;
+    bool success = has_multimodal
+        ? this->_shared_insert(meta_info, tokens, is_cancelled, &multi_modal_payload, last_image_token_index)
+        : this->_shared_insert(meta_info, tokens, is_cancelled, nullptr);
 
     checkpoint_his = token_history;
     int checkpoint_idx = gemma4_12b_engine->checkpoint();

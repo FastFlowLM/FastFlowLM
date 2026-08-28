@@ -8,6 +8,7 @@
 #include "AutoModel/modeling_gemma4_12b.hpp"
 #include "audio_process_utils/audioproc.hpp"
 #include "base64.hpp"
+#include <cassert>
 #include <utility>
 #include <cmath>
 #include <algorithm>
@@ -40,23 +41,66 @@ audio_data_t Gemma4_12B::load_audio(const std::string &filename, int resample_ra
     return result;
 }
 
-void Gemma4_12B::extract_waveform_features(audio_data_t& audio, 
+void Gemma4_12B::extract_waveform_features(audio_data_t& audio,
     int audio_samples_per_token,
+    int audio_max_soft_tokens,
     std::vector<bf16> & result_vector,
-    int & num_frames
+    int & num_frames,
+    size_t sample_offset
 ){
 
     assert(audio.channels == 1);
-    num_frames = (audio.num_samples +audio_samples_per_token-1)/audio_samples_per_token;
-    
+    const size_t total_samples = audio.samples.size();
+    const size_t remaining = (sample_offset < total_samples) ? (total_samples - sample_offset) : 0;
+    num_frames = static_cast<int>((remaining + audio_samples_per_token - 1) / audio_samples_per_token);
 
-    result_vector.resize(num_frames * audio_samples_per_token); // new elems are zero-init
-
-    for(size_t i = 0; i < audio.samples.size(); i++){
-        result_vector[i] = audio.samples[i]; // float -> bf16
+    // One token is 640 samples = 40 ms; the model accepts at most 750 of them
+    // (30 s). Anything past that is dropped, as in the reference extractor.
+    // Both bounds come from processor_config.json.
+    if (audio_max_soft_tokens > 0 && num_frames > audio_max_soft_tokens) {
+        num_frames = audio_max_soft_tokens;
     }
-    // padding already zeroed by resize()
 
+    result_vector.assign(static_cast<size_t>(num_frames) * audio_samples_per_token, bf16(0.0f));
+
+    const size_t num_to_copy = std::min(remaining, result_vector.size());
+    for(size_t i = 0; i < num_to_copy; i++){
+        result_vector[i] = audio.samples[sample_offset + i]; // float -> bf16
+    }
+    // tail padding already zeroed by assign()
+
+}
+
+void Gemma4_12B::extract_waveform_features_chunked(audio_data_t& audio,
+    int audio_samples_per_token,
+    int audio_max_soft_tokens,
+    std::vector<std::vector<bf16>> & chunk_features,
+    std::vector<int> & chunk_num_frames
+){
+    chunk_features.clear();
+    chunk_num_frames.clear();
+
+    const size_t total_samples = audio.samples.size();
+    if (total_samples == 0) {
+        return;
+    }
+
+    // Without a positive cap a clip is never split: one chunk holds everything.
+    const size_t samples_per_chunk = (audio_max_soft_tokens > 0)
+        ? static_cast<size_t>(audio_max_soft_tokens) * audio_samples_per_token
+        : total_samples;
+
+    for (size_t offset = 0; offset < total_samples; offset += samples_per_chunk) {
+        std::vector<bf16> features;
+        int num_frames = 0;
+        extract_waveform_features(audio, audio_samples_per_token, audio_max_soft_tokens,
+                                  features, num_frames, offset);
+        if (num_frames <= 0) {
+            break;
+        }
+        chunk_features.push_back(std::move(features));
+        chunk_num_frames.push_back(num_frames);
+    }
 }
 
 

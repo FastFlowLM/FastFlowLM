@@ -50,13 +50,34 @@ private:
     audio_data_t load_audio(const std::string &filename, int resample_rate, MonoDownmixMode downmix = MonoDownmixMode::NONE);
     audio_data_t load_audio_base64(const std::string &base64_str, int resample_rate, MonoDownmixMode downmix);
 
-    void extract_waveform_features(audio_data_t& audio, 
+    /// \note audio_samples_per_token (640 = 40 ms at 16 kHz) and
+    ///       audio_max_soft_tokens (750 = 30 s) are preprocessing constants read
+    ///       from processor_config.json; see gemma4_12b_npu::load_audio_preprocess_parameters.
+    void extract_waveform_features(audio_data_t& audio,
         int audio_samples_per_token,
+        int audio_max_soft_tokens,
         std::vector<bf16> & result_vector,
-        int & num_frames
+        int & num_frames,
+        size_t sample_offset = 0
     );
 
-    int image_softtoken_budget = 280; // set a default value
+    /// \brief Split an audio clip into consecutive chunks of at most
+    ///        audio_max_soft_tokens frames (750 = 30 s) and extract the raw
+    ///        waveform features of every chunk.
+    /// \note The reference feature extractor caps a single clip at 30 s. A longer
+    ///       clip must therefore be fed as several clips, each with its own
+    ///       <|audio> ... <audio|> block, or everything past the first 30 s is
+    ///       silently dropped.
+    void extract_waveform_features_chunked(audio_data_t& audio,
+        int audio_samples_per_token,
+        int audio_max_soft_tokens,
+        std::vector<std::vector<bf16>> & chunk_features,
+        std::vector<int> & chunk_num_frames
+    );
+
+    // Overwritten in load_model() from processor_config.json; the literal is the
+    // released Gemma4-12B value, used when the checkpoint ships no processor config.
+    int image_softtoken_budget = 280;
 
     void preprocess_image(
       gemma4_12b_image_t &image,

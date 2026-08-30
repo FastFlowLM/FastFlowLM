@@ -16,7 +16,7 @@
 -include ../common.mk
 
 # Test scenario: 0 = text, 1 = image, 2 = audio, 3 = omni (image + audio)
-TYPE ?= 2
+TYPE ?= 3
 
 SOURCES += test.cpp
 SOURCES += ../../common/AutoModel/automodel.cpp

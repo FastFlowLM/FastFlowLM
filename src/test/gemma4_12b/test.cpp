@@ -20,7 +20,7 @@ int main(int argc, char* argv[]) {
     desc.add_options()("model,m", arg_utils::po::value<std::string>()->required(), "Model file");
     desc.add_options()("Short,s", arg_utils::po::value<bool>()->default_value(true), "Short Prompt");
     desc.add_options()("Preemption,p", arg_utils::po::value<bool>()->default_value(false), "Preemption");
-    desc.add_options()("type,t", arg_utils::po::value<int>()->default_value(0), "\t0: text mode\n\t1: image only\n\t2: audio only\n\t3: omni mode\n\t4: ocr mode\n\t");
+    desc.add_options()("type,t", arg_utils::po::value<int>()->default_value(0), "\t0: text mode\n\t1: image only\n\t2: audio only\n\t3: omni mode\n\t4: ocr mode\n\t5: multi-turn text mode\n\t");
     desc.add_options()("Think,k", arg_utils::po::value<bool>()->default_value(false), "Enable thinking");
     arg_utils::po::store(arg_utils::po::parse_command_line(argc, argv, desc), vm);
 
@@ -56,6 +56,7 @@ int main(int argc, char* argv[]) {
 
     if (short_prompt) {
         std::string response;
+        std::vector<std::string> follow_ups;  // extra turns appended after the first one
 
         switch (type) {
             case 0:  // text only
@@ -81,6 +82,19 @@ int main(int argc, char* argv[]) {
                 uniformed_input.prompt = "Read all the text in the image and translate it to English. Output only the English translation.";
                 uniformed_input.images.push_back("../../../tb_files/german.png");
                 break;
+            case 5:  // multi-turn: three related text questions, long enough to pass the 1024 sliding window
+                uniformed_input.prompt = "I am building a laptop that runs large language models locally. "
+                                         "Explain in detail how an NPU differs from a GPU and from a CPU for this workload. "
+                                         "Cover the compute fabric, the memory hierarchy, and the power envelope of each, "
+                                         "and write at least four full paragraphs.";
+                follow_ups.push_back("Given the three architectures you just compared, which one would you pick to run a "
+                                     "12-billion-parameter model on battery power, and why? Walk through the memory "
+                                     "bandwidth math and the power trade-offs step by step, and be thorough.");
+                follow_ups.push_back("Now do two things. First, summarize our entire conversation so far as a bullet list, "
+                                     "including the specific hardware you named in your first answer. Second, explain what "
+                                     "4-bit weight quantization does to the bandwidth math you worked out, and say whether "
+                                     "it changes the recommendation you made a moment ago.");
+                break;
             default:
                 header_print("info", "Unknown test type, exit 0;");
                 return 0;
@@ -94,6 +108,23 @@ int main(int argc, char* argv[]) {
         chat->stop_total_timer();
         std::cout << std::endl << std::endl;
         std::cout << chat->show_profile() << std::endl;
+
+        int turn = 1;
+        for (const std::string& follow_up : follow_ups) {
+            std::cout << "History length after turn " << turn << ": " << chat->get_history().second.size() << std::endl;
+            turn++;
+
+            lm_uniform_input_t next_input;
+            next_input.prompt = follow_up;
+            std::cout << std::endl << "Prompt: " << next_input.prompt << std::endl;
+            std::cout << "Response: " << std::endl;
+            chat->start_total_timer();
+            chat->insert(meta_info, next_input);
+            response = chat->generate(meta_info, 8192, std::cout);
+            chat->stop_total_timer();
+            std::cout << std::endl << std::endl;
+            std::cout << chat->show_profile() << std::endl;
+        }
     }
     else {
         std::ifstream file("../../../../prompt.txt", std::ios::binary);

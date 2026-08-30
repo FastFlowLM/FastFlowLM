@@ -11,7 +11,7 @@ parent: Models
 - **Think:** No
 - **Tool Calling Support:** No
 - **Base Model:** [google/embeddinggemma-300m](https://huggingface.co/google/embeddinggemma-300m)
-- **Quantization:** Q4_1
+- **Quantization:** bf16
 - **Max Chunk Size:** 2048
 - **Default Context Length:** NA
 

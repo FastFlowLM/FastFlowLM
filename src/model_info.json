@@ -355,6 +355,75 @@
             "path": "vision_weight.q4nx"
         }
     ],
+    "gemma4-it:12b":[
+        {
+            "type": "file",
+            "oid": "83c8ea9c8551a76b29521487fdf58e72c5f924dc",
+            "size": 1678,
+            "path": ".gitattributes"
+        },
+        {
+            "type": "file",
+            "oid": "61e18105d7cb61ce375aa16ed66442b85116bb8a",
+            "size": 27955,
+            "path": "README.md"
+        },
+        {
+            "type": "file",
+            "oid": "4741bf6e4132ba23a5537f9d6e74e9a6d613d7cd",
+            "size": 18683,
+            "path": "chat_template.jinja"
+        },
+        {
+            "type": "file",
+            "oid": "7ca198437d6c4c90c271a3cc35ca791c4d66c12b",
+            "size": 3654,
+            "path": "config.json"
+        },
+        {
+            "type": "file",
+            "oid": "153d88abe2a1c5a164ae867a3b3ade89bf1d17c8",
+            "size": 104760840,
+            "lfs": {
+                "oid": "b61ff2a265ef9cdbc20763603a28b7769d6fa23b807322ca60deb68ca82a633b",
+                "size": 104760840,
+                "pointerSize": 134
+            },
+            "xetHash": "0755c68afc20f59691f161850631cdf96e416059310edd694bce6f1e327588af",
+            "path": "image_audio_weights.q4nx"
+        },
+        {
+            "type": "file",
+            "oid": "262a22e293417801629c0f2c8c5583a2cf14e0a9",
+            "size": 9215652096,
+            "lfs": {
+                "oid": "746f0a04fc08b6a4320cba34bb78b275149bc1fa60ad1345a2cb10e70553d3e6",
+                "size": 9215652096,
+                "pointerSize": 135
+            },
+            "xetHash": "5fcbeaede45c90b47509e48c94102dddd3378edff2b6580fe55fd0d9cc66ecf4",
+            "path": "model.q4nx"
+        },
+        {
+            "type": "file",
+            "oid": "1ff9f3e3439a939b971f9919e821bf87e835a503",
+            "size": 32169626,
+            "lfs": {
+                "oid": "cc8d3a0ce36466ccc1278bf987df5f71db1719b9ca6b4118264f45cb627bfe0f",
+                "size": 32169626,
+                "pointerSize": 133
+            },
+            "xetHash": "e65599fc667863640f9d049bb9355d8c96e0e00d9b0e891a681c642bf6004afe",
+            "path": "tokenizer.json"
+        },
+        {
+            "type": "file",
+            "oid": "30cf4ed4cb1db8e9490ec880dbbc1bd06f85ddea",
+            "size": 3150,
+            "path": "tokenizer_config.json"
+        }
+    ],
+
     "qwen3.5:0.8b": [
         {
             "type": "file",

@@ -183,6 +183,7 @@ bool AutoModel::_shared_insert(chat_meta_info_t& meta_info, std::vector<int>& to
         }
     }
     if (skip_count != idx) {
+        header_print("FLM", "System prompt changed! Clearing context...");
         clear_context();
         skip_count = 0;
     }

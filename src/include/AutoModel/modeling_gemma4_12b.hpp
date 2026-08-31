@@ -30,7 +30,10 @@ private:
 
     StreamResult parse_stream_content_impl(const std::string content, bool is_final);
 
-
+    static constexpr int boc_token_id = 100; // begin of channel token id
+    static constexpr int eoc_token_id = 101; // end of channel token id
+    static constexpr int thought_token_id = 45518; // 'thought'
+    static constexpr int new_line_token_id = 107; // '\n'
 
 
     static constexpr int boi_token_id = 255999; // begin of image token id

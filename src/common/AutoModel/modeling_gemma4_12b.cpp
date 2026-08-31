@@ -505,36 +505,99 @@ bool Gemma4_12B::insert(chat_meta_info_t& meta_info, lm_uniform_input_t& input, 
     // into, so the chat template emits one <|audio|> placeholder per chunk.
     std::vector<int> audio_chunks_per_input;
 
-    // The prompt (CLI) path below preprocesses images/audios; only the
-    // messages (REST) path is still text-only and strips them.
-
+    nlohmann::ordered_json gemma4_12b_message = nlohmann::ordered_json::array();
     if (!input.messages.empty()) { // already a formated messages, usually from REST API
-        nlohmann::ordered_json text_messages = nlohmann::ordered_json::array();
-        bool dropped_modal = false;
-        for (const auto& item : input.messages) {
-            if (!item.contains("images") && !item.contains("audios")) {
-                text_messages.push_back(item);
+        int total_images = 0;
+        for (auto& message : input.messages) {
+            if (!message.contains("images") && !message.contains("audios")) {
+                gemma4_12b_message.push_back(message);
                 continue;
             }
-            dropped_modal = true;
-            nlohmann::ordered_json text_only_item = item;
-            text_only_item.erase("images");
-            text_only_item.erase("audios");
-            text_messages.push_back(text_only_item);
+
+            nlohmann::ordered_json newContent = nlohmann::ordered_json::array();
+            // Process Images
+            if (message.contains("images")) {
+                for (auto& img : message["images"]) {
+                    std::string img_str = img.get<std::string>();
+
+                    gemma4_12b_image_t image = this->load_image_base64(img_str);
+                    if (image.width <= 0 || image.height <= 0) {
+                        header_print("ERROR", "Skipping invalid base64 image; prefilling language only for this item");
+                        continue;
+                    }
+                    std::vector<bf16> pixel_values;
+                    std::pair<int, int> patch_element_per_patch;
+                    uint32_t valid_patch_size = 0;
+                    uint32_t num_soft_tokens = 0;
+                    std::vector<int> image_grid_pairs; 
+
+                    preprocess_image(image, patch_element_per_patch, valid_patch_size, pixel_values, image_grid_pairs, num_soft_tokens);
+
+                    image_payload.image_patch__element_per_patch.push_back(patch_element_per_patch);
+                    image_payload.valid_patch_size_per_image.push_back(valid_patch_size);
+                    image_payload.pixel_values.push_back(pixel_values);
+                    image_payload.image_grid_pairs_per_image.push_back(image_grid_pairs);
+                    image_payload.num_soft_tokens_per_image.push_back(num_soft_tokens);
+                    image_payload.num_images++;
+                    total_images++;
+                    newContent.push_back({{"type", "image"}, {"image", img}});
+                }
         }
-        if (dropped_modal) {
-            header_print("WARNING", "Gemma4-12B text-only interface: stripped image/audio entries from messages");
+            // Process Audios
+            if (message.contains("audios")) {
+                gemma4_12b_npu *gemma4e_engine = dynamic_cast<gemma4_12b_npu*>(this->lm_engine.get()); 
+                for (auto& aud : message["audios"]) {
+                    std::string audio_str = aud.get<std::string>();
+                    audio_data_t audio_data = this->load_audio_base64(audio_str, gemma4e_engine->GEMMA4_12B_audio_sampling_rate, MonoDownmixMode::RMS);
+                    if (audio_data.channels > 1) {
+                        std::cerr << "only mono audio is supported." << std::endl;
+                        exit(-1);
+                    }
+
+                    std::vector<std::vector<bf16>> audio_chunks;
+                    std::vector<int> audio_chunk_frames;
+                    extract_waveform_features_chunked(
+                        audio_data,
+                        gemma4e_engine->GEMMA4_12B_audio_samples_per_token,
+                        gemma4e_engine->GEMMA4_12B_audio_max_soft_tokens,
+                        audio_chunks,
+                        audio_chunk_frames
+                    );
+
+                    if (audio_chunks.size() > 1) {
+                        header_print_g("FLM", "Audio in message is split into " << audio_chunks.size() << " chunks for processing.");
+                    }
+
+                    for (size_t c = 0; c < audio_chunks.size(); c++) {
+                        const int processed_num_frames = audio_chunk_frames[c];
+                        audio_payload.num_audios++;
+                        audio_payload.num_soft_tokens_per_audio.push_back(
+                            processed_num_frames
+                        );
+                        audio_payload.mel_spectrograms.push_back(
+                            std::move(audio_chunks[c])
+                        );
+                        audio_payload.mel_spectrogram_frames_per_audio.push_back(processed_num_frames);
+                        audio_payload.mel_spectrogram_bins_per_audio.push_back(gemma4e_engine->GEMMA4_12B_audio_embed_dim);
+                        newContent.push_back({{"type", "audio"}, {"audio", aud}});
+                    }
+                }
+            }
+
+            newContent.push_back({{"type", "text"}, {"text", message.value("content", "")}});
+
+            nlohmann::ordered_json newItem = {
+                {"role", message.value("role", "user")},
+                {"content", newContent}
+            };
+            gemma4_12b_message.push_back(newItem);
         }
-        templated_text = this->apply_chat_template(text_messages, input.tools);
+        header_print("FLM", "Total images: " << total_images);
     }
     else { // a pure text, usually from the cli
         // nlohmann::ordered_json messages;
         if(input.audios.size() > 0){
-
             gemma4_12b_npu *gemma4e_engine = dynamic_cast<gemma4_12b_npu*>(this->lm_engine.get());  
-            
-        
-
 
             for (int i = 0; i < input.audios.size(); i++) {
                 std::string audio_str = input.audios[i];
@@ -580,33 +643,10 @@ bool Gemma4_12B::insert(chat_meta_info_t& meta_info, lm_uniform_input_t& input, 
                     audio_payload.mel_spectrogram_frames_per_audio.push_back(processed_num_frames);
                     audio_payload.mel_spectrogram_bins_per_audio.push_back(gemma4e_engine->GEMMA4_12B_audio_embed_dim);
                 }
-
-
-
-
-
-                // {
-                //     SafeTensors referencetensor("/scratch/shdu/transformerExplorer/gemma4_unified_audio_debug.safetensors");
-                //     buffer<float> raw_speech_data_ref;
-
-                //     referencetensor.load_weights(
-                //         raw_speech_data_ref,
-                //         "input_features_" + std::to_string(i)
-                //     );
-     
-                //     print_error_metrics<bf16, float>(
-                //         audio_processed.data(), raw_speech_data_ref.data(),
-                //         1,
-                //         processed_num_frames, gemma4e_engine->GEMMA4_12B_audio_embed_dim,
-                //         processed_num_frames, gemma4e_engine->GEMMA4_12B_audio_embed_dim
-                //     );
-
-                // }
             }
         }
 
         if(input.images.size() > 0){
-
             for (const auto& img_str : input.images) {
                 gemma4_12b_image_t image = this->load_image(img_str);
 
@@ -618,52 +658,21 @@ bool Gemma4_12B::insert(chat_meta_info_t& meta_info, lm_uniform_input_t& input, 
 
                 preprocess_image(image, patch_element_per_patch, valid_patch_size, pixel_values, image_grid_pairs, num_soft_tokens);
 
-
-         
-                // {
-                //     SafeTensors referencetensor("/scratch/shdu/transformerExplorer/gemma4_unified_image_debug.safetensors");
-                
-                //     buffer<float> pixel_value_ref;
-                //     referencetensor.load_weights(
-                //         pixel_value_ref,
-                //         "pixel_values"
-                //     );
-                //     std::cout << "patch_element_per_patch" << patch_element_per_patch.first <<\
-                //         "  "<< patch_element_per_patch.second << std::endl;
-                //     print_error_metrics<bf16, float>(
-                //         pixel_values.data(), pixel_value_ref.data() + image_payload.num_images*280*6912,
-                //         1,
-                //         patch_element_per_patch.first,patch_element_per_patch.second,
-                //         patch_element_per_patch.first,patch_element_per_patch.second  
-                //     );
-                
-                // }
-
-
-
                 image_payload.image_patch__element_per_patch.push_back(patch_element_per_patch);
                 image_payload.valid_patch_size_per_image.push_back(valid_patch_size);
                 image_payload.pixel_values.push_back(pixel_values);
                 image_payload.image_grid_pairs_per_image.push_back(image_grid_pairs);
                 image_payload.num_soft_tokens_per_image.push_back(num_soft_tokens);
                 image_payload.num_images++;
-   
-
-            
             }
-            
-
         }
-
-
-
-        // messages.push_back({ {"role", "user"}, {"content", input.prompt} });
-        // templated_text = this->apply_chat_template(messages, input.tools);
     }
     
 
     if (!input.messages.empty()) { // already a formated messages, usually from REST API
-    }else{
+        templated_text = this->apply_chat_template(gemma4_12b_message, input.tools);
+    }
+    else{
 
         nlohmann::ordered_json messages;
         nlohmann::ordered_json content;
@@ -687,8 +696,6 @@ bool Gemma4_12B::insert(chat_meta_info_t& meta_info, lm_uniform_input_t& input, 
         content["content"].push_back({{"type", "text"}, {"text", input.prompt}});
         messages.push_back(content);
         templated_text = this->apply_chat_template(messages);
-
-
     }
 
     // update the tokens to include the image tokens
@@ -860,6 +867,8 @@ bool Gemma4_12B::insert(chat_meta_info_t& meta_info, lm_uniform_input_t& input, 
         this->token_history = checkpoint_his; // restore the token history to be consistent with the restored KV cache, which is crucial for correct functioning of _shared_insert's prefix-matching logic
     }
 
+    size_t n = tokens.size();
+    tokens.resize(n - (this->enable_think ? 0 : 4));
 
     gemma4_12b_multi_modal_payload_t multi_modal_payload;
     multi_modal_payload.image_payload = image_payload;
@@ -876,20 +885,134 @@ bool Gemma4_12B::insert(chat_meta_info_t& meta_info, lm_uniform_input_t& input, 
 }
 
 std::string Gemma4_12B::generate(chat_meta_info_t& meta_info, int length_limit, std::ostream& os, std::function<bool()> is_cancelled) {
-    std::string result = this->_shared_generate(meta_info, length_limit, os, is_cancelled);
+    std::vector<int> sampled_tokens;
+    std::string result;
+    if (length_limit > 0){
+        sampled_tokens.reserve(length_limit);
+    }
+    else{
+        sampled_tokens.reserve(4096);
+    }
+    assert(this->last_token != -1);
+    stop_reason_t reason = EOT_DETECTED;
 
-    if (!this->enable_think) {
-        gemma4_12b_npu *gemma4_12b_engine = dynamic_cast<gemma4_12b_npu*>(this->lm_engine.get());
-        int checkpoint_idx = gemma4_12b_engine->checkpoint();
-        // copy the token history at the checkpoint except the last one token, which is the start
-        // token for generation and should not be included in the checkpoint history
-        checkpoint_his = token_history;
-        if (!checkpoint_his.empty()) {
-            checkpoint_his.pop_back();
+    this->profiler_list[DECODING_TIME].reset();
+    this->profiler_list[TKOEN_DECODE_TIME].reset();
+    std::string token_str;
+    int sampled_token;
+    int last_sampled_token;
+    if(!enable_think) {
+        this->token_history.push_back(boc_token_id);
+        this->profiler_list[DECODING_TIME].start();
+        this->lm_engine->forward(boc_token_id);
+        this->profiler_list[DECODING_TIME].stop(1);
+        token_str = this->tokenizer->run_time_decoder(boc_token_id);
+
+        // thought
+        this->token_history.push_back(thought_token_id);
+        this->profiler_list[DECODING_TIME].start();
+        this->lm_engine->forward(thought_token_id);
+        this->profiler_list[DECODING_TIME].stop(1);
+        token_str = this->tokenizer->run_time_decoder(thought_token_id);
+        
+        this->token_history.push_back(new_line_token_id);
+        this->profiler_list[DECODING_TIME].start();
+        this->lm_engine->forward(new_line_token_id);
+        this->profiler_list[DECODING_TIME].stop(1);
+        token_str = this->tokenizer->run_time_decoder(new_line_token_id);
+
+        this->token_history.push_back(eoc_token_id);
+        this->profiler_list[DECODING_TIME].start();
+        buffer<bf16> y = this->lm_engine->forward(eoc_token_id);
+        this->profiler_list[DECODING_TIME].stop(1);
+        token_str = this->tokenizer->run_time_decoder(eoc_token_id);
+        sampled_token = this->sampler->sample(y);
+
+        this->total_tokens++;
+        meta_info.generated_tokens++;
+        last_sampled_token = sampled_token;
+        token_str = this->tokenizer->run_time_decoder(last_sampled_token);
+        result += token_str;
+        os << token_str << std::flush;
+    }
+    else {
+        last_sampled_token = this->last_token;
+        this->token_history.push_back(this->last_token);
+        if (this->is_normal_token(last_sampled_token) && last_sampled_token != -1){
+            std::string token_str = this->tokenizer->run_time_decoder(last_sampled_token);
+            result += token_str;
+            os << token_str << std::flush;
+
+        }
+        if (this->is_eos(last_sampled_token)){
+            return result;
         }
     }
 
+    if (this->total_tokens >= this->MAX_L){
+        header_print("WARNING", "Max length reached, stopping generation...");
+        reason = MAX_LENGTH_REACHED;
+        return result;
+    }
+    while (this->total_tokens < this->MAX_L){
+        if (is_cancelled()) {
+            reason = CANCEL_DETECTED;
+            // reset stream content 
+            buffer_.clear();
+            current_mode_ = StreamEventType::CONTENT;
+            tool_name_.clear();
+            is_in_tool_block_ = false;
+            break;
+        }
+        this->profiler_list[DECODING_TIME].start();
+        buffer<bf16> y = this->lm_engine->forward(last_sampled_token);
+        this->profiler_list[DECODING_TIME].stop(1);
+
+        this->profiler_list[SAMPLING_TIME].start();
+        int sampled_token = this->sampler->sample(y);
+        this->profiler_list[SAMPLING_TIME].stop(1);
+        this->total_tokens++;
+        last_sampled_token = sampled_token;
+
+        this->profiler_list[TKOEN_DECODE_TIME].start();
+        if (this->is_normal_token(sampled_token)){ // filter out special tokens
+            std::string token_str = this->tokenizer->run_time_decoder(sampled_token);
+            os << token_str << std::flush;
+            result += token_str;
+        }
+        this->profiler_list[TKOEN_DECODE_TIME].stop(1);
+        this->token_history.push_back(sampled_token);
+        if (this->is_eos(sampled_token)){
+            meta_info.generated_tokens++;
+            this->lm_engine->forward(last_sampled_token);
+            break;
+        }
+        meta_info.generated_tokens++;
+        if ((length_limit > 0) && (meta_info.generated_tokens >= length_limit)){
+            reason = MAX_LENGTH_REACHED;
+            break;
+        }
+    }
+    meta_info.decoding_duration = (uint64_t)(time_utils::cast_to_us(this->profiler_list[DECODING_TIME].get_total_time()).first) * 1e3;
+    meta_info.stop_reason = reason;
+    if (this->total_tokens >= this->MAX_L){
+        header_print("WARNING", "Max length reached, stopping generation...");
+    }
+    std::cout << std::endl;
+    header_print("FLM", "Model RAW Output: \n" + result);
     return result;
+
+    // if (!this->enable_think) {
+    //     gemma4_12b_npu *gemma4_12b_engine = dynamic_cast<gemma4_12b_npu*>(this->lm_engine.get());
+    //     int checkpoint_idx = gemma4_12b_engine->checkpoint();
+    //     // copy the token history at the checkpoint except the last one token, which is the start
+    //     // token for generation and should not be included in the checkpoint history
+    //     checkpoint_his = token_history;
+    //     if (!checkpoint_his.empty()) {
+    //         checkpoint_his.pop_back();
+    //     }
+    // }
+
 }
 
 std::string Gemma4_12B::generate_with_prompt(chat_meta_info_t& meta_info, lm_uniform_input_t& input, int length_limit, std::ostream& os) {

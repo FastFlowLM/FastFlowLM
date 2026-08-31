@@ -17,28 +17,49 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export LD_LIBRARY_PATH="$SCRIPT_DIR/lib:$LD_LIBRARY_PATH"
 
 if [ "$FLM_RUNTIME" = "xrt" ]; then
-    # XRT constructs library paths as $XILINX_XRT/lib/x86_64-linux-gnu/<lib>.
-    # Point XILINX_XRT at the portable root so XRT finds ./lib/x86_64-linux-gnu/.
+    # How XRT locates its own runtime libraries (the libxrt_core shim, the
+    # libxrt_driver_xdna plugin, ...) changed across releases, and the portable
+    # tree has to satisfy both schemes:
+    #
+    #   * XRT <= 2.21 honours $XILINX_XRT and builds the path as
+    #     $XILINX_XRT/lib/x86_64-linux-gnu/<lib>.
+    #   * XRT >= 2.25 IGNORES $XILINX_XRT on Linux. Instead it calls dladdr() on
+    #     libxrt_coreutil.so to discover where the loader actually resolved that
+    #     library from, then strips the XRT_LIB_DIR suffix (lib/x86_64-linux-gnu
+    #     -> two path components) off that directory to recover the "XRT root".
+    #     The shim is then expected at <root>/lib/x86_64-linux-gnu/<lib>.
+    #
+    # Our real libxrt_coreutil.so lives in $SCRIPT_DIR/lib. If the loader
+    # resolves it from there, 2.25 strips two components from ".../lib" and
+    # derives the PARENT of $SCRIPT_DIR as the root, producing errors like:
+    #   No such library '<parent>/lib/x86_64-linux-gnu/libxrt_core.so.2'
+    # (see the mirror directory below for where the libs really are).
+    #
+    # Fix: make the loader resolve libxrt_coreutil.so from the multiarch mirror
+    # ($SCRIPT_DIR/lib/x86_64-linux-gnu) FIRST. dladdr() then reports that path,
+    # stripping two components yields $SCRIPT_DIR, and the shim resolves
+    # correctly. $XILINX_XRT is still exported for the pre-2.25 scheme.
     export XILINX_XRT="$SCRIPT_DIR"
 
-    # Ensure the multiarch directory structure exists with symlinks to the
-    # bundled XRT libs, so XRT's internal path construction resolves.
     MULTIARCH_DIR="$SCRIPT_DIR/lib/x86_64-linux-gnu"
-    if [ ! -d "$MULTIARCH_DIR" ]; then
-        mkdir -p "$MULTIARCH_DIR"
-        cd "$SCRIPT_DIR/lib"
-        for lib in libxrt*.so* libxrt++.so*; do
-            if [ -f "$lib" ] || [ -L "$lib" ]; then
-                if [ -L "$lib" ]; then
-                    target=$(readlink "$lib")
-                    ln -sf "../$target" "$MULTIARCH_DIR/$lib" 2>/dev/null
-                else
-                    ln -sf "../$lib" "$MULTIARCH_DIR/$lib" 2>/dev/null
-                fi
-            fi
-        done
-        cd - > /dev/null
-    fi
+
+    # Ensure the multiarch mirror exists with symlinks to the bundled XRT libs.
+    # This is normally created at package time; recreated here as a safety net,
+    # idempotently, so a partial or missing mirror cannot break lib discovery.
+    mkdir -p "$MULTIARCH_DIR"
+    for lib in "$SCRIPT_DIR"/lib/libxrt*.so*; do
+        [ -e "$lib" ] || continue          # no glob match -> skip literal
+        name=$(basename "$lib")
+        [ -e "$MULTIARCH_DIR/$name" ] && continue
+        if [ -L "$lib" ]; then
+            ln -sf "../$(readlink "$lib")" "$MULTIARCH_DIR/$name" 2>/dev/null
+        else
+            ln -sf "../$name" "$MULTIARCH_DIR/$name" 2>/dev/null
+        fi
+    done
+
+    # Resolve XRT libs from the multiarch mirror first (see rationale above).
+    export LD_LIBRARY_PATH="$MULTIARCH_DIR:$LD_LIBRARY_PATH"
 fi
 
 # Execute the real binary, forwarding all arguments.

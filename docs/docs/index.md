@@ -11,7 +11,7 @@ has_children: false
 
 Run **LLMs — now with Vision support — in minutes**: **no GPU required**, **over 10× more power-efficient**, and with **context lengths up to 256k tokens**.  
 
-Think **Ollama — but laser-optimized for NPUs**.  
+A **familiar single-command CLI — laser-optimized for NPUs**.  
 
 From *idle silicon* to *instant power* — **FastFlowLM makes Ryzen™ AI shine.**
 

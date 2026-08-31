@@ -10,7 +10,7 @@ has_children: true
 **FastFlowLM (FLM)** is a deeply optimized runtime for **local LLM inference on AMD NPUs** —  
 ultra-fast, power-efficient, and 100% offline.
 
-Its user interface and workflow are similar to **Ollama**, but purpose-built for AMD's XDNA architecture.
+Its user interface and workflow follow a **familiar single-command CLI**, purpose-built for AMD's XDNA architecture.
 
 This section will walk you through how to use FastFlowLM with examples.
 

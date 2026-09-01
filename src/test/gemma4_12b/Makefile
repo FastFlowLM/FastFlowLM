@@ -84,7 +84,7 @@ clean:
 
 test: directories $(BUILD_DIR)/test_gemma4_12b.exe
 	cp ../../model_list.json $(BUILD_DIR)/model_list.json
-	cd $(BUILD_DIR) && ${PWSH} -Command "\$$env:PATH = '..\..\..\lib;' + \$$env:PATH; .\test_gemma4_12b.exe -m gemma4-12b:12b -s 1 -p 0 -t $(TYPE)"
+	cd $(BUILD_DIR) && ${PWSH} -Command "\$$env:PATH = '..\..\..\lib;' + \$$env:PATH; .\test_gemma4_12b.exe -m gemma4-it:12b -s 1 -p 0 -t $(TYPE)"
 
 .PHONY: all clean test directories
 

@@ -71,6 +71,7 @@ endfunction()
 enable_testing()
 add_corelib_host_test(test_corelib_api test_corelib_api.cpp)
 add_corelib_host_test(test_phi4_manifest test_phi4_manifest.cpp)
+add_corelib_host_test(test_phi4_shape_plan test_phi4_shape_plan.cpp)
 add_corelib_host_test(
     test_corelib_fatal_record
     test_corelib_fatal_record.cpp)

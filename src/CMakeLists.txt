@@ -305,6 +305,8 @@ endif()
 add_executable(flm ${SOURCES} ${HEADERS})
 
 if(FLM_ENABLE_CORELIB_AIE4)
+    target_compile_definitions(flm PRIVATE
+        FLM_ENABLE_CORELIB_AIE4=1)
     target_link_libraries(flm PRIVATE flm_corelib_aie4)
 endif()
 

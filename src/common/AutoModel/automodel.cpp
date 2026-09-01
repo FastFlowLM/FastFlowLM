@@ -8,6 +8,22 @@
 #include "AutoModel/automodel.hpp"
 
 
+ModelRequestError::ModelRequestError(
+    int http_code,
+    bool session_cleared,
+    std::string message)
+    : std::runtime_error(std::move(message)),
+      http_code_(http_code),
+      session_cleared_(session_cleared) {}
+
+int ModelRequestError::http_code() const noexcept {
+    return http_code_;
+}
+
+bool ModelRequestError::session_cleared() const noexcept {
+    return session_cleared_;
+}
+
 AutoModel::AutoModel(flm_rt::device* npu_device_inst, std::string current_model) {
     this->npu_device_inst = npu_device_inst;
     this->current_model = current_model;
@@ -116,17 +132,21 @@ void AutoModel::_shared_load_model(std::string model_path, json model_info, int 
         header_print("FLM", "Model already loaded: " << this->model_path);
         return;
     }
+    this->_shared_initialize_model_state(
+        std::move(model_path),
+        std::move(model_info),
+        default_context_length);
+    this->_shared_initialize_legacy_npu(enable_preemption);
+}
 
+void AutoModel::_shared_initialize_model_state(
+    std::string model_path,
+    json model_info,
+    int default_context_length) {
     this->model_path = model_path;
     header_print("FLM", "Loading model: " << this->model_path);
     this->lm_config = std::make_unique<LM_Config>();
     this->lm_config->from_pretrained(this->model_path);
-    if (this->npu_device_inst == nullptr) {
-        header_print("ERROR", "NPU device instance is nullptr");
-        exit(1);
-    }
-    this->npu = std::make_unique<npu_xclbin_manager>(npu_device::device_npu2, this->npu_device_inst, enable_preemption);
-    this->enable_preemption = enable_preemption;
     // Set context length: use provided value if not -1, otherwise use model default
     if (default_context_length != -1) {
         this->MAX_L = default_context_length;
@@ -144,62 +164,146 @@ void AutoModel::_shared_load_model(std::string model_path, json model_info, int 
     this->total_tokens = 0;
 }
 
-bool AutoModel::_shared_insert(chat_meta_info_t& meta_info, std::vector<int>& tokens, std::function<bool()> is_cancelled, void* payload, int first_len_run) {
-
-    // print token history
-    // header_print("DEBUG", "Current token history: ");
-    // for (size_t i = 0; i < this->token_history.size(); i++) {
-    //     std::cout << this->token_history[i] << " ";
-    // }
-    // std::cout << std::endl;
-    // // print tokens to insert
-    // header_print("DEBUG", "Tokens to insert: ");
-    // for (size_t i = 0; i < tokens.size(); i++) {
-    //     std::cout << tokens[i] <<  " ";
-    // }
-    // std::cout << std::endl;
-
-    // prefix check for tokens and token history to see if we can skip some tokens
-    const size_t idx = this->token_history.size();
-    size_t skip_count = 0;
-    for (size_t i = 0; i < idx; i++) {
-        if (i < tokens.size() && tokens[i] == this->token_history[i]) {
-            skip_count++;
-        }
-        else {
-            break;
-        }
+void AutoModel::_shared_initialize_legacy_npu(
+    bool enable_preemption) {
+    if (this->npu_device_inst == nullptr) {
+        header_print("ERROR", "NPU device instance is nullptr");
+        exit(1);
     }
-    if (skip_count != idx) {
+    this->npu = std::make_unique<npu_xclbin_manager>(
+        npu_device::device_npu2,
+        this->npu_device_inst,
+        enable_preemption);
+    this->enable_preemption = enable_preemption;
+}
+
+size_t AutoModel::_matching_prefix_length(
+    std::span<const int> tokens) const {
+    const size_t compared =
+        std::min(tokens.size(), this->token_history.size());
+    size_t matched = 0;
+    while (
+        matched < compared &&
+        tokens[matched] == this->token_history[matched]) {
+        ++matched;
+    }
+    return matched;
+}
+
+bool AutoModel::_shared_insert(
+    chat_meta_info_t& meta_info,
+    std::vector<int>& tokens,
+    std::function<bool()> is_cancelled,
+    void* payload,
+    int first_len_run) {
+    return this->_shared_insert(
+        meta_info,
+        tokens,
+        std::move(is_cancelled),
+        payload,
+        first_len_run,
+        PrefixHitAction::AppendSuffixBatched);
+}
+
+bool AutoModel::_shared_insert(
+    chat_meta_info_t& meta_info,
+    std::vector<int>& tokens,
+    std::function<bool()> is_cancelled,
+    void* payload,
+    int first_len_run,
+    PrefixHitAction prefix_action) {
+    const auto mark_cancelled = [&] {
+        meta_info.stop_reason = CANCEL_DETECTED;
+        buffer_.clear();
+        current_mode_ = StreamEventType::CONTENT;
+        tool_name_.clear();
+        is_in_tool_block_ = false;
+    };
+
+    const size_t history_size = this->token_history.size();
+    const size_t matched = this->_matching_prefix_length(tokens);
+    const bool prefix_hit = matched == history_size;
+    const bool recompute =
+        prefix_action == PrefixHitAction::RecomputeFull;
+    const bool clear_before_prefill = !prefix_hit || recompute;
+    const bool fresh_prefill = history_size == 0;
+
+    if (
+        (fresh_prefill || clear_before_prefill) &&
+        is_cancelled()) {
+        mark_cancelled();
+        return false;
+    }
+
+    size_t skip_count = prefix_hit && !recompute
+                            ? history_size
+                            : 0;
+    if (clear_before_prefill) {
         clear_context();
-        skip_count = 0;
     }
     tokens.erase(tokens.begin(), tokens.begin() + skip_count);
 
-
-    if (this->total_tokens + tokens.size() >= this->MAX_L){
+    if (this->total_tokens + tokens.size() >= this->MAX_L) {
         header_print("WARNING", "Max length reached, stopping prefilling...");
         return false;
     }
-    for (int token : tokens){
-        this->token_history.push_back(token);
+
+    if (tokens.empty()) {
+        meta_info.prefill_duration = 0;
+        meta_info.prompt_tokens = 0;
+        return this->last_token != -1;
     }
+
     buffer<bf16> y;
-
     auto prefill_start_time = this->profiler_list[PREFILL_TIME].start();
-    
-    y = _chunked_insert(meta_info, tokens, is_cancelled, payload, first_len_run);
 
-    auto prefill_end_time = this->profiler_list[PREFILL_TIME].stop(tokens.size());
+    size_t committed_tokens = 0;
+    if (
+        prefix_action == PrefixHitAction::AppendSuffixOneByOne &&
+        !clear_before_prefill) {
+        for (const int token : tokens) {
+            if (is_cancelled()) {
+                mark_cancelled();
+                break;
+            }
+            std::vector<int> one_token{token};
+            y = this->lm_engine->prefill(one_token, payload);
+            payload = nullptr;
+            this->token_history.push_back(token);
+            ++this->total_tokens;
+            ++committed_tokens;
+        }
+    } else {
+        for (const int token : tokens) {
+            this->token_history.push_back(token);
+        }
+        const bool direct_full_prefill =
+            clear_before_prefill &&
+            prefix_action != PrefixHitAction::AppendSuffixBatched;
+        y = direct_full_prefill
+                ? this->lm_engine->prefill(tokens, payload)
+                : _chunked_insert(
+                      meta_info,
+                      tokens,
+                      is_cancelled,
+                      payload,
+                      first_len_run);
+        if (meta_info.stop_reason != CANCEL_DETECTED) {
+            committed_tokens = tokens.size();
+            this->total_tokens += tokens.size();
+        }
+    }
+
+    auto prefill_end_time =
+        this->profiler_list[PREFILL_TIME].stop(committed_tokens);
     meta_info.prefill_duration = (uint64_t)time_utils::duration_ns(prefill_start_time, prefill_end_time).first;
-    meta_info.prompt_tokens = tokens.size();
+    meta_info.prompt_tokens = static_cast<int>(committed_tokens);
 
     if (meta_info.stop_reason == CANCEL_DETECTED) {
         return false;
     }
 
-    this->total_tokens += tokens.size();
-    if (this->total_tokens >= this->MAX_L){
+    if (this->total_tokens >= this->MAX_L) {
         header_print("WARNING", "Max length reached, stopping prefilling...");
     }
     this->profiler_list[SAMPLING_TIME].start();

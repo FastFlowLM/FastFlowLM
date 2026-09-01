@@ -7,9 +7,13 @@
 #pragma once
 
 #include <ctime>
+#include <functional>
 #include <iomanip>
-#include <sstream>
 #include <memory>
+#include <optional>
+#include <span>
+#include <sstream>
+#include <stdexcept>
 #include <utility>
 #include <vector>
 #include <iostream>
@@ -128,9 +132,31 @@ struct lm_uniform_input_t {
 	std::vector<std::string> audios;
 	std::vector<input_payload_type_t> audio_payload_types;
 	nlohmann::ordered_json tools;
+	std::optional<int> requested_max_new_tokens;
 };
 
 using json = nlohmann::ordered_json;
+
+class ModelRequestError final : public std::runtime_error {
+public:
+	ModelRequestError(
+		int http_code,
+		bool session_cleared,
+		std::string message);
+
+	int http_code() const noexcept;
+	bool session_cleared() const noexcept;
+
+private:
+	int http_code_;
+	bool session_cleared_;
+};
+
+enum class PrefixHitAction {
+	AppendSuffixBatched,
+	AppendSuffixOneByOne,
+	RecomputeFull
+};
 
 class AutoModel {
 protected:
@@ -188,14 +214,29 @@ protected:
 
 
 	void _shared_load_model(std::string model_path, json model_info, int default_context_length = -1, bool enable_preemption = false);
+	void _shared_initialize_model_state(std::string model_path, json model_info, int default_context_length);
+	void _shared_initialize_legacy_npu(bool enable_preemption);
 	nlohmann::json _shared_setup_tokenizer(std::string model_path);
+	size_t _matching_prefix_length(std::span<const int> tokens) const;
 
 	/// \brief Insert tokens into the model
 	/// \param meta_info the meta information of the chat
 	/// \param tokens the tokens to insert
 	/// \param payload the payload, it shall not be used as this function is only used for chunkwised insertion, no image allowed
 	/// \return true if the tokens were inserted successfully, false otherwise
-	bool _shared_insert(chat_meta_info_t& meta_info, std::vector<int>& tokens, std::function<bool()> is_cancelled = [] { return false; }, void* payload = nullptr, int first_len_run = 0);
+	bool _shared_insert(
+		chat_meta_info_t& meta_info,
+		std::vector<int>& tokens,
+		std::function<bool()> is_cancelled = [] { return false; },
+		void* payload = nullptr,
+		int first_len_run = 0);
+	bool _shared_insert(
+		chat_meta_info_t& meta_info,
+		std::vector<int>& tokens,
+		std::function<bool()> is_cancelled,
+		void* payload,
+		int first_len_run,
+		PrefixHitAction prefix_action);
 	buffer<bf16> _chunked_insert(chat_meta_info_t& meta_info, std::vector<int>& tokens, std::function<bool()> is_cancelled = [] { return false; }, void* payload = nullptr, int first_len_run = 0);
 	std::string _shared_generate(chat_meta_info_t& meta_info, int length_limit, std::ostream& os, std::function<bool()> is_cancelled = [] { return false; });
 

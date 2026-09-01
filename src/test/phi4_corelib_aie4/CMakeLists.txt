@@ -100,3 +100,89 @@ add_dependencies(
     fake_ryzenai_corelib)
 target_link_libraries(test_corelib_fatal_record PRIVATE
     advapi32)
+
+set(PHI4_FRONTEND_SOURCES
+    ${FASTFLOW_SOURCE_DIR}/common/AutoModel/automodel.cpp
+    ${FASTFLOW_SOURCE_DIR}/common/AutoModel/modeling_phi4.cpp)
+
+function(add_phi4_frontend_test TEST_NAME ENABLE_AIE4)
+    add_executable(${TEST_NAME}
+        test_phi4_frontend.cpp
+        ${PHI4_FRONTEND_SOURCES})
+    target_include_directories(${TEST_NAME} PRIVATE
+        ${FASTFLOW_SOURCE_DIR}/include
+        ${FASTFLOW_SOURCE_DIR}/../third_party/tokenizers-cpp/include
+        ${BOOST_INCLUDE_DIR}
+        ${XRT_INCLUDE_DIR})
+    target_compile_definitions(${TEST_NAME} PRIVATE
+        FLM_CORELIB_TESTING=1
+        DEV_BUILD=1
+        __WINDOWS__
+        USEAVX2=1
+        DISABLE_ABI_CHECK=1
+        _ENABLE_EXTENDED_ALIGNED_STORAGE
+        CMAKE_INSTALL_PREFIX="${FASTFLOW_SOURCE_DIR}/build/phi4_corelib_aie4-tests"
+        CMAKE_XCLBIN_PREFIX="${FASTFLOW_SOURCE_DIR}/xclbins"
+        WIN32_LEAN_AND_MEAN
+        NOMINMAX)
+    target_compile_options(${TEST_NAME} PRIVATE
+        $<$<CXX_COMPILER_ID:MSVC>:/arch:AVX2 /fp:precise>)
+    target_link_directories(${TEST_NAME} PRIVATE
+        ${XRT_LIB_DIR})
+    target_link_libraries(${TEST_NAME} PRIVATE
+        xrt_coreutil)
+
+    if(ENABLE_AIE4)
+        target_compile_definitions(${TEST_NAME} PRIVATE
+            FLM_ENABLE_CORELIB_AIE4=1)
+        target_include_directories(${TEST_NAME} PRIVATE
+            ${RYZENAI_CORELIB_INCLUDE_DIR})
+        target_link_libraries(${TEST_NAME} PRIVATE
+            flm_corelib_aie4_testlib)
+        add_dependencies(${TEST_NAME}
+            fake_ryzenai_corelib)
+    endif()
+
+    add_test(NAME ${TEST_NAME} COMMAND ${TEST_NAME})
+    set_tests_properties(${TEST_NAME} PROPERTIES
+        ENVIRONMENT_MODIFICATION
+        "PATH=path_list_prepend:${XRT_LIB_DIR}")
+endfunction()
+
+add_phi4_frontend_test(test_phi4_frontend_off FALSE)
+add_phi4_frontend_test(test_phi4_frontend_on TRUE)
+
+function(add_phi4_frontend_compile_check TARGET_NAME ENABLE_AIE4)
+    add_library(${TARGET_NAME} OBJECT
+        ${PHI4_FRONTEND_SOURCES})
+    target_include_directories(${TARGET_NAME} PRIVATE
+        ${FASTFLOW_SOURCE_DIR}/include
+        ${FASTFLOW_SOURCE_DIR}/../third_party/tokenizers-cpp/include
+        ${BOOST_INCLUDE_DIR}
+        ${XRT_INCLUDE_DIR})
+    target_compile_definitions(${TARGET_NAME} PRIVATE
+        DEV_BUILD=1
+        __WINDOWS__
+        USEAVX2=1
+        DISABLE_ABI_CHECK=1
+        _ENABLE_EXTENDED_ALIGNED_STORAGE
+        CMAKE_INSTALL_PREFIX="${FASTFLOW_SOURCE_DIR}/build/phi4_corelib_aie4-tests"
+        CMAKE_XCLBIN_PREFIX="${FASTFLOW_SOURCE_DIR}/xclbins"
+        WIN32_LEAN_AND_MEAN
+        NOMINMAX)
+    target_compile_options(${TARGET_NAME} PRIVATE
+        $<$<CXX_COMPILER_ID:MSVC>:/arch:AVX2 /fp:precise>)
+    if(ENABLE_AIE4)
+        target_compile_definitions(${TARGET_NAME} PRIVATE
+            FLM_ENABLE_CORELIB_AIE4=1)
+        target_include_directories(${TARGET_NAME} PRIVATE
+            ${RYZENAI_CORELIB_INCLUDE_DIR})
+    endif()
+endfunction()
+
+add_phi4_frontend_compile_check(
+    phi4_frontend_compile_off
+    FALSE)
+add_phi4_frontend_compile_check(
+    phi4_frontend_compile_on
+    TRUE)

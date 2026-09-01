@@ -4,6 +4,7 @@
 #include <corelib/corelib_runtime.hpp>
 #include <lm_config.hpp>
 
+#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <memory>
@@ -40,6 +41,7 @@ struct Phi4Aie4Metrics {
     std::uint64_t attention_extent_queries = 0;
     std::uint64_t output_projection_extent_queries = 0;
     std::uint64_t lm_head_extent_queries = 0;
+    std::array<std::uint32_t, 6> helper_transition_counts{};
     std::uint64_t v_read_calls = 0;
     std::uint64_t v_write_calls = 0;
     std::uint64_t v_bytes = 0;

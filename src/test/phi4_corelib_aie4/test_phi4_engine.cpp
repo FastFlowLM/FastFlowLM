@@ -1820,6 +1820,10 @@ void CheckMetrics(
     CHECK(metrics.attention_extent_queries == passes);
     CHECK(metrics.output_projection_extent_queries == passes);
     CHECK(metrics.lm_head_extent_queries == passes);
+    CHECK(std::all_of(
+        metrics.helper_transition_counts.begin(),
+        metrics.helper_transition_counts.end(),
+        [](std::uint32_t count) { return count > 0; }));
     CHECK(metrics.v_read_calls == passes * 32u);
     CHECK(metrics.v_write_calls == passes * 32u * 8u);
     CHECK(metrics.v_bytes > 0);
@@ -2500,6 +2504,52 @@ void TestDestructorSynchronizeFailureChild(
     CHECK(record.at("position") == 0);
 }
 
+void TestConfigIdentityMismatchIsRejected(
+    const SyntheticPackage& package) {
+    RecordingState state;
+    flm::test::ResetFakeCorelib();
+    TempDirectory fatal_root(
+        "fastflowlm-phi4-config-identity");
+    auto api = ResolveRecordingCorelib(state);
+    auto runtime = CorelibRuntime::Create(
+        api,
+        MakeRecords(fatal_root.path()),
+        [](unsigned int) {
+            throw std::runtime_error(
+                "config validation must not terminate");
+        });
+
+    LM_Config config;
+    config._json_config = {
+        {"hidden_size", constants::kHiddenSize + 1},
+        {"num_hidden_layers", constants::kLayerCount},
+        {"vocab_size", constants::kVocabularySize},
+    };
+
+    bool rejected = false;
+    try {
+        phi4_corelib_aie4 engine(
+            std::move(config),
+            package.path(),
+            runtime,
+            4096);
+    } catch (const std::invalid_argument& error) {
+        CHECK(
+            std::string_view(error.what()).find("hidden_size") !=
+            std::string_view::npos);
+        rejected = true;
+    }
+    runtime->ShutdownHealthy();
+    if (g_state == &state) {
+        g_state = nullptr;
+    }
+    CHECK(rejected);
+    CHECK(state.objects.empty());
+    CHECK(state.tensors.empty());
+    CHECK(state.matmul_weight_count == 0);
+    CHECK(state.ssmlp_weight_count == 0);
+}
+
 static_assert(std::is_base_of_v<causal_lm, phi4_corelib_aie4>);
 static_assert(std::has_virtual_destructor_v<phi4_corelib_aie4>);
 
@@ -2517,6 +2567,7 @@ int wmain(int argc, wchar_t* argv[]) {
                 argv[4]);
         }
         SyntheticPackage package;
+        TestConfigIdentityMismatchIsRejected(package);
         TestOrderBuffersTailsStateAndMetrics(package);
         TestDivergentPaddingGrids(package);
         TestRecoverablePreSubmitFailures(package);

@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <exception>
@@ -60,6 +61,96 @@ std::uint32_t ValidateMaxLength(std::uint32_t max_length) {
             "Phi-4 AIE4 maximum length must be in 1..4096");
     }
     return max_length;
+}
+
+void ValidateOptionalIntegerIdentity(
+    const LM_Config& config,
+    std::string_view key,
+    std::int64_t expected) {
+    const auto found = config._json_config.find(std::string(key));
+    if (
+        found == config._json_config.end() ||
+        found->is_null()) {
+        return;
+    }
+    if (!found->is_number_integer()) {
+        throw std::invalid_argument(
+            "Phi-4 AIE4 LM_Config field '" +
+            std::string(key) + "' must be an integer");
+    }
+    const std::int64_t actual = found->get<std::int64_t>();
+    if (actual != expected) {
+        throw std::invalid_argument(
+            "Phi-4 AIE4 LM_Config field '" +
+            std::string(key) +
+            "' does not match the package identity");
+    }
+}
+
+void ValidateOptionalFloatingIdentity(
+    const LM_Config& config,
+    std::string_view key,
+    double expected) {
+    const auto found = config._json_config.find(std::string(key));
+    if (
+        found == config._json_config.end() ||
+        found->is_null()) {
+        return;
+    }
+    if (!found->is_number()) {
+        throw std::invalid_argument(
+            "Phi-4 AIE4 LM_Config field '" +
+            std::string(key) + "' must be numeric");
+    }
+    const double actual = found->get<double>();
+    if (
+        !std::isfinite(actual) ||
+        std::abs(actual - expected) >
+            std::numeric_limits<double>::epsilon() *
+                std::max(1.0, std::abs(expected)) * 8.0) {
+        throw std::invalid_argument(
+            "Phi-4 AIE4 LM_Config field '" +
+            std::string(key) +
+            "' does not match the package identity");
+    }
+}
+
+void ValidateConfigIdentity(const LM_Config& config) {
+    // Legacy LM_Config files do not guarantee every fixed field. Validate
+    // each field they do provide; the package manifest independently remains
+    // the authority for absent fields.
+    ValidateOptionalIntegerIdentity(
+        config,
+        "num_hidden_layers",
+        constants::kLayerCount);
+    ValidateOptionalIntegerIdentity(
+        config,
+        "hidden_size",
+        constants::kHiddenSize);
+    ValidateOptionalIntegerIdentity(
+        config,
+        "intermediate_size",
+        constants::kIntermediateSize);
+    ValidateOptionalIntegerIdentity(
+        config,
+        "num_attention_heads",
+        constants::kQueryHeadCount);
+    ValidateOptionalIntegerIdentity(
+        config,
+        "num_key_value_heads",
+        constants::kKvHeadCount);
+    ValidateOptionalIntegerIdentity(
+        config,
+        "head_dim",
+        constants::kHeadSize);
+    ValidateOptionalIntegerIdentity(
+        config,
+        "vocab_size",
+        constants::kVocabularySize);
+    ValidateOptionalFloatingIdentity(
+        config,
+        "rms_norm_eps",
+        constants::kRmsEpsilon);
 }
 
 std::size_t CheckedElements(
@@ -264,7 +355,7 @@ struct phi4_corelib_aie4::Impl final {
         std::uint32_t requested_max_length)
         : runtime(std::move(supplied_runtime)),
           max_length(ValidateMaxLength(requested_max_length)) {
-        (void)config;
+        ValidateConfigIdentity(config);
         if (!runtime) {
             throw std::invalid_argument(
                 "phi4_corelib_aie4 requires a CorelibRuntime");
@@ -288,6 +379,26 @@ struct phi4_corelib_aie4::Impl final {
         metrics.mapped_source_bytes =
             MappedSourceBytes(*package);
         shape_plan.emplace(Phi4ShapePlan::Build(api));
+        metrics.helper_transition_counts = {
+            static_cast<std::uint32_t>(
+                shape_plan->Transitions(
+                    RowUse::QueryProjection).size()),
+            static_cast<std::uint32_t>(
+                shape_plan->Transitions(
+                    RowUse::KvProjection).size()),
+            static_cast<std::uint32_t>(
+                shape_plan->Transitions(
+                    RowUse::Attention).size()),
+            static_cast<std::uint32_t>(
+                shape_plan->Transitions(
+                    RowUse::OutputProjection).size()),
+            static_cast<std::uint32_t>(
+                shape_plan->Transitions(
+                    RowUse::SsMlp).size()),
+            static_cast<std::uint32_t>(
+                shape_plan->Transitions(
+                    RowUse::LmHead).size()),
+        };
 
         const auto& embedding_view =
             package->Require(kEmbeddingName);

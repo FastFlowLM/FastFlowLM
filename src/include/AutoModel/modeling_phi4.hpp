@@ -7,10 +7,66 @@
 #pragma once
 #include "AutoModel/automodel.hpp"
 
+#if defined(FLM_ENABLE_CORELIB_AIE4)
+#include "corelib/corelib_runtime.hpp"
+#include "models/phi4/phi4_corelib_aie4.hpp"
+#include "models/phi4/phi4_corelib_aie4_tuning.hpp"
+#include <optional>
+#endif
+
+#if defined(FLM_CORELIB_TESTING)
+#include <filesystem>
+#include <functional>
+#endif
+
+#if defined(FLM_CORELIB_TESTING)
+namespace flm::phi4::testing {
+class Phi4FrontendTestAccess;
+}
+#endif
+
 /************              phi4 family            **************/
 class Phi4 : public AutoModel {
 private:
-    void setup_tokenizer(std::string model_path);
+    void setup_tokenizer(
+        const std::string& model_path,
+        bool require_aie4_eos);
+
+#if defined(FLM_ENABLE_CORELIB_AIE4)
+    void validate_aie4_capacity(
+        size_t rendered_tokens,
+        std::optional<int> requested_max_new_tokens) const;
+    void clear_after_corelib_error();
+    const flm::phi4::Phi4Aie4Metrics& aie4_metrics() const;
+
+    bool uses_corelib_aie4_ = false;
+    std::shared_ptr<flm::corelib::CorelibRuntime>
+        corelib_runtime_;
+    flm::phi4::ForcedContinuationRoute
+        forced_continuation_route_ =
+            flm::phi4::ForcedContinuationRoute::Automatic;
+    std::optional<flm::phi4::ContinuationRoute>
+        last_continuation_route_;
+    std::uint64_t last_continuation_ns_ = 0;
+    std::uint64_t append_continuation_ns_ = 0;
+    std::uint64_t reprefill_continuation_ns_ = 0;
+#if defined(FLM_CORELIB_TESTING)
+    std::optional<flm::phi4::Phi4Aie4Metrics>
+        metrics_for_testing_;
+#endif
+#endif
+
+#if defined(FLM_CORELIB_TESTING)
+    using EngineFactoryForTesting =
+        std::function<std::unique_ptr<causal_lm>(
+            bool,
+            const LM_Config&,
+            npu_xclbin_manager*,
+            const std::filesystem::path&,
+            std::uint32_t)>;
+    static EngineFactoryForTesting engine_factory_for_testing_;
+    friend class flm::phi4::testing::Phi4FrontendTestAccess;
+#endif
 
 public:
     Phi4(flm_rt::device* npu_device_inst);
@@ -21,4 +77,6 @@ public:
     std::string generate(chat_meta_info_t& meta_info, int length_limit, std::ostream& os, std::function<bool()> is_cancelled = [] { return false; }) override;
     std::string generate_with_prompt(chat_meta_info_t& meta_info, lm_uniform_input_t& input, int length_limit, std::ostream& os = std::cout) override;
     std::string apply_chat_template(nlohmann::ordered_json& messages, nlohmann::ordered_json tools = nlohmann::ordered_json::object()) override;
+    void set_max_length(unsigned int MAX_L) override;
+    std::string show_profile() override;
 };

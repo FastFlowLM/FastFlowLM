@@ -8,18 +8,12 @@
  */
 #include "server.hpp"
 #include "rest_handler.hpp"
+#include <server/generation_limit.hpp>
 #include <sstream>
 #include <thread>
 #include <iostream>
 #include <iomanip>
 #include <locale>
-
-
-// Global NPU access control
-std::mutex g_npu_access_mutex;
-std::atomic<bool> g_npu_in_use{false};
-
-std::atomic<int> g_npu_active_requests{0};
 
 ///@brief get current time string, format: hh:mm:ss mm:dd:yyyy
 ///@return the current time string
@@ -127,46 +121,6 @@ void brief_print_message_request(nlohmann::json request) {
 ///@param request the request
 void brief_print_message_response(nlohmann::json request) {
 
-}
-
-// NPU Access Manager implementation
-bool NPUAccessManager::try_acquire_npu_access() {
-    std::lock_guard<std::mutex> lock(g_npu_access_mutex);
-    if (g_npu_in_use.load()) {
-        return false; // NPU is already in use
-    }
-    g_npu_in_use.store(true);
-    g_npu_active_requests.fetch_add(1);
-    return true;
-}
-
-void NPUAccessManager::release_npu_access() {
-
-    header_print("🔵 ", "NPU Lock Released!" );
-    std::lock_guard<std::mutex> lock(g_npu_access_mutex);
-    g_npu_in_use.store(false);
-    g_npu_active_requests.fetch_sub(1);
-}
-
-bool NPUAccessManager::is_npu_available() {
-    return !g_npu_in_use.load();
-}
-
-int NPUAccessManager::get_active_npu_requests() {
-    return g_npu_active_requests.load();
-}
-
-// Helper function to check if an endpoint requires NPU access
-bool requires_npu_access(const std::string& method, const std::string& path) {
-    // NPU-intensive endpoints that should be restricted to one user at a time
-    if (method == "POST") {
-        return path == "/api/generate" || 
-               path == "/api/chat" || 
-               path == "/v1/chat/completions" ||
-               path == "/v1/audio/transcriptions" ||
-               path == "/v1/embeddings";
-    }
-    return false;
 }
 
 ///@brief HttpSession class implementation
@@ -728,20 +682,14 @@ bool WebServer::handle_request(http::request<http::string_body>& req,
         // catch is_deferred 
         auto send_response = [res_ptr, session, this, request_id, needs_npu, is_deferred, cancellation_token](const json& response_data) {
             auto& response_ref = *res_ptr;
-            http::status status = http::status::ok;
-
-            if (response_data.contains("error") &&
-                response_data["error"].contains("code"))
-            {
-                int code = response_data["error"]["code"].get<int>();
-
-                if (code == 400) {
-                    status = http::status::bad_request;
-                }
-                //else if () {
-
-                //}
-            }
+            const int status_code =
+                HttpStatusForResponse(response_data);
+            const http::status status =
+                status_code == 400
+                    ? http::status::bad_request
+                    : status_code == 500
+                          ? http::status::internal_server_error
+                          : http::status::ok;
 
             response_ref.result(status);
             response_ref.body() = response_data.dump();

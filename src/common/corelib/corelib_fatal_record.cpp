@@ -576,6 +576,14 @@ std::filesystem::path FatalRecordStore::Persist(
 }
 
 std::vector<std::string> FatalRecordStore::DrainPriorRecords(
+    std::ostream& output) {
+    return DrainPriorRecords(
+        LocalAppDataLogRoot(),
+        ProbeProcessStart,
+        output);
+}
+
+std::vector<std::string> FatalRecordStore::DrainPriorRecords(
     const std::filesystem::path& root,
     ProcessProbe process_probe,
     std::ostream& output) {

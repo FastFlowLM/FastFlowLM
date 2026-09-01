@@ -14,6 +14,7 @@
 #include "program_args.hpp"
 #include "minja/chat-template.hpp"
 #include <cstring>
+#include <csignal>
 #include <iostream>
 #include <fstream>
 #include <string>
@@ -22,6 +23,7 @@
 #include <atomic>
 #include <condition_variable>
 #include <mutex>
+#include <memory>
 #include <filesystem>
 #include <cstdlib>
 #ifdef _WIN32
@@ -48,6 +50,11 @@
 #endif
 
 #include "AutoModel/automodel.hpp"
+
+#if defined(FLM_ENABLE_CORELIB_AIE4)
+#include <corelib/corelib_fatal_record.hpp>
+#include <corelib/corelib_runtime.hpp>
+#endif
 
 #ifndef _WIN32
 #include <dlfcn.h>
@@ -207,7 +214,10 @@ std::string identify_npu_arch() {
 
 #endif
 
-static bool sanity_check_npu_stack(bool quiet, bool json_output = false) {
+static bool sanity_check_npu_stack(
+    bool quiet,
+    bool json_output = false,
+    nlohmann::json* report_output = nullptr) {
     bool print_human = !quiet && !json_output;
 #ifndef _WIN32
     nlohmann::json validation_json = {
@@ -221,6 +231,17 @@ static bool sanity_check_npu_stack(bool quiet, bool json_output = false) {
         {"devices", nlohmann::json::array()},
         {"ready", true}
     };
+    const auto finish_validation =
+        [&](bool ready) {
+            validation_json["ready"] = ready;
+            if (report_output != nullptr) {
+                *report_output = validation_json;
+            }
+            if (json_output) {
+                std::cout << validation_json.dump(4) << std::endl;
+            }
+            return ready;
+        };
     validation_json["platform"] = "linux";
     // Check kernel version
     struct utsname u_name;
@@ -228,11 +249,7 @@ static bool sanity_check_npu_stack(bool quiet, bool json_output = false) {
         if (print_human)
             perror("Failed to get kernel version");
         validation_json["kernel_ok"] = false;
-        validation_json["ready"] = false;
-        if (json_output) {
-            std::cout << validation_json.dump(4) << std::endl;
-        }
-        return false;
+        return finish_validation(false);
     }
     int major, minor;
     sscanf(u_name.release, "%d.%d", &major, &minor);
@@ -243,11 +260,7 @@ static bool sanity_check_npu_stack(bool quiet, bool json_output = false) {
         if (print_human) {
             header_print_r("ERROR", "Kernel version incompatible with this version of FLM. Please update your kernel!");
         }
-        validation_json["ready"] = false;
-        if (json_output) {
-            std::cout << validation_json.dump(4) << std::endl;
-        }
-        return false;
+        return finish_validation(false);
     }
     if (print_human) {
         header_print("Linux", "Kernel: " << u_name.release);
@@ -398,12 +411,7 @@ static bool sanity_check_npu_stack(bool quiet, bool json_output = false) {
     validation_json["memlock_ok"] = memlock_ok;
 
     bool overall_ok = amd_device_found && kernel_ok && all_fw_ok && enough_cols && memlock_ok;
-    validation_json["ready"] = overall_ok;
-    if (json_output) {
-        std::cout << validation_json.dump(4) << std::endl;
-    }
-
-    return overall_ok;
+    return finish_validation(overall_ok);
 #else
     nlohmann::json validation_json = {
         {"object", "npu_stack_validation"},
@@ -412,16 +420,23 @@ static bool sanity_check_npu_stack(bool quiet, bool json_output = false) {
         {"npu_driver_ok", true},
         {"ready", true}
     };
+    const auto finish_validation =
+        [&](bool ready) {
+            validation_json["ready"] = ready;
+            if (report_output != nullptr) {
+                *report_output = validation_json;
+            }
+            if (json_output) {
+                std::cout << validation_json.dump(4) << std::endl;
+            }
+            return ready;
+        };
     std::string npu_arch = identify_npu_arch();
     if (npu_arch.empty()) {
         if (print_human)
             header_print("Error", "No XDNA2 NPU hardware detected");
-        validation_json["ready"] = false;
         validation_json["amd_device_found"] = false;
-        if (json_output) {
-            std::cout << validation_json.dump(4) << std::endl;
-        }
-        return false;
+        return finish_validation(false);
     }
 
     std::string min_drv = __NPU_VERSION__;
@@ -435,12 +450,8 @@ static bool sanity_check_npu_stack(bool quiet, bool json_output = false) {
         if (print_human) {
             header_print("Error", "NPU driver version doesn't meet the minimum!");
         }
-        validation_json["ready"] = false;
         validation_json["npu_driver_ok"] = false;
-        if (json_output) {
-            std::cout << validation_json.dump(4) << std::endl;
-        }
-        return false;
+        return finish_validation(false);
     }
 
     if (print_human) {
@@ -448,12 +459,96 @@ static bool sanity_check_npu_stack(bool quiet, bool json_output = false) {
         header_print_g("Windows", "NPU dirver version: " << drv);
     }
 
-    if (json_output) {
-        std::cout << validation_json.dump(4) << std::endl;
-    }
-    return true;
+    return finish_validation(true);
 #endif
 }
+
+#if defined(FLM_ENABLE_CORELIB_AIE4)
+static void drain_prior_corelib_fatal_records() noexcept {
+    try {
+        (void)flm::corelib::FatalRecordStore::DrainPriorRecords(
+            std::cerr);
+    } catch (const std::exception& error) {
+        std::cerr
+            << "AIE4 fatal record warning: startup drain failed: "
+            << error.what() << '\n';
+    } catch (...) {
+        std::cerr
+            << "AIE4 fatal record warning: startup drain failed with an "
+               "unknown error\n";
+    }
+}
+
+static bool shutdown_corelib_process() noexcept {
+    try {
+        flm::corelib::CorelibRuntime::ShutdownProcess();
+        return true;
+    } catch (const std::exception& error) {
+        std::cerr << "Error: failed to shut down AIE4 corelib runtime: "
+                  << error.what() << '\n';
+    } catch (...) {
+        std::cerr
+            << "Error: failed to shut down AIE4 corelib runtime with an "
+               "unknown error\n";
+    }
+    return false;
+}
+
+static nlohmann::json validate_corelib_aie4(
+    const std::filesystem::path& executable_dir,
+    bool print_human) {
+    nlohmann::json report = {
+        {"available_in_build", true},
+        {"loader_ok", false},
+        {"dependencies_ok", false},
+        {"device_context_ok", false},
+        {"fatal_log_writable", false},
+        {"shutdown_ok", false},
+        {"ready", false},
+    };
+
+    std::shared_ptr<flm::corelib::CorelibRuntime> runtime;
+    try {
+        runtime =
+            flm::corelib::CorelibRuntime::GetOrCreate(
+                executable_dir);
+        report["loader_ok"] = true;
+        report["dependencies_ok"] = true;
+        report["device_context_ok"] = true;
+        report["fatal_log_writable"] = true;
+        runtime.reset();
+        const bool shutdown_ok = shutdown_corelib_process();
+        report["shutdown_ok"] = shutdown_ok;
+        report["ready"] = shutdown_ok;
+    } catch (const std::exception& error) {
+        runtime.reset();
+        (void)shutdown_corelib_process();
+        report["error"] = error.what();
+    } catch (...) {
+        runtime.reset();
+        (void)shutdown_corelib_process();
+        report["error"] = "unknown AIE4 validation error";
+    }
+
+    if (print_human) {
+        if (report["ready"].get<bool>()) {
+            header_print_g(
+                "Windows",
+                "Corelib AIE4: ready");
+        } else {
+            header_print_r(
+                "ERROR",
+                "Corelib AIE4: not ready"
+                    << (report.contains("error")
+                            ? " (" +
+                                  report["error"].get<std::string>() +
+                                  ")"
+                            : ""));
+        }
+    }
+    return report;
+}
+#endif
 
 
 ///@brief main function
@@ -468,12 +563,17 @@ int main(int argc, char* argv[]) {
     // XRT backend: preload bundled XRT libraries from the executable directory.
     preload_bundled_libraries();
 #endif
+    std::signal(SIGINT, signal_handler);
     
     // Parse command line arguments using Boost Program Options
     program_args_t parsed_args;
     if (!arg_utils::parse_options(argc, argv, parsed_args)) {
         return 1; // Help was already printed by Boost Program Options
     }
+
+#if defined(FLM_ENABLE_CORELIB_AIE4)
+    drain_prior_corelib_fatal_records();
+#endif
 
     
     // Get the command, model tag, and force flag
@@ -505,7 +605,75 @@ int main(int argc, char* argv[]) {
 
     // Check if the commands and args valid
     if (parsed_args.command == "validate") {
-        stable_stack = sanity_check_npu_stack(parsed_args.command != "validate", parsed_args.command == "validate" && parsed_args.json_output);
+        nlohmann::json legacy_report;
+        bool legacy_ready = false;
+        try {
+            legacy_ready =
+                sanity_check_npu_stack(
+                    parsed_args.json_output,
+                    false,
+                    &legacy_report);
+        } catch (const std::exception& error) {
+            legacy_report = {
+                {"object", "npu_stack_validation"},
+                {"ready", false},
+                {"error", error.what()},
+            };
+#ifdef _WIN32
+            legacy_report["platform"] = "windows";
+#else
+            legacy_report["platform"] = "linux";
+#endif
+            if (!parsed_args.json_output) {
+                header_print_r(
+                    "ERROR",
+                    "Legacy XDNA2 validation failed: "
+                        << error.what());
+            }
+        } catch (...) {
+            legacy_report = {
+                {"object", "npu_stack_validation"},
+                {"ready", false},
+                {"error", "unknown legacy XDNA2 validation error"},
+            };
+#ifdef _WIN32
+            legacy_report["platform"] = "windows";
+#else
+            legacy_report["platform"] = "linux";
+#endif
+            if (!parsed_args.json_output) {
+                header_print_r(
+                    "ERROR",
+                    "Legacy XDNA2 validation failed with an "
+                    "unknown error");
+            }
+        }
+        nlohmann::json aie4_report = {
+            {"available_in_build", false},
+            {"ready", false},
+        };
+        bool aie4_ready = false;
+#if defined(FLM_ENABLE_CORELIB_AIE4)
+        aie4_report =
+            validate_corelib_aie4(
+                exe_dir,
+                !parsed_args.json_output);
+        aie4_ready = aie4_report["ready"].get<bool>();
+#else
+        if (!parsed_args.json_output) {
+            header_print(
+                "FLM",
+                "Corelib AIE4: unavailable in this build");
+        }
+#endif
+        stable_stack = legacy_ready || aie4_ready;
+        if (parsed_args.json_output) {
+            nlohmann::json validation_report = legacy_report;
+            validation_report["legacy_xdna2"] = legacy_report;
+            validation_report["corelib_aie4"] = aie4_report;
+            validation_report["ready"] = stable_stack;
+            std::cout << validation_report.dump(4) << std::endl;
+        }
         return stable_stack ? 0 : 1;
     }
 
@@ -715,11 +883,25 @@ int main(int argc, char* argv[]) {
             std::cerr << "Use --help for usage information" << std::endl;
             return 1;
         }
+#if defined(FLM_ENABLE_CORELIB_AIE4)
+        if (!shutdown_corelib_process()) {
+            return 1;
+        }
+#endif
         // Return 0 if the command is valid
         return 0;
     } catch (const std::exception& e) {
         // If an error occurs, this will be used to show the error
         std::cerr << "Error: " << e.what() << std::endl;
+#if defined(FLM_ENABLE_CORELIB_AIE4)
+        (void)shutdown_corelib_process();
+#endif
+        return 1;
+    } catch (...) {
+        std::cerr << "Error: unknown command failure" << std::endl;
+#if defined(FLM_ENABLE_CORELIB_AIE4)
+        (void)shutdown_corelib_process();
+#endif
         return 1;
     }
 }

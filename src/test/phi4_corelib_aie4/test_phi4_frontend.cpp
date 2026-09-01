@@ -1,5 +1,6 @@
 #include <AutoModel/modeling_phi4.hpp>
 #include <models/phi4/phi4_corelib_aie4_tuning.hpp>
+#include <server/generation_limit.hpp>
 
 #if defined(FLM_ENABLE_CORELIB_AIE4)
 #include <corelib/corelib_runtime.hpp>
@@ -703,6 +704,72 @@ void TestDefaultChatLimitWithoutExplicitRequestIsAdmitted() {
     CheckAligned(*model, *g_factory.engine, {41, 200020});
 }
 
+void TestEndpointLimitsAtLoweredCap() {
+    TempModelPackage package;
+    FactoryScope factory;
+    auto model = Load(
+        package,
+        ModelInfo(512, "corelib_aie4"),
+        -1,
+        false,
+        nullptr);
+    FakeEngine* engine = g_factory.engine;
+
+    for (const GenerationEndpoint endpoint : {
+             GenerationEndpoint::Generate,
+             GenerationEndpoint::OpenAiChatCompletion,
+             GenerationEndpoint::OpenAiCompletion}) {
+        const ParsedGenerationLimit omitted =
+            ParseGenerationLimit(
+                nlohmann::ordered_json::object(),
+                endpoint);
+        CHECK(!omitted.explicit_limit);
+        CHECK(GenerationLoopLimit(omitted, true) == -1);
+
+        g_encoded_tokens = {41};
+        g_sample_tokens.clear();
+        g_sample_token = 7;
+        auto meta = Meta();
+        auto input = Prompt(RequestedMaxNewTokens(omitted));
+        CHECK(model->insert(meta, input));
+        std::ostringstream output;
+        (void)model->generate(
+            meta,
+            GenerationLoopLimit(omitted, true),
+            output);
+        CHECK(meta.generated_tokens == 511);
+        CHECK(model->get_current_context_length() == 512);
+        CHECK(engine->position == 512);
+
+        model->clear_context();
+        nlohmann::ordered_json explicit_request;
+        if (endpoint ==
+            GenerationEndpoint::OpenAiChatCompletion) {
+            explicit_request["max_completion_tokens"] = 512;
+        } else {
+            explicit_request["max_tokens"] = 512;
+        }
+        const ParsedGenerationLimit explicit_limit =
+            ParseGenerationLimit(explicit_request, endpoint);
+        CHECK(explicit_limit.explicit_limit);
+        CHECK(explicit_limit.value == 512);
+
+        meta = Meta();
+        input = Prompt(RequestedMaxNewTokens(explicit_limit));
+        const int clear_count = engine->clear_count;
+        const auto prefill_count = engine->prefill_calls.size();
+        CheckRequestError(
+            [&] { (void)model->insert(meta, input); },
+            400,
+            false,
+            "512");
+        CHECK(engine->position == 0);
+        CHECK(engine->clear_count == clear_count);
+        CHECK(engine->prefill_calls.size() == prefill_count);
+        CHECK(Phi4FrontendTestAccess::History(*model).empty());
+    }
+}
+
 void TestLengthStopCommitsTokensBeforeForcedAppend() {
     TempModelPackage package;
     FactoryScope factory;
@@ -1193,6 +1260,7 @@ int main() {
         TestEnginePositionIsAuthoritativeForCapUpdate();
         TestRenderedCapacityIsAtomic();
         TestDefaultChatLimitWithoutExplicitRequestIsAdmitted();
+        TestEndpointLimitsAtLoweredCap();
         TestLengthStopCommitsTokensBeforeForcedAppend();
         TestEosStopCommitsTokenBeforeCapUpdateAndAppend();
         TestActiveCapNeverEmitsUncommittedToken();

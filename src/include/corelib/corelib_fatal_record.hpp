@@ -47,6 +47,8 @@ public:
     void Prepare();
     std::filesystem::path Persist(const FailureContext& failure);
     static std::vector<std::string> DrainPriorRecords(
+        std::ostream& output);
+    static std::vector<std::string> DrainPriorRecords(
         const std::filesystem::path& root,
         ProcessProbe process_probe,
         std::ostream& output);

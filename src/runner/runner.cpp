@@ -8,6 +8,7 @@
 */
 #include "runner.hpp"
 #include "harmony_filter.hpp"
+#include <server/generation_limit.hpp>
 #ifndef FASTFLOWLM_LINUX_LIMITED_MODELS
 #include "AutoEmbeddingModel/all_embedding_model.hpp"
 #endif
@@ -18,8 +19,21 @@
 #include <iomanip>
 #include <fstream>
 #include <algorithm>
+#include <stdexcept>
 #include <thread>
 #include <chrono>
+
+namespace {
+
+void PrintModelRequestError(const ModelRequestError& error) {
+    std::cerr
+        << CliModelErrorNotice(
+               error.what(),
+               error.session_cleared())
+        << '\n';
+}
+
+}  // namespace
 
 /// \brief Command map for command line input
 std::map<std::string, runner_cmd_t> cmd_map = {
@@ -66,7 +80,9 @@ Runner::Runner(model_list& supported_models, ModelDownloader& downloader, progra
             this->downloader.pull_model(this->tag, this->modelscope);
             break;
         case ModelDownloader::ModelStatus::Incompatible:
-            exit(EXIT_FAILURE);
+            throw std::runtime_error(
+                "Model is incompatible with this version of FastFlowLM: " +
+                this->tag);
     }
     auto [new_tag, model_info] = this->supported_models.get_model_info(this->tag);
     this->asr_supported = model_info.contains("asr") && model_info["asr"];
@@ -77,7 +93,7 @@ Runner::Runner(model_list& supported_models, ModelDownloader& downloader, progra
     }
     catch (const std::exception& e) {
         header_print("ERROR", "Failed to load model: " + std::string(e.what()));
-        exit(EXIT_FAILURE);
+        throw;
     }
 
     try {
@@ -127,7 +143,7 @@ Runner::Runner(model_list& supported_models, ModelDownloader& downloader, progra
             }
             catch (const std::exception& e) {
                 header_print("WARNING", "Failed to load ASR model: " + std::string(e.what()));
-                exit(EXIT_FAILURE);
+                throw;
             }
         }
         else {
@@ -358,6 +374,8 @@ void Runner::run() {
             chat_meta_info_t meta_info;
             meta_info.max_prefill_len = this->prefill_chunk_len;
             uniformed_input.prompt = input;
+            uniformed_input.requested_max_new_tokens =
+                CliRequestedMaxNewTokens(this->generate_limit);
             
             this->auto_chat_engine->start_total_timer();
             
@@ -368,6 +386,10 @@ void Runner::run() {
                     header_print("WARNING", "Max length reached, stopping generation...");
                     break;
                 }
+            }
+            catch (const ModelRequestError& error) {
+                PrintModelRequestError(error);
+                continue;
             }
             catch (const std::exception& e) {
                 header_print("ERROR", "Insertion error: " + std::string(e.what()));
@@ -383,6 +405,10 @@ void Runner::run() {
                 try {
                     this->auto_chat_engine->generate(meta_info, this->generate_limit, harmony_filter_ostream);
                 }
+                catch (const ModelRequestError& error) {
+                    PrintModelRequestError(error);
+                    continue;
+                }
                 catch (const std::exception& e) {
                     header_print("ERROR", "Generation error: " + std::string(e.what()));
                     this->auto_chat_engine->clear_context();
@@ -391,6 +417,10 @@ void Runner::run() {
             } else {
                 try {
                     this->auto_chat_engine->generate(meta_info, this->generate_limit, base_ostream);
+                }
+                catch (const ModelRequestError& error) {
+                    PrintModelRequestError(error);
+                    continue;
                 }
                 catch (const std::exception& e) {
                     header_print("ERROR", "Generation error: " + std::string(e.what()));
@@ -440,7 +470,10 @@ void Runner::cmd_load(std::vector<std::string>& input_list) {
                 break;
             case ModelDownloader::ModelStatus::Incompatible:
                 header_print("ERROR", "Model is incompatible with this version of FastFlowLM: " + this->tag);
-                exit(EXIT_FAILURE);
+                throw std::runtime_error(
+                    "Model is incompatible with this version of "
+                    "FastFlowLM: " +
+                    this->tag);
         }
         auto_chat_engine.reset();
         if(model_name=="gpt-oss:20b")
@@ -454,7 +487,7 @@ void Runner::cmd_load(std::vector<std::string>& input_list) {
         }
         catch (const std::exception& e) {
             header_print("ERROR", "Failed to load model: " + std::string(e.what()));
-            exit(EXIT_FAILURE);
+            throw;
         }
 
         this->auto_chat_engine->configure_parameter("system_prompt", this->system_prompt);
@@ -604,7 +637,7 @@ void Runner::cmd_set(std::vector<std::string>& input_list) {
         }
         catch (const std::exception& e) {
             header_print("ERROR", "Failed to set context length: " + std::string(e.what()));
-            exit(EXIT_FAILURE);
+            return;
         }
     }
     else if (set_context == "gen-lim"){

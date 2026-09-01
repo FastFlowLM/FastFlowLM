@@ -271,7 +271,7 @@ add_subdirectory(${CMAKE_SOURCE_DIR}/../third_party/tokenizers-cpp
 # ———————————————————————————————————————————————
 file(GLOB SOURCES "src/*.cpp" "runner/*.cpp" "common/*.cpp" "common/*/*.cpp" "server/*.cpp" "pull/*.cpp" )
 list(FILTER SOURCES EXCLUDE REGEX ".*/common/corelib/.*\\.cpp$")
-file(GLOB HEADERS "include/*.hpp" "runner/*.hpp" "common/*.hpp" "common/*/*.hpp" "server/*.hpp" "pull/*.hpp")
+file(GLOB HEADERS "include/*.hpp" "include/server/*.hpp" "runner/*.hpp" "common/*.hpp" "common/*/*.hpp" "server/*.hpp" "pull/*.hpp")
 
 # Exclude files that depend on missing libraries for Linux
 if(NOT WIN32)

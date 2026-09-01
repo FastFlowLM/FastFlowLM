@@ -29,6 +29,7 @@
 #include "streaming_ostream.hpp"
 #include "model_downloader.hpp"
 #include "multipart.hpp"
+#include <server/npu_access_manager.hpp>
 #include <queue>
 #include <functional>
 
@@ -42,26 +43,9 @@ using json = nlohmann::ordered_json;
 class RestHandler;
 class HttpSession;
 
-// Global NPU access control
-extern std::mutex g_npu_access_mutex;
-extern std::atomic<bool> g_npu_in_use;
-extern std::atomic<int> g_npu_active_requests;
-
-// Helper function to check if an endpoint requires NPU access
-bool requires_npu_access(const std::string& method, const std::string& path);
-
 ///@brief get current time string, format: hh:mm:ss mm:dd:yyyy
 ///@return the current time string
 std::string get_current_time_string();
-
-// NPU access manager class
-class NPUAccessManager {
-public:
-    static bool try_acquire_npu_access();
-    static void release_npu_access();
-    static bool is_npu_available();
-    static int get_active_npu_requests();
-};
 
 // Stream response callback type for handling streaming responses
 using StreamCallback = std::function<void(const std::string&)>;

@@ -84,6 +84,14 @@ function(add_corelib_host_test TEST_NAME TEST_SOURCE)
 endfunction()
 
 enable_testing()
+add_executable(test_generation_limit
+    test_generation_limit.cpp
+    ${FASTFLOW_SOURCE_DIR}/server/generation_limit.cpp
+    ${FASTFLOW_SOURCE_DIR}/server/npu_access_manager.cpp)
+target_include_directories(test_generation_limit PRIVATE
+    ${FASTFLOW_SOURCE_DIR}/include)
+add_test(NAME test_generation_limit COMMAND test_generation_limit)
+
 add_corelib_host_test(test_corelib_api test_corelib_api.cpp)
 add_corelib_host_test(test_phi4_manifest test_phi4_manifest.cpp)
 add_corelib_host_test(test_phi4_shape_plan test_phi4_shape_plan.cpp)
@@ -103,7 +111,8 @@ target_link_libraries(test_corelib_fatal_record PRIVATE
 
 set(PHI4_FRONTEND_SOURCES
     ${FASTFLOW_SOURCE_DIR}/common/AutoModel/automodel.cpp
-    ${FASTFLOW_SOURCE_DIR}/common/AutoModel/modeling_phi4.cpp)
+    ${FASTFLOW_SOURCE_DIR}/common/AutoModel/modeling_phi4.cpp
+    ${FASTFLOW_SOURCE_DIR}/server/generation_limit.cpp)
 
 function(add_phi4_frontend_test TEST_NAME ENABLE_AIE4)
     add_executable(${TEST_NAME}
@@ -185,4 +194,73 @@ add_phi4_frontend_compile_check(
     FALSE)
 add_phi4_frontend_compile_check(
     phi4_frontend_compile_on
+    TRUE)
+
+set(TASK10_PRODUCTION_SOURCES
+    ${FASTFLOW_SOURCE_DIR}/server/generation_limit.cpp
+    ${FASTFLOW_SOURCE_DIR}/server/npu_access_manager.cpp
+    ${FASTFLOW_SOURCE_DIR}/server/rest_handler.cpp
+    ${FASTFLOW_SOURCE_DIR}/server/server.cpp
+    ${FASTFLOW_SOURCE_DIR}/runner/runner.cpp
+    ${FASTFLOW_SOURCE_DIR}/src/main.cpp)
+
+set(TASK10_STUB_INCLUDE_DIR
+    "${CMAKE_CURRENT_BINARY_DIR}/task10-compile-stubs")
+# These production translation units include declaration-only FFmpeg headers
+# transitively. The standalone host suite does not link or execute FFmpeg.
+foreach(TASK10_STUB_HEADER IN ITEMS
+        libavcodec/avcodec.h
+        libswscale/swscale.h
+        libavutil/imgutils.h
+        libavutil/frame.h
+        libavutil/pixfmt.h)
+    get_filename_component(
+        TASK10_STUB_PARENT
+        "${TASK10_STUB_INCLUDE_DIR}/${TASK10_STUB_HEADER}"
+        DIRECTORY)
+    file(MAKE_DIRECTORY "${TASK10_STUB_PARENT}")
+    file(WRITE
+        "${TASK10_STUB_INCLUDE_DIR}/${TASK10_STUB_HEADER}"
+        "#pragma once\n")
+endforeach()
+
+function(add_task10_production_compile_check TARGET_NAME ENABLE_AIE4)
+    add_library(${TARGET_NAME} OBJECT
+        ${TASK10_PRODUCTION_SOURCES})
+    target_include_directories(${TARGET_NAME} PRIVATE
+        ${FASTFLOW_SOURCE_DIR}/include
+        ${FASTFLOW_SOURCE_DIR}/runner
+        ${FASTFLOW_SOURCE_DIR}/server
+        ${FASTFLOW_SOURCE_DIR}/pull
+        ${FASTFLOW_SOURCE_DIR}/../third_party/tokenizers-cpp/include
+        ${TASK10_STUB_INCLUDE_DIR}
+        ${BOOST_INCLUDE_DIR}
+        ${XRT_INCLUDE_DIR})
+    target_compile_definitions(${TARGET_NAME} PRIVATE
+        DEV_BUILD=1
+        __WINDOWS__
+        USEAVX2=1
+        DISABLE_ABI_CHECK=1
+        _ENABLE_EXTENDED_ALIGNED_STORAGE
+        CMAKE_INSTALL_PREFIX="${FASTFLOW_SOURCE_DIR}/build/phi4_corelib_aie4-tests"
+        CMAKE_XCLBIN_PREFIX="${FASTFLOW_SOURCE_DIR}/xclbins"
+        __FLM_VERSION__="task10-test"
+        __NPU_VERSION__="0.0.0.0"
+        WIN32_LEAN_AND_MEAN
+        NOMINMAX)
+    target_compile_options(${TARGET_NAME} PRIVATE
+        $<$<CXX_COMPILER_ID:MSVC>:/arch:AVX2 /fp:precise>)
+    if(ENABLE_AIE4)
+        target_compile_definitions(${TARGET_NAME} PRIVATE
+            FLM_ENABLE_CORELIB_AIE4=1)
+        target_include_directories(${TARGET_NAME} PRIVATE
+            ${RYZENAI_CORELIB_INCLUDE_DIR})
+    endif()
+endfunction()
+
+add_task10_production_compile_check(
+    task10_production_compile_off
+    FALSE)
+add_task10_production_compile_check(
+    task10_production_compile_on
     TRUE)

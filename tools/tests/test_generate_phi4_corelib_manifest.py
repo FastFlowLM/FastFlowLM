@@ -1,14 +1,19 @@
 from __future__ import annotations
 
+from collections import Counter
 import hashlib
 import json
+import os
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import onnx
 from onnx import TensorProto, helper
 
+from tools import generate_phi4_corelib_manifest as manifest_tool
 from tools.generate_phi4_corelib_manifest import (
     MAX_U64,
     _generate_manifest,
@@ -474,6 +479,196 @@ class ManifestGeneratorTests(unittest.TestCase):
                             self._exact_roles("test.weight"),
                         )
 
+    def test_symlink_escape_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            root = parent / "model"
+            root.mkdir()
+            outside = parent / "outside.bin"
+            outside.write_bytes(b"data")
+            link = root / "weights.bin"
+            try:
+                link.symlink_to(outside)
+            except (NotImplementedError, OSError) as error:
+                if os.name == "nt":
+                    self.skipTest(
+                        f"Windows cannot create the required symlink: {error}"
+                    )
+                raise
+
+            tensor = self._external(
+                "test.weight",
+                TensorProto.UINT8,
+                [2, 2],
+                [
+                    ("location", "weights.bin"),
+                    ("offset", "0"),
+                    ("length", "4"),
+                ],
+            )
+            self._write_model(root, [tensor])
+
+            with self.assertRaisesRegex(ValueError, "escapes"):
+                _generate_manifest(
+                    root,
+                    root / "manifest.json",
+                    False,
+                    self._exact_roles("test.weight"),
+                )
+
+    def test_out_of_file_range_reaches_range_guard(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "weights.bin").write_bytes(b"ab")
+            tensor = self._external(
+                "test.weight",
+                TensorProto.UINT8,
+                [2],
+                [
+                    ("location", "weights.bin"),
+                    ("offset", "1"),
+                    ("length", "2"),
+                ],
+            )
+            self._write_model(root, [tensor])
+
+            with self.assertRaisesRegex(ValueError, "range exceeds file size"):
+                _generate_manifest(
+                    root,
+                    root / "manifest.json",
+                    False,
+                    self._exact_roles("test.weight", shape=[2]),
+                )
+
+    def test_multibyte_dtype_rejects_odd_external_offset(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "weights.bin").write_bytes(b"x" + bytes(4))
+            tensor = self._external(
+                "test.scale",
+                TensorProto.FLOAT16,
+                [2],
+                [
+                    ("location", "weights.bin"),
+                    ("offset", "1"),
+                    ("length", "4"),
+                ],
+            )
+            self._write_model(root, [tensor])
+
+            with self.assertRaisesRegex(ValueError, "dtype-aligned"):
+                _generate_manifest(
+                    root,
+                    root / "manifest.json",
+                    False,
+                    self._exact_roles(
+                        "test.scale",
+                        dtypes={"float16"},
+                        shape=[2],
+                    ),
+                )
+
+    def test_duplicate_external_metadata_key_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "weights.bin").write_bytes(b"data")
+            tensor = self._external(
+                "test.weight",
+                TensorProto.UINT8,
+                [2, 2],
+                [
+                    ("location", "weights.bin"),
+                    ("location", "weights.bin"),
+                    ("offset", "0"),
+                    ("length", "4"),
+                ],
+            )
+            self._write_model(root, [tensor])
+
+            with self.assertRaisesRegex(
+                ValueError,
+                "duplicate external metadata key location",
+            ):
+                _generate_manifest(
+                    root,
+                    root / "manifest.json",
+                    False,
+                    self._exact_roles("test.weight"),
+                )
+
+    def test_generated_sidecar_cannot_replace_required_external_data(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            sidecar = root / "corelib_embedded_initializers.bin"
+            sidecar.write_bytes(b"source")
+            external = self._external(
+                "external.weight",
+                TensorProto.UINT8,
+                [6],
+                [
+                    ("location", "corelib_embedded_initializers.bin"),
+                    ("offset", "0"),
+                    ("length", "6"),
+                ],
+            )
+            embedded = self._embedded(
+                "embedded.weight",
+                TensorProto.UINT8,
+                [4],
+                b"data",
+            )
+            self._write_model(root, [external, embedded])
+            roles = {
+                "external.weight": {
+                    "role": "test.external",
+                    "dtypes": {"uint8"},
+                    "shape": [6],
+                },
+                "embedded.weight": {
+                    "role": "test.embedded",
+                    "dtypes": {"uint8"},
+                    "shape": [4],
+                },
+            }
+
+            with self.assertRaisesRegex(ValueError, "sidecar conflicts"):
+                _generate_manifest(
+                    root,
+                    root / "manifest.json",
+                    False,
+                    roles,
+                )
+            self.assertEqual(sidecar.read_bytes(), b"source")
+
+    def test_output_cannot_overwrite_required_external_data(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            data_path = root / "weights.bin"
+            data_path.write_bytes(b"data")
+            tensor = self._external(
+                "test.weight",
+                TensorProto.UINT8,
+                [2, 2],
+                [
+                    ("location", "weights.bin"),
+                    ("offset", "0"),
+                    ("length", "4"),
+                ],
+            )
+            self._write_model(root, [tensor])
+
+            with self.assertRaisesRegex(
+                ValueError,
+                "output path would overwrite",
+            ):
+                _generate_manifest(
+                    root,
+                    data_path,
+                    False,
+                    self._exact_roles("test.weight"),
+                )
+            self.assertEqual(data_path.read_bytes(), b"data")
+
     def test_missing_length_and_range_overflow_are_rejected(self):
         cases = (
             (
@@ -666,6 +861,297 @@ class ManifestGeneratorTests(unittest.TestCase):
                 },
             )
             self.assertEqual(manifest["backend"], {"max_seq": 4096})
+
+    def test_required_weight_objects_have_exact_descriptors_and_roles(self):
+        objects = manifest_tool.required_weight_objects()
+        self.assertEqual(len(objects), 161)
+        self.assertEqual(objects, manifest_tool.required_weight_objects())
+
+        names = [record["name"] for record in objects]
+        self.assertEqual(len(names), len(set(names)))
+        self.assertEqual(
+            Counter(record["kind"] for record in objects),
+            {"matmul": 129, "ssmlp": 32},
+        )
+        self.assertEqual(
+            sum(
+                record["kind"] == "matmul"
+                and ".attn." in record["name"]
+                for record in objects
+            ),
+            128,
+        )
+        expected_names = [
+            name
+            for layer in range(32)
+            for name in (
+                f"model.layers.{layer}.attn.q_proj.MatMulNBits",
+                f"model.layers.{layer}.attn.k_proj.MatMulNBits",
+                f"model.layers.{layer}.attn.v_proj.MatMulNBits",
+                f"model.layers.{layer}.attn.o_proj.MatMulNBits",
+                f"model.layers.{layer}.ssmlp",
+            )
+        ]
+        expected_names.append("lm_head.MatMulNBits")
+        self.assertEqual(names, expected_names)
+        self.assertEqual(
+            names[:5],
+            [
+                "model.layers.0.attn.q_proj.MatMulNBits",
+                "model.layers.0.attn.k_proj.MatMulNBits",
+                "model.layers.0.attn.v_proj.MatMulNBits",
+                "model.layers.0.attn.o_proj.MatMulNBits",
+                "model.layers.0.ssmlp",
+            ],
+        )
+        self.assertEqual(names[-1], "lm_head.MatMulNBits")
+
+        by_name = {record["name"]: record for record in objects}
+        projection_descriptors = (
+            ("q_proj", 3072, 3072),
+            ("k_proj", 3072, 1024),
+            ("v_proj", 3072, 1024),
+            ("o_proj", 3072, 3072),
+        )
+        for layer in range(32):
+            for projection, k, n in projection_descriptors:
+                prefix = (
+                    f"model.layers.{layer}.attn.{projection}.MatMulNBits"
+                )
+                self.assertEqual(
+                    by_name[prefix]["descriptor"],
+                    {
+                        "k": k,
+                        "n": n,
+                        "group_size": 128,
+                        "has_bias": False,
+                    },
+                )
+                self.assertEqual(
+                    by_name[prefix]["roles"],
+                    {
+                        "qweight": f"{prefix}.qweight",
+                        "scales": f"{prefix}.scales",
+                        "qzeros": f"{prefix}.qzeros",
+                    },
+                )
+
+            base = f"model.layers.{layer}"
+            next_norm = (
+                "model.layers.32.final_norm_layernorm.weight"
+                if layer == 31
+                else f"model.layers.{layer + 1}.input_layernorm.weight"
+            )
+            expected_ssmlp_roles = {
+                "norm0": f"{base}.post_attention_layernorm.weight",
+                "norm1": next_norm,
+            }
+            for projection in ("gate", "up", "down"):
+                prefix = f"{base}.mlp.{projection}_proj.MatMulNBits"
+                for component in ("qweight", "scales", "qzeros"):
+                    expected_ssmlp_roles[f"{projection}_{component}"] = (
+                        f"{prefix}.{component}"
+                    )
+            self.assertEqual(
+                by_name[f"{base}.ssmlp"],
+                {
+                    "name": f"{base}.ssmlp",
+                    "kind": "ssmlp",
+                    "descriptor": {
+                        "k": 3072,
+                        "n": 8192,
+                        "group_size": 128,
+                    },
+                    "roles": expected_ssmlp_roles,
+                },
+            )
+
+        self.assertEqual(
+            by_name["model.layers.0.attn.q_proj.MatMulNBits"],
+            {
+                "name": "model.layers.0.attn.q_proj.MatMulNBits",
+                "kind": "matmul",
+                "descriptor": {
+                    "k": 3072,
+                    "n": 3072,
+                    "group_size": 128,
+                    "has_bias": False,
+                },
+                "roles": {
+                    "qweight": (
+                        "model.layers.0.attn.q_proj."
+                        "MatMulNBits.qweight"
+                    ),
+                    "scales": (
+                        "model.layers.0.attn.q_proj."
+                        "MatMulNBits.scales"
+                    ),
+                    "qzeros": (
+                        "model.layers.0.attn.q_proj."
+                        "MatMulNBits.qzeros"
+                    ),
+                },
+            },
+        )
+        self.assertEqual(
+            by_name["model.layers.0.attn.k_proj.MatMulNBits"]["descriptor"],
+            {
+                "k": 3072,
+                "n": 1024,
+                "group_size": 128,
+                "has_bias": False,
+            },
+        )
+        self.assertEqual(
+            by_name["model.layers.0.attn.v_proj.MatMulNBits"]["descriptor"],
+            {
+                "k": 3072,
+                "n": 1024,
+                "group_size": 128,
+                "has_bias": False,
+            },
+        )
+        self.assertEqual(
+            by_name["model.layers.0.attn.o_proj.MatMulNBits"]["descriptor"],
+            {
+                "k": 3072,
+                "n": 3072,
+                "group_size": 128,
+                "has_bias": False,
+            },
+        )
+        self.assertEqual(
+            by_name["lm_head.MatMulNBits"]["descriptor"],
+            {
+                "k": 3072,
+                "n": 200064,
+                "group_size": 128,
+                "has_bias": False,
+            },
+        )
+
+        final_ssmlp = by_name["model.layers.31.ssmlp"]
+        self.assertEqual(
+            final_ssmlp["descriptor"],
+            {"k": 3072, "n": 8192, "group_size": 128},
+        )
+        self.assertEqual(
+            final_ssmlp["roles"]["norm1"],
+            "model.layers.32.final_norm_layernorm.weight",
+        )
+        self.assertNotIn("epsilon", final_ssmlp["roles"])
+        self.assertEqual(manifest_tool.MODEL_IDENTITY["rms_epsilon"], 0.00001)
+
+        initializers = required_initializer_roles()
+        for weight_object in objects:
+            for initializer_name in weight_object["roles"].values():
+                self.assertIn(initializer_name, initializers)
+
+    def test_manifest_emits_top_level_weight_objects_only(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            names = ("test.qweight", "test.scales", "test.qzeros")
+            tensors = [
+                self._embedded(name, TensorProto.UINT8, [1], bytes([index]))
+                for index, name in enumerate(names, start=1)
+            ]
+            self._write_model(root, tensors)
+            roles = {
+                name: {
+                    "role": f"test.{name.rsplit('.', 1)[-1]}",
+                    "weight_object": "test.matmul",
+                    "dtypes": {"uint8"},
+                    "shape": [1],
+                }
+                for name in names
+            }
+            weight_objects = [
+                {
+                    "name": "test.matmul",
+                    "kind": "matmul",
+                    "descriptor": {
+                        "k": 2,
+                        "n": 1,
+                        "group_size": 1,
+                        "has_bias": False,
+                    },
+                    "roles": {
+                        "qweight": "test.qweight",
+                        "scales": "test.scales",
+                        "qzeros": "test.qzeros",
+                    },
+                }
+            ]
+
+            manifest = _generate_manifest(
+                root,
+                root / "manifest.json",
+                False,
+                roles,
+                weight_objects,
+            )
+
+            self.assertEqual(manifest["weight_objects"], weight_objects)
+            for initializer in manifest["initializers"].values():
+                self.assertNotIn("weight_object", initializer)
+
+    def test_generate_manifest_binds_real_role_and_weight_maps(self):
+        model_dir = Path("model package")
+        output = Path("output manifest.json")
+        sentinel = {"result": "sentinel"}
+
+        with patch.object(
+            manifest_tool,
+            "_generate_manifest",
+            return_value=sentinel,
+        ) as lower:
+            result = manifest_tool.generate_manifest(
+                model_dir,
+                output,
+                True,
+            )
+
+        self.assertIs(result, sentinel)
+        self.assertEqual(len(lower.call_args.args), 5)
+        self.assertEqual(lower.call_args.args[:3], (model_dir, output, True))
+        self.assertEqual(
+            lower.call_args.args[3],
+            required_initializer_roles(),
+        )
+        self.assertEqual(
+            lower.call_args.args[4],
+            manifest_tool.required_weight_objects(),
+        )
+
+    def test_main_wires_exact_paths_and_full_hash_flag(self):
+        cases = (
+            ([], False),
+            (["--full-hash"], True),
+        )
+        for extra, expected_full_hash in cases:
+            with self.subTest(full_hash=expected_full_hash):
+                argv = [
+                    "generate_phi4_corelib_manifest.py",
+                    "--model-dir",
+                    "model package",
+                    "--output",
+                    "output manifest.json",
+                    *extra,
+                ]
+                with (
+                    patch.object(sys, "argv", argv),
+                    patch.object(
+                        manifest_tool,
+                        "generate_manifest",
+                    ) as generate,
+                ):
+                    self.assertEqual(manifest_tool.main(), 0)
+
+                generate.assert_called_once_with(
+                    Path("model package"),
+                    Path("output manifest.json"),
+                    expected_full_hash,
+                )
 
 
 if __name__ == "__main__":

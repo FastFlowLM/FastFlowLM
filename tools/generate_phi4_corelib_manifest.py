@@ -27,6 +27,13 @@ MODEL_IDENTITY: dict[str, object] = {
     "rms_epsilon": 0.00001,
 }
 
+_ATTENTION_PROJECTIONS = (
+    ("q_proj", 3072, 3072),
+    ("k_proj", 3072, 1024),
+    ("v_proj", 3072, 1024),
+    ("o_proj", 3072, 3072),
+)
+
 _DTYPE_INFO = {
     TensorProto.UINT8: ("uint8", 1),
     TensorProto.FLOAT16: ("float16", 2),
@@ -192,13 +199,8 @@ def required_initializer_roles() -> dict[str, dict[str, object]]:
         # The driver maps o_proj from Q_DIM to HIDDEN. Both are 3072 for
         # Phi-4-mini, but keeping both logical dimensions explicit prevents a
         # future name-only inference from changing the source contract.
-        for projection, k, n in (
-            ("attn.q_proj", 3072, 3072),
-            ("attn.k_proj", 3072, 1024),
-            ("attn.v_proj", 3072, 1024),
-            ("attn.o_proj", 3072, 3072),
-        ):
-            prefix = f"{base}.{projection}.MatMulNBits"
+        for projection, k, n in _ATTENTION_PROJECTIONS:
+            prefix = f"{base}.attn.{projection}.MatMulNBits"
             _merge_roles(roles, matmul_roles(prefix, k, n, 128))
         _merge_roles(roles, ssmlp_roles(layer))
 
@@ -227,6 +229,95 @@ def required_initializer_roles() -> dict[str, dict[str, object]]:
             f"{len(roles)} initializers, {len(weight_objects)} weight objects"
         )
     return roles
+
+
+def _matmul_weight_object(
+    prefix: str,
+    k: int,
+    n: int,
+    group_size: int,
+) -> dict[str, object]:
+    return {
+        "name": prefix,
+        "kind": "matmul",
+        "descriptor": {
+            "k": k,
+            "n": n,
+            "group_size": group_size,
+            "has_bias": False,
+        },
+        "roles": {
+            component: f"{prefix}.{component}"
+            for component in ("qweight", "scales", "qzeros")
+        },
+    }
+
+
+def _ssmlp_weight_object(layer: int) -> dict[str, object]:
+    base = f"model.layers.{layer}"
+    next_norm = (
+        "model.layers.32.final_norm_layernorm.weight"
+        if layer == 31
+        else f"model.layers.{layer + 1}.input_layernorm.weight"
+    )
+    roles = {
+        "norm0": f"{base}.post_attention_layernorm.weight",
+        "norm1": next_norm,
+    }
+    for projection in ("gate", "up", "down"):
+        prefix = f"{base}.mlp.{projection}_proj.MatMulNBits"
+        for component in ("qweight", "scales", "qzeros"):
+            roles[f"{projection}_{component}"] = f"{prefix}.{component}"
+    return {
+        "name": f"{base}.ssmlp",
+        "kind": "ssmlp",
+        "descriptor": {
+            "k": 3072,
+            "n": 8192,
+            "group_size": 128,
+        },
+        "roles": roles,
+    }
+
+
+def required_weight_objects() -> list[dict[str, object]]:
+    """Return the deterministic 161-object corelib construction plan."""
+    objects: list[dict[str, object]] = []
+    for layer in range(32):
+        base = f"model.layers.{layer}.attn"
+        for projection, k, n in _ATTENTION_PROJECTIONS:
+            objects.append(
+                _matmul_weight_object(
+                    f"{base}.{projection}.MatMulNBits",
+                    k,
+                    n,
+                    128,
+                )
+            )
+        objects.append(_ssmlp_weight_object(layer))
+    objects.append(
+        _matmul_weight_object(
+            "lm_head.MatMulNBits",
+            3072,
+            200064,
+            128,
+        )
+    )
+
+    names = [record["name"] for record in objects]
+    initializer_names = set(required_initializer_roles())
+    references = {
+        initializer_name
+        for record in objects
+        for initializer_name in record["roles"].values()
+    }
+    if (
+        len(objects) != 161
+        or len(names) != len(set(names))
+        or not references.issubset(initializer_names)
+    ):
+        raise RuntimeError("internal Phi-4 weight-object map mismatch")
+    return objects
 
 
 def _parse_u64(value: str, field: str, initializer: str) -> int:
@@ -442,11 +533,79 @@ def _initializer_record(
     return record
 
 
+def _validate_weight_objects(
+    weight_objects: list[dict[str, object]],
+    initializer_names: set[str],
+) -> None:
+    names: set[str] = set()
+    expected_roles = {
+        "matmul": {"qweight", "scales", "qzeros"},
+        "ssmlp": {
+            "norm0",
+            "norm1",
+            "gate_qweight",
+            "gate_scales",
+            "gate_qzeros",
+            "up_qweight",
+            "up_scales",
+            "up_qzeros",
+            "down_qweight",
+            "down_scales",
+            "down_qzeros",
+        },
+    }
+    expected_descriptor_keys = {
+        "matmul": {"k", "n", "group_size", "has_bias"},
+        "ssmlp": {"k", "n", "group_size"},
+    }
+
+    for record in weight_objects:
+        name = record.get("name")
+        kind = record.get("kind")
+        descriptor = record.get("descriptor")
+        roles = record.get("roles")
+        if not isinstance(name, str) or not name:
+            raise ValueError("weight object has an invalid name")
+        if name in names:
+            raise ValueError(f"duplicate weight object: {name}")
+        names.add(name)
+        if kind not in expected_roles:
+            raise ValueError(f"{name}: invalid weight object kind")
+        if (
+            not isinstance(descriptor, dict)
+            or set(descriptor) != expected_descriptor_keys[kind]
+        ):
+            raise ValueError(f"{name}: invalid weight object descriptor")
+        for field in ("k", "n", "group_size"):
+            value = descriptor[field]
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, int)
+                or value <= 0
+            ):
+                raise ValueError(f"{name}: invalid descriptor {field}")
+        if kind == "matmul" and descriptor["has_bias"] is not False:
+            raise ValueError(f"{name}: MatMul has_bias must be false")
+        if not isinstance(roles, dict) or set(roles) != expected_roles[kind]:
+            raise ValueError(f"{name}: invalid weight object role map")
+        if len(set(roles.values())) != len(roles):
+            raise ValueError(f"{name}: duplicate initializer role reference")
+        for initializer_name in roles.values():
+            if (
+                not isinstance(initializer_name, str)
+                or initializer_name not in initializer_names
+            ):
+                raise ValueError(
+                    f"{name}: unresolved initializer {initializer_name}"
+                )
+
+
 def _generate_manifest(
     model_dir: Path,
     output: Path,
     full_hash: bool,
     roles: dict[str, dict[str, object]],
+    weight_objects: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
     """Generate a manifest using an explicit role map.
 
@@ -582,6 +741,10 @@ def _generate_manifest(
             full_hash,
         )
 
+    emitted_weight_objects = (
+        [] if weight_objects is None else weight_objects
+    )
+    _validate_weight_objects(emitted_weight_objects, set(records))
     manifest: dict[str, object] = {
         "schema_version": SCHEMA_VERSION,
         "execution_backend": "corelib_aie4",
@@ -589,6 +752,7 @@ def _generate_manifest(
         "backend": {"max_seq": 4096},
         "files": files,
         "initializers": records,
+        "weight_objects": emitted_weight_objects,
     }
     serialized = json.dumps(
         manifest,
@@ -610,6 +774,7 @@ def generate_manifest(
         output,
         full_hash,
         required_initializer_roles(),
+        required_weight_objects(),
     )
 
 

@@ -59,7 +59,7 @@ clean:
 
 test: $(BUILD_DIR)/test_gemma4_12b
 	cp ../../model_list.json $(BUILD_DIR)/model_list.json
-	cd $(BUILD_DIR) && ./test_gemma4_12b --model gemma4-12b:12b -s 1 -t $(TYPE)
+	cd $(BUILD_DIR) && ./test_gemma4_12b --model gemma4-it:12b -s 1 -t $(TYPE)
 
 -include $(DEPS)
 .PHONY: all clean test

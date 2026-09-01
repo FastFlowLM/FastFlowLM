@@ -134,26 +134,23 @@
                     "chat-transcription"
                 ],
                 "footprint": 9.1
-            }
-        },
-        "gemma4-12b": {
+            },
             "12b": {
                 "name": "Gemma4-12B-IT-NPU2",
                 "url": "https://huggingface.co/FastFlowLM/Gemma4-12B-IT-NPU2",
                 "file_url": "https://huggingface.co/api/models/FastFlowLM/Gemma4-12B-IT-NPU2/tree/main",
                 "ms_url": "https://modelscope.cn/models/amd/Gemma4-12B-IT-NPU2",
                 "size": 12000000000,
-                "flm_min_version": "0.9.45",
+                "flm_min_version": "1.0.4",
                 "files": [
                     "config.json",
-                    "processor_config.json",
                     "model.q4nx",
                     "tokenizer.json",
                     "tokenizer_config.json",
                     "chat_template.jinja"
                 ],
-                "vlm": false,
-                "asr": false,
+                "vlm": true,
+                "asr": true,
                 "default_context_length": 32768,
                 "max_prefill_len": 4096,
                 "details": {
@@ -164,8 +161,11 @@
                     "quantization_level": "Q4_1"
                 },
                 "label": [
+                    "audio",
+                    "vision",
                     "reasoning",
-                    "tool-calling"
+                    "tool-calling",
+                    "chat-transcription"
                 ],
                 "footprint": 10.5
             }
@@ -194,7 +194,7 @@
                     "family": "qwen3.5",
                     "think": true,
                     "parameter_size": "0.8B",
-                    "quantization_level": "Q4_1"
+                    "quantization_level": "Q4_K"
                 },
                 "label": [
                     "vision",
@@ -225,7 +225,7 @@
                     "family": "qwen3.5",
                     "think": true,
                     "parameter_size": "2B",
-                    "quantization_level": "Q4_1"
+                    "quantization_level": "Q4_K"
                 },
                 "label": [
                     "vision",
@@ -257,7 +257,7 @@
                     "family": "qwen3.5",
                     "think": true,
                     "parameter_size": "4B",
-                    "quantization_level": "Q4_1"
+                    "quantization_level": "Q4_K"
                 },
                 "label": [
                     "vision",
@@ -289,7 +289,7 @@
                     "family": "qwen3.5",
                     "think": true,
                     "parameter_size": "9B",
-                    "quantization_level": "Q4_1"
+                    "quantization_level": "Q4_K"
                 },
                 "label": [
                     "vision",
@@ -324,7 +324,7 @@
                     "family": "qwen3.6-moe",
                     "think": true,
                     "parameter_size": "35B",
-                    "quantization_level": "Q4_K_S"
+                    "quantization_level": "Q4_K"
                 },
                 "label": [
                     "vision",

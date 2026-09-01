@@ -22,4 +22,5 @@ copy_if_different /scratch/$USER/Projects/FastFlowLM_IRON/FLM_Xclbin/Gemma4_12B_
 copy_if_different /scratch/$USER/Projects/FastFlowLM_IRON/FLM_Xclbin/Gemma4_12B_QAT/dequant_mm/build/xclbins/dequant_mm.xclbin ../../xclbins/Gemma4-12B-IT-NPU2
 copy_if_different /scratch/michyu/Projects/FastFlowLM_IRON/FLM_Xclbin/Gemma4_12B_QAT/attention_DH_512_prefill/build/xclbins/attn_global.xclbin ../../xclbins/Gemma4-12B-IT-NPU2/
 copy_if_different /scratch/michyu/Projects/FastFlowLM_IRON/FLM_Xclbin/Gemma4_12B_QAT/attention_DH_256_prefill/build/xclbins/attn_sliding.xclbin ../../xclbins/Gemma4-12B-IT-NPU2/
+copy_if_different /scratch/michyu/Projects/FastFlowLM_IRON/FLM_Xclbin/Gemma4_12B_QAT/attention_global_image/build/xclbins/attn_global_image.xclbin ../../xclbins/Gemma4-12B-IT-NPU2/
 copy_if_different /scratch/michyu/Projects/FastFlowLM_IRON/FLM_Xclbin/Gemma4_12B_QAT/audio_image_mm/build/xclbins/audio_image_mm.xclbin ../../xclbins/Gemma4-12B-IT-NPU2/

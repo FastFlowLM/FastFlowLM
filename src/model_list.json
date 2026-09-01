@@ -159,7 +159,7 @@
                     "family": "gemma4-12b",
                     "think": true,
                     "parameter_size": "12B",
-                    "quantization_level": "Q4_1"
+                    "quantization_level": "Q4_0"
                 },
                 "label": [
                     "audio",

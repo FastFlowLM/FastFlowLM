@@ -37,6 +37,11 @@ private:
         size_t rendered_tokens,
         std::optional<int> requested_max_new_tokens) const;
     void clear_after_corelib_error();
+    std::string generate_aie4(
+        chat_meta_info_t& meta_info,
+        int length_limit,
+        std::ostream& os,
+        std::function<bool()> is_cancelled);
     const flm::phi4::Phi4Aie4Metrics& aie4_metrics() const;
 
     bool uses_corelib_aie4_ = false;

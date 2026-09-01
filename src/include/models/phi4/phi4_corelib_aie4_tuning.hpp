@@ -21,6 +21,9 @@ inline constexpr std::uint32_t kContinuationAppendThreshold = 0;
 inline constexpr ContinuationRoute SelectContinuationRoute(
     std::size_t suffix_tokens,
     ForcedContinuationRoute forced) noexcept {
+    if (suffix_tokens == 0) {
+        return ContinuationRoute::Reprefill;
+    }
     switch (forced) {
         case ForcedContinuationRoute::Append:
             return ContinuationRoute::Append;

@@ -1,5 +1,3 @@
-#include "test_support.hpp"
-
 #include <AutoModel/modeling_phi4.hpp>
 #include <models/phi4/phi4_corelib_aie4_tuning.hpp>
 
@@ -8,10 +6,14 @@
 #include <models/phi4/phi4_corelib_aie4.hpp>
 #endif
 
+#define FLM_PHI4_FRONTEND_TEST_SUPPORT
+#include "test_support.hpp"
+
 #include <windows.h>
 
 #include <algorithm>
 #include <cstdint>
+#include <deque>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -29,6 +31,7 @@ namespace {
 
 std::vector<int> g_encoded_tokens;
 int g_sample_token = 7;
+std::deque<int> g_sample_tokens;
 int g_sampler_reset_count = 0;
 int g_sampler_sample_count = 0;
 
@@ -126,110 +129,6 @@ private:
     std::filesystem::path path_;
 };
 
-class FakeEngine final : public causal_lm {
-public:
-    explicit FakeEngine(std::uint32_t max_length)
-        : max_length(max_length) {}
-
-    buffer<bf16> forward(int id) override {
-#if defined(FLM_ENABLE_CORELIB_AIE4)
-        if (fail_next_forward) {
-            fail_next_forward = false;
-            throw flm::corelib::CorelibError(
-                ryzenai_corelib_status_failure,
-                "fake_forward",
-                "injected pre-submit forward failure",
-                "failure");
-        }
-#endif
-        forward_tokens.push_back(id);
-        ++position;
-        return MakeLogits();
-    }
-
-    buffer<bf16> prefill(
-        std::vector<int>& ids,
-        void*) override {
-#if defined(FLM_ENABLE_CORELIB_AIE4)
-        if (fail_next_prefill) {
-            fail_next_prefill = false;
-            throw flm::corelib::CorelibError(
-                ryzenai_corelib_status_failure,
-                "fake_prefill",
-                "injected pre-submit prefill failure",
-                "failure");
-        }
-#endif
-        prefill_calls.push_back(ids);
-        position += static_cast<int>(ids.size());
-        return MakeLogits();
-    }
-
-    void set_context_length(int length) override {
-        position = length;
-    }
-
-    void load_weights(Q4NX&) override {}
-
-    void update_max_length(std::uint32_t requested) override {
-        if (requested == 0 || requested > 4096) {
-            throw std::out_of_range(
-                "fake AIE4 maximum length must be in 1..4096");
-        }
-        if (requested < static_cast<std::uint32_t>(position)) {
-            throw std::out_of_range(
-                "fake AIE4 maximum length cannot be below current");
-        }
-        max_length = requested;
-    }
-
-    void clear_context() override {
-        ++clear_count;
-        position = 0;
-        checkpoint_position.reset();
-    }
-
-    buffer<bf16> get_k_cache(int, int) override {
-        return MakeLogits();
-    }
-
-    buffer<bf16> get_v_cache(int, int) override {
-        return MakeLogits();
-    }
-
-    int get_current_context_length() override {
-        return position;
-    }
-
-    int checkpoint() override {
-        checkpoint_position = position;
-        return position;
-    }
-
-    int restore() override {
-        if (!checkpoint_position.has_value()) {
-            throw std::logic_error("fake engine has no checkpoint");
-        }
-        position = *checkpoint_position;
-        return position;
-    }
-
-    static buffer<bf16> MakeLogits() {
-        return buffer<bf16>(1);
-    }
-
-    std::uint32_t max_length;
-    int position = 0;
-    int clear_count = 0;
-    std::optional<int> checkpoint_position;
-    std::vector<std::vector<int>> prefill_calls;
-    std::vector<int> forward_tokens;
-#if defined(FLM_ENABLE_CORELIB_AIE4)
-    bool fail_next_prefill = false;
-    bool fail_next_forward = false;
-#endif
-};
-
 struct FactoryState {
     int calls = 0;
     bool last_was_corelib = false;
@@ -265,6 +164,10 @@ lm_uniform_input_t Prompt(
     input.prompt = "frontend-test";
     input.requested_max_new_tokens = requested;
     return input;
+}
+
+void SetSamples(std::initializer_list<int> samples) {
+    g_sample_tokens.assign(samples.begin(), samples.end());
 }
 
 template <class Function>
@@ -339,8 +242,14 @@ void Sampler::reset_penalties() {
 int Sampler::sample(buffer<bf16>&) {
     ++g_sampler_sample_count;
     ++total_tokens;
-    token_history.push_back(g_sample_token);
-    return g_sample_token;
+    const int sampled_token = g_sample_tokens.empty()
+                                  ? g_sample_token
+                                  : g_sample_tokens.front();
+    if (!g_sample_tokens.empty()) {
+        g_sample_tokens.pop_front();
+    }
+    token_history.push_back(sampled_token);
+    return sampled_token;
 }
 
 namespace utils {
@@ -409,6 +318,23 @@ public:
     static const std::vector<int>& History(const Phi4& model) {
         return model.token_history;
     }
+
+    static int LastToken(const Phi4& model) {
+        return model.last_token;
+    }
+
+    static bool SharedInsert(
+        Phi4& model,
+        chat_meta_info_t& meta,
+        std::vector<int>& tokens,
+        void* payload) {
+        return model._shared_insert(
+            meta,
+            tokens,
+            [] { return false; },
+            payload,
+            0);
+    }
 };
 
 }  // namespace flm::phi4::testing
@@ -451,11 +377,16 @@ void TestContinuationSelector() {
         SelectContinuationRoute(
             0,
             ForcedContinuationRoute::Automatic) ==
-        ContinuationRoute::Append);
+        ContinuationRoute::Reprefill);
     CHECK(
         SelectContinuationRoute(
             1,
             ForcedContinuationRoute::Automatic) ==
+        ContinuationRoute::Reprefill);
+    CHECK(
+        SelectContinuationRoute(
+            0,
+            ForcedContinuationRoute::Append) ==
         ContinuationRoute::Reprefill);
     CHECK(
         SelectContinuationRoute(
@@ -507,6 +438,35 @@ void TestLegacyRoutingAndUnknownBackend() {
         },
         "invented_backend");
     CHECK(g_factory.calls == 1);
+}
+
+void TestLegacyExactRepeatPreservesEmptyPrefillPayload() {
+    TempModelPackage package({200020});
+    FactoryScope factory;
+    auto model = Load(package, ModelInfo(64));
+    FakeEngine* engine = g_factory.engine;
+
+    int first_payload = 1;
+    int repeated_payload = 2;
+    auto meta = Meta();
+    std::vector<int> first{1, 2};
+    CHECK(Phi4FrontendTestAccess::SharedInsert(
+        *model,
+        meta,
+        first,
+        &first_payload));
+    const int samples_before_repeat = g_sampler_sample_count;
+
+    std::vector<int> repeated{1, 2};
+    CHECK(Phi4FrontendTestAccess::SharedInsert(
+        *model,
+        meta,
+        repeated,
+        &repeated_payload));
+    CHECK(engine->prefill_calls.size() == 2);
+    CHECK(engine->prefill_calls.back().empty());
+    CHECK(engine->prefill_payloads.back() == &repeated_payload);
+    CHECK(g_sampler_sample_count == samples_before_repeat + 1);
 }
 
 #if !defined(FLM_ENABLE_CORELIB_AIE4)
@@ -627,6 +587,34 @@ void TestInitialAndAtomicCaps() {
     CHECK(engine->position == 10);
 }
 
+void TestEnginePositionIsAuthoritativeForCapUpdate() {
+    TempModelPackage package;
+    FactoryScope factory;
+    auto model = Load(
+        package,
+        ModelInfo(64, "corelib_aie4"),
+        -1,
+        false,
+        nullptr);
+    FakeEngine* engine = g_factory.engine;
+
+    g_encoded_tokens.assign(10, 11);
+    auto meta = Meta();
+    auto input = Prompt();
+    CHECK(model->insert(meta, input));
+    engine->position = 11;
+
+    model->set_max_length(11);
+    CHECK(model->get_max_length() == 11);
+    CHECK(engine->max_length == 11);
+
+    CheckThrowsContains(
+        [&] { model->set_max_length(10); },
+        "engine position");
+    CHECK(model->get_max_length() == 11);
+    CHECK(engine->max_length == 11);
+}
+
 void TestRenderedCapacityIsAtomic() {
     TempModelPackage package;
     FactoryScope factory;
@@ -674,6 +662,222 @@ void TestRenderedCapacityIsAtomic() {
         engine->prefill_calls.size() ==
         calls_before_append_rejection);
     CHECK(Phi4FrontendTestAccess::History(*model).size() == 500);
+}
+
+void CheckAligned(
+    Phi4& model,
+    const FakeEngine& engine,
+    const std::vector<int>& expected_history) {
+    CHECK(Phi4FrontendTestAccess::History(model) == expected_history);
+    CHECK(
+        model.get_current_context_length() ==
+        static_cast<int>(expected_history.size()));
+    CHECK(
+        engine.position ==
+        static_cast<int>(expected_history.size()));
+}
+
+void TestDefaultChatLimitWithoutExplicitRequestIsAdmitted() {
+    TempModelPackage package;
+    FactoryScope factory;
+    auto model = Load(
+        package,
+        ModelInfo(4096, "corelib_aie4"),
+        -1,
+        false,
+        nullptr);
+
+    g_encoded_tokens = {41};
+    SetSamples({200020});
+    auto meta = Meta();
+    auto input = Prompt();
+    std::ostringstream output;
+    CHECK(
+        model->generate_with_prompt(
+            meta,
+            input,
+            4096,
+            output)
+            .empty());
+    CHECK(!input.requested_max_new_tokens.has_value());
+    CheckAligned(*model, *g_factory.engine, {41, 200020});
+}
+
+void TestLengthStopCommitsTokensBeforeForcedAppend() {
+    TempModelPackage package;
+    FactoryScope factory;
+    auto model = Load(
+        package,
+        ModelInfo(64, "corelib_aie4"),
+        -1,
+        false,
+        nullptr);
+    FakeEngine* engine = g_factory.engine;
+
+    g_encoded_tokens = {1, 2};
+    SetSamples({101, 102});
+    auto meta = Meta();
+    auto input = Prompt();
+    CHECK(model->insert(meta, input));
+    std::ostringstream output;
+    CHECK(
+        model->generate(meta, 2, output) ==
+        "token-101token-102");
+    CHECK(meta.generated_tokens == 2);
+    CHECK(meta.stop_reason == MAX_LENGTH_REACHED);
+    CheckAligned(*model, *engine, {1, 2, 101, 102});
+
+    model->set_max_length(16);
+    CHECK(model->get_max_length() == 16);
+    CHECK(engine->max_length == 16);
+
+    Phi4FrontendTestAccess::ForceRoute(
+        *model,
+        ForcedContinuationRoute::Append);
+    engine->prefill_calls.clear();
+    g_encoded_tokens = {1, 2, 101, 102, 3};
+    SetSamples({103});
+    auto append_meta = Meta();
+    CHECK(model->insert(append_meta, input));
+    CHECK(engine->prefill_calls == std::vector<std::vector<int>>({{3}}));
+    CheckAligned(*model, *engine, {1, 2, 101, 102, 3});
+}
+
+void TestEosStopCommitsTokenBeforeCapUpdateAndAppend() {
+    TempModelPackage package;
+    FactoryScope factory;
+    auto model = Load(
+        package,
+        ModelInfo(64, "corelib_aie4"),
+        -1,
+        false,
+        nullptr);
+    FakeEngine* engine = g_factory.engine;
+
+    g_encoded_tokens = {10};
+    SetSamples({101, 200020});
+    auto meta = Meta();
+    auto input = Prompt();
+    CHECK(model->insert(meta, input));
+    std::ostringstream output;
+    CHECK(model->generate(meta, 8, output) == "token-101");
+    CHECK(meta.generated_tokens == 2);
+    CHECK(meta.stop_reason == EOT_DETECTED);
+    CheckAligned(*model, *engine, {10, 101, 200020});
+
+    model->set_max_length(8);
+    CHECK(model->get_max_length() == 8);
+    CHECK(engine->max_length == 8);
+
+    Phi4FrontendTestAccess::ForceRoute(
+        *model,
+        ForcedContinuationRoute::Append);
+    engine->prefill_calls.clear();
+    g_encoded_tokens = {10, 101, 200020, 11};
+    SetSamples({102});
+    auto append_meta = Meta();
+    CHECK(model->insert(append_meta, input));
+    CHECK(engine->prefill_calls == std::vector<std::vector<int>>({{11}}));
+    CheckAligned(*model, *engine, {10, 101, 200020, 11});
+}
+
+void TestActiveCapNeverEmitsUncommittedToken() {
+    TempModelPackage package;
+    FactoryScope factory;
+    auto model = Load(
+        package,
+        ModelInfo(3, "corelib_aie4"),
+        -1,
+        false,
+        nullptr);
+    FakeEngine* engine = g_factory.engine;
+
+    g_encoded_tokens = {1, 2};
+    SetSamples({101, 102});
+    auto meta = Meta();
+    auto input = Prompt();
+    CHECK(model->insert(meta, input));
+    std::ostringstream output;
+    CHECK(model->generate(meta, 8, output) == "token-101");
+    CHECK(meta.generated_tokens == 1);
+    CHECK(meta.stop_reason == MAX_LENGTH_REACHED);
+    CHECK(engine->forward_tokens == std::vector<int>({101}));
+    CHECK(g_sample_tokens.size() == 1);
+    CheckAligned(*model, *engine, {1, 2, 101});
+}
+
+void TestCancellationLeavesOnlyCommittedTokensVisible() {
+    TempModelPackage package;
+    FactoryScope factory;
+    auto model = Load(
+        package,
+        ModelInfo(64, "corelib_aie4"),
+        -1,
+        false,
+        nullptr);
+    FakeEngine* engine = g_factory.engine;
+
+    g_encoded_tokens = {1, 2};
+    SetSamples({101, 102});
+    auto meta = Meta();
+    auto input = Prompt();
+    CHECK(model->insert(meta, input));
+    int cancellation_checks = 0;
+    std::ostringstream output;
+    CHECK(
+        model->generate(
+            meta,
+            8,
+            output,
+            [&] { return cancellation_checks++ == 1; }) ==
+        "token-101");
+    CHECK(meta.generated_tokens == 1);
+    CHECK(meta.stop_reason == CANCEL_DETECTED);
+    CHECK(engine->forward_tokens == std::vector<int>({101}));
+    CheckAligned(*model, *engine, {1, 2, 101});
+}
+
+void TestExactRepeatReprefillsAndSamplesFreshToken() {
+    TempModelPackage package;
+    FactoryScope factory;
+    auto model = Load(
+        package,
+        ModelInfo(64, "corelib_aie4"),
+        -1,
+        false,
+        nullptr);
+    FakeEngine* engine = g_factory.engine;
+
+    g_encoded_tokens = {1};
+    SetSamples({101});
+    auto first_meta = Meta();
+    auto input = Prompt();
+    CHECK(model->insert(first_meta, input));
+    std::ostringstream first_output;
+    CHECK(model->generate(first_meta, 1, first_output) == "token-101");
+    CheckAligned(*model, *engine, {1, 101});
+
+    const int clear_before = engine->clear_count;
+    engine->prefill_calls.clear();
+    Phi4FrontendTestAccess::ForceRoute(
+        *model,
+        ForcedContinuationRoute::Append);
+    g_encoded_tokens = {1, 101};
+    SetSamples({202});
+    auto repeated_meta = Meta();
+    CHECK(model->insert(repeated_meta, input));
+    CHECK(engine->clear_count == clear_before + 1);
+    CHECK(
+        engine->prefill_calls ==
+        std::vector<std::vector<int>>({{1, 101}}));
+    std::ostringstream repeated_output;
+    CHECK(
+        model->generate(repeated_meta, 1, repeated_output) ==
+        "token-202");
+    CHECK(
+        engine->forward_tokens ==
+        std::vector<int>({101, 202}));
+    CheckAligned(*model, *engine, {1, 101, 202});
 }
 
 void TestForcedAppendAndCancellationAlignment() {
@@ -789,7 +993,8 @@ void TestEosValidationAndFrontendStop() {
     CHECK(model->insert(meta, input));
     std::ostringstream output;
     CHECK(model->generate(meta, 8, output).empty());
-    CHECK(engine->forward_tokens.empty());
+    CHECK(engine->forward_tokens == std::vector<int>({200020}));
+    CheckAligned(*model, *engine, {10, 11, 200020});
     g_sample_token = 7;
 }
 
@@ -840,6 +1045,90 @@ void TestRecoverableFailuresClearSession() {
     CHECK(!engine->checkpoint_position.has_value());
     CHECK(Phi4FrontendTestAccess::History(*model).empty());
     CHECK(g_sampler_reset_count > resets_before_generate);
+}
+
+void CheckPartialAppendFailureClearsSession(
+    FakeEngine::FailureKind failure) {
+    TempModelPackage package;
+    FactoryScope factory;
+    auto model = Load(
+        package,
+        ModelInfo(64, "corelib_aie4"),
+        -1,
+        false,
+        nullptr);
+    FakeEngine* engine = g_factory.engine;
+
+    g_encoded_tokens = {1};
+    SetSamples({101});
+    auto meta = Meta();
+    auto input = Prompt();
+    CHECK(model->insert(meta, input));
+    engine->checkpoint();
+    Phi4FrontendTestAccess::ForceRoute(
+        *model,
+        ForcedContinuationRoute::Append);
+    engine->prefill_failure = failure;
+    engine->successful_prefills_before_failure = 1;
+    const int resets_before = g_sampler_reset_count;
+    g_encoded_tokens = {1, 2, 3, 4};
+
+    CheckRequestError(
+        [&] { (void)model->insert(meta, input); },
+        500,
+        true,
+        "current conversation was cleared");
+    CHECK(engine->prefill_calls.back() == std::vector<int>({2}));
+    CHECK(engine->position == 0);
+    CHECK(!engine->checkpoint_position.has_value());
+    CHECK(model->get_current_context_length() == 0);
+    CHECK(Phi4FrontendTestAccess::History(*model).empty());
+    CHECK(Phi4FrontendTestAccess::LastToken(*model) == -1);
+    CHECK(g_sampler_reset_count > resets_before);
+}
+
+void TestPartialAppendStandardFailureClearsCommittedPrefix() {
+    CheckPartialAppendFailureClearsSession(
+        FakeEngine::FailureKind::Standard);
+}
+
+void TestPartialAppendUnknownFailureClearsCommittedPrefix() {
+    CheckPartialAppendFailureClearsSession(
+        FakeEngine::FailureKind::Unknown);
+}
+
+void TestStandardGenerateFailureClearsSession() {
+    TempModelPackage package;
+    FactoryScope factory;
+    auto model = Load(
+        package,
+        ModelInfo(64, "corelib_aie4"),
+        -1,
+        false,
+        nullptr);
+    FakeEngine* engine = g_factory.engine;
+
+    g_encoded_tokens = {31, 32};
+    SetSamples({101});
+    auto meta = Meta();
+    auto input = Prompt();
+    CHECK(model->insert(meta, input));
+    engine->checkpoint();
+    engine->forward_failure = FakeEngine::FailureKind::Standard;
+    const int resets_before = g_sampler_reset_count;
+    std::ostringstream output;
+
+    CheckRequestError(
+        [&] { (void)model->generate(meta, 8, output); },
+        500,
+        true,
+        "current conversation was cleared");
+    CHECK(engine->position == 0);
+    CHECK(!engine->checkpoint_position.has_value());
+    CHECK(model->get_current_context_length() == 0);
+    CHECK(Phi4FrontendTestAccess::History(*model).empty());
+    CHECK(Phi4FrontendTestAccess::LastToken(*model) == -1);
+    CHECK(g_sampler_reset_count > resets_before);
 }
 
 void TestProfileSplit() {
@@ -896,15 +1185,26 @@ int main() {
     try {
         TestContinuationSelector();
         TestLegacyRoutingAndUnknownBackend();
+        TestLegacyExactRepeatPreservesEmptyPrefillPayload();
 #if defined(FLM_ENABLE_CORELIB_AIE4)
         ConfigureFakeCorelibDll();
         TestCorelibRoutingAndPreemption();
         TestInitialAndAtomicCaps();
+        TestEnginePositionIsAuthoritativeForCapUpdate();
         TestRenderedCapacityIsAtomic();
+        TestDefaultChatLimitWithoutExplicitRequestIsAdmitted();
+        TestLengthStopCommitsTokensBeforeForcedAppend();
+        TestEosStopCommitsTokenBeforeCapUpdateAndAppend();
+        TestActiveCapNeverEmitsUncommittedToken();
+        TestCancellationLeavesOnlyCommittedTokensVisible();
+        TestExactRepeatReprefillsAndSamplesFreshToken();
         TestForcedAppendAndCancellationAlignment();
         TestForcedAndAutomaticReprefill();
         TestEosValidationAndFrontendStop();
         TestRecoverableFailuresClearSession();
+        TestPartialAppendStandardFailureClearsCommittedPrefix();
+        TestPartialAppendUnknownFailureClearsCommittedPrefix();
+        TestStandardGenerateFailureClearsSession();
         TestProfileSplit();
         Phi4FrontendTestAccess::RemoveFactory();
         flm::corelib::CorelibRuntime::ShutdownProcess();

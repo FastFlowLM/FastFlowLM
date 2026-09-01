@@ -350,6 +350,97 @@ void Phi4::validate_aie4_capacity(
 void Phi4::clear_after_corelib_error() {
     AutoModel::clear_context();
 }
+
+std::string Phi4::generate_aie4(
+    chat_meta_info_t& meta_info,
+    int length_limit,
+    std::ostream& os,
+    std::function<bool()> is_cancelled) {
+    std::string result;
+    stop_reason_t reason = EOT_DETECTED;
+    int generated_this_call = 0;
+
+    this->profiler_list[DECODING_TIME].reset();
+    this->profiler_list[TKOEN_DECODE_TIME].reset();
+
+    if (this->last_token == -1) {
+        throw std::logic_error(
+            "Phi-4 AIE4 generation has no sampled token");
+    }
+
+    while (
+        this->last_token != -1 &&
+        this->total_tokens < this->MAX_L) {
+        if (is_cancelled()) {
+            reason = CANCEL_DETECTED;
+            buffer_.clear();
+            current_mode_ = StreamEventType::CONTENT;
+            tool_name_.clear();
+            is_in_tool_block_ = false;
+            break;
+        }
+
+        const int committed_token = this->last_token;
+        this->profiler_list[DECODING_TIME].start();
+        buffer<bf16> logits =
+            this->lm_engine->forward(committed_token);
+        this->profiler_list[DECODING_TIME].stop(1);
+
+        this->token_history.push_back(committed_token);
+        ++this->total_tokens;
+        ++meta_info.generated_tokens;
+        ++generated_this_call;
+
+        this->profiler_list[TKOEN_DECODE_TIME].start();
+        if (this->is_normal_token(committed_token)) {
+            const std::string token_str =
+                this->tokenizer->run_time_decoder(committed_token);
+            os << token_str << std::flush;
+            result += token_str;
+        }
+        this->profiler_list[TKOEN_DECODE_TIME].stop(1);
+
+        if (this->is_eos(committed_token)) {
+            this->last_token = -1;
+            break;
+        }
+        if (
+            length_limit > 0 &&
+            generated_this_call >= length_limit) {
+            this->last_token = -1;
+            reason = MAX_LENGTH_REACHED;
+            break;
+        }
+        if (this->total_tokens >= this->MAX_L) {
+            this->last_token = -1;
+            reason = MAX_LENGTH_REACHED;
+            break;
+        }
+
+        this->profiler_list[SAMPLING_TIME].start();
+        this->last_token = this->sampler->sample(logits);
+        this->profiler_list[SAMPLING_TIME].stop(1);
+    }
+
+    if (this->total_tokens >= this->MAX_L) {
+        this->last_token = -1;
+        reason = MAX_LENGTH_REACHED;
+        header_print(
+            "WARNING",
+            "Max length reached, stopping generation...");
+    }
+    meta_info.decoding_duration =
+        static_cast<uint64_t>(
+            time_utils::cast_to_us(
+                this->profiler_list[DECODING_TIME]
+                    .get_total_time())
+                .first) *
+        1e3;
+    meta_info.stop_reason = reason;
+    std::cout << std::endl;
+    header_print("FLM", "Model RAW Output: \n" + result);
+    return result;
+}
 #endif
 
 bool Phi4::insert(chat_meta_info_t& meta_info, lm_uniform_input_t& input, std::function<bool()> is_cancelled) {
@@ -377,6 +468,7 @@ bool Phi4::insert(chat_meta_info_t& meta_info, lm_uniform_input_t& input, std::f
         this->validate_aie4_capacity(
             tokens.size(),
             input.requested_max_new_tokens);
+        meta_info.stop_reason = EOT_DETECTED;
 
         const size_t history_size = this->token_history.size();
         const size_t matched = this->_matching_prefix_length(tokens);
@@ -405,7 +497,23 @@ bool Phi4::insert(chat_meta_info_t& meta_info, lm_uniform_input_t& input, std::f
                 nullptr,
                 0,
                 action);
+        } catch (const ModelRequestError&) {
+            throw;
         } catch (const flm::corelib::CorelibError&) {
+            this->clear_after_corelib_error();
+            throw ModelRequestError(
+                500,
+                true,
+                "AIE4 inference failed before submission; the "
+                "current conversation was cleared.");
+        } catch (const std::exception&) {
+            this->clear_after_corelib_error();
+            throw ModelRequestError(
+                500,
+                true,
+                "AIE4 inference failed before submission; the "
+                "current conversation was cleared.");
+        } catch (...) {
             this->clear_after_corelib_error();
             throw ModelRequestError(
                 500,
@@ -444,12 +552,28 @@ std::string Phi4::generate(chat_meta_info_t& meta_info, int length_limit, std::o
 #if defined(FLM_ENABLE_CORELIB_AIE4)
     if (this->uses_corelib_aie4_) {
         try {
-            return this->_shared_generate(
+            return this->generate_aie4(
                 meta_info,
                 length_limit,
                 os,
                 std::move(is_cancelled));
+        } catch (const ModelRequestError&) {
+            throw;
         } catch (const flm::corelib::CorelibError&) {
+            this->clear_after_corelib_error();
+            throw ModelRequestError(
+                500,
+                true,
+                "AIE4 inference failed before submission; the "
+                "current conversation was cleared.");
+        } catch (const std::exception&) {
+            this->clear_after_corelib_error();
+            throw ModelRequestError(
+                500,
+                true,
+                "AIE4 inference failed before submission; the "
+                "current conversation was cleared.");
+        } catch (...) {
             this->clear_after_corelib_error();
             throw ModelRequestError(
                 500,
@@ -467,24 +591,9 @@ std::string Phi4::generate(chat_meta_info_t& meta_info, int length_limit, std::o
 }
 
 std::string Phi4::generate_with_prompt(chat_meta_info_t& meta_info, lm_uniform_input_t& input, int length_limit, std::ostream& os) {
-    const std::optional<int> caller_limit =
-        input.requested_max_new_tokens;
-    if (
-        !input.requested_max_new_tokens.has_value() &&
-        length_limit >= 0) {
-        input.requested_max_new_tokens = length_limit;
+    if (!this->insert(meta_info, input)) {
+        return "";
     }
-
-    try {
-        if (!this->insert(meta_info, input)) {
-            input.requested_max_new_tokens = caller_limit;
-            return "";
-        }
-    } catch (...) {
-        input.requested_max_new_tokens = caller_limit;
-        throw;
-    }
-    input.requested_max_new_tokens = caller_limit;
     return this->generate(meta_info, length_limit, os);
 }
 
@@ -497,21 +606,14 @@ void Phi4::set_max_length(unsigned int requested_max_length) {
             throw std::out_of_range(
                 "Phi-4 AIE4 maximum length must be in 1..4096");
         }
-        const int frontend_position =
-            AutoModel::get_current_context_length();
         const int engine_position =
             this->lm_engine->get_current_context_length();
-        if (frontend_position != engine_position) {
-            throw std::logic_error(
-                "Phi-4 AIE4 frontend and engine context positions "
-                "are inconsistent");
-        }
         if (
             requested_max_length <
-            static_cast<unsigned int>(frontend_position)) {
+            static_cast<unsigned int>(engine_position)) {
             throw std::out_of_range(
                 "Phi-4 AIE4 maximum length cannot be below the "
-                "current logical position");
+                "current engine position");
         }
 
         this->lm_engine->update_max_length(requested_max_length);

@@ -248,12 +248,6 @@ bool AutoModel::_shared_insert(
         return false;
     }
 
-    if (tokens.empty()) {
-        meta_info.prefill_duration = 0;
-        meta_info.prompt_tokens = 0;
-        return this->last_token != -1;
-    }
-
     buffer<bf16> y;
     auto prefill_start_time = this->profiler_list[PREFILL_TIME].start();
 

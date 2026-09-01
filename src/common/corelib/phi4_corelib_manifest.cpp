@@ -430,8 +430,23 @@ std::set<std::string> JsonKeys(const json& value) {
     return keys;
 }
 
+std::string ComponentContext(
+    std::string_view object_name,
+    std::string_view role_name) {
+    return std::string(object_name) + "." + std::string(role_name);
+}
+
+std::string ComponentContext(
+    std::string_view object_name,
+    std::string_view role_name,
+    std::string_view initializer_name) {
+    return ComponentContext(object_name, role_name) + " (" +
+           std::string(initializer_name) + ")";
+}
+
 void ValidateQuantizedProjection(
     const Phi4Package& package,
+    std::string_view object_name,
     const std::map<std::string, std::string, std::less<>>& semantic_roles,
     const std::map<std::string, std::string>& components,
     std::string_view role_prefix,
@@ -454,13 +469,17 @@ void ValidateQuantizedProjection(
             std::string(component_prefix) + std::string(component);
         const auto found = components.find(role_name);
         if (found == components.end()) {
-            Throw(role_prefix, "is missing a component role");
+            Throw(
+                ComponentContext(object_name, role_name),
+                "is missing a component role");
         }
         const auto& view = package.Require(found->second);
+        const std::string context =
+            ComponentContext(object_name, role_name, found->second);
         if (view.dtype != dtype) {
-            Throw(role_name, "has an invalid dtype");
+            Throw(context, "has an invalid dtype");
         }
-        RequireShape(view, shape, role_name);
+        RequireShape(view, shape, context);
         RequireSemanticRole(
             semantic_roles,
             found->second,
@@ -477,11 +496,17 @@ void ValidateQuantizedProjection(
         std::string(component_prefix) + "scales";
     const auto scales_component = components.find(scales_name);
     if (scales_component == components.end()) {
-        Throw(role_prefix, "is missing a scales role");
+        Throw(
+            ComponentContext(object_name, scales_name),
+            "is missing a scales role");
     }
     const auto& scales = package.Require(scales_component->second);
-    RequireFloating(scales, scales_name);
-    RequireShape(scales, {n, groups}, scales_name);
+    const std::string scales_context = ComponentContext(
+        object_name,
+        scales_name,
+        scales_component->second);
+    RequireFloating(scales, scales_context);
+    RequireShape(scales, {n, groups}, scales_context);
     RequireSemanticRole(
         semantic_roles,
         scales_component->second,
@@ -1081,6 +1106,13 @@ Phi4Package Phi4Package::Load(
             kind == WeightObjectKind::MatMul
                 ? MatMulRoleNames()
                 : SsMlpRoleNames();
+        for (const auto& role : expected_roles) {
+            if (!role_map.contains(role)) {
+                Throw(
+                    ComponentContext(name, role),
+                    "is missing a component role");
+            }
+        }
         if (JsonKeys(role_map) != expected_roles) {
             Throw(name, "invalid weight object role map");
         }
@@ -1110,6 +1142,7 @@ Phi4Package Phi4Package::Load(
         if (kind == WeightObjectKind::MatMul) {
             ValidateQuantizedProjection(
                 package,
+                name,
                 semantic_roles,
                 components,
                 "matmul",
@@ -1124,8 +1157,12 @@ Phi4Package Phi4Package::Load(
                     components.find(std::string(role));
                 const auto& view =
                     package.Require(component->second);
-                RequireFloating(view, role);
-                RequireShape(view, {kHidden}, role);
+                const std::string context = ComponentContext(
+                    name,
+                    role,
+                    component->second);
+                RequireFloating(view, context);
+                RequireShape(view, {kHidden}, context);
                 RequireSemanticRole(
                     semantic_roles,
                     component->second,
@@ -1135,6 +1172,7 @@ Phi4Package Phi4Package::Load(
             validate_norm("norm1", "ssmlp.norm1");
             ValidateQuantizedProjection(
                 package,
+                name,
                 semantic_roles,
                 components,
                 "ssmlp.gate",
@@ -1143,6 +1181,7 @@ Phi4Package Phi4Package::Load(
                 n);
             ValidateQuantizedProjection(
                 package,
+                name,
                 semantic_roles,
                 components,
                 "ssmlp.up",
@@ -1151,6 +1190,7 @@ Phi4Package Phi4Package::Load(
                 n);
             ValidateQuantizedProjection(
                 package,
+                name,
                 semantic_roles,
                 components,
                 "ssmlp.down",

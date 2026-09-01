@@ -1018,6 +1018,80 @@ void TestExactSourceValidation(
         "semantic role");
 }
 
+void TestComponentDiagnosticsIdentifyWeightObjects(
+    const SyntheticPackage& fixture,
+    const std::shared_ptr<CorelibApi>& api) {
+    std::string failures;
+    const auto verify = [&](
+                            std::string_view scenario,
+                            auto mutation,
+                            std::string_view expected) {
+        try {
+            ExpectLoadFailure(
+                fixture,
+                api,
+                std::move(mutation),
+                expected);
+        } catch (const std::exception& error) {
+            failures += "\n" + std::string(scenario) + ": " + error.what();
+        }
+    };
+
+    verify(
+        "MatMul dtype",
+        [](json& manifest) {
+            constexpr std::size_t object_index = 7u * 5u + 1u;
+            const std::string initializer =
+                manifest["weight_objects"][object_index]["roles"]["scales"];
+            auto& record = manifest["initializers"].at(initializer);
+            record["dtype"] = "uint8";
+            record["length"] = 1024u * 24u;
+        },
+        "model.layers.7.attn.k_proj.MatMulNBits.scales "
+        "(model.layers.7.attn.k_proj.MatMulNBits.scales)");
+    verify(
+        "SSMLP projection shape",
+        [](json& manifest) {
+            constexpr std::size_t object_index = 19u * 5u + 4u;
+            const std::string initializer =
+                manifest["weight_objects"][object_index]["roles"]
+                        ["up_scales"];
+            auto& record = manifest["initializers"].at(initializer);
+            record["shape"] = {8191, 24};
+            record["length"] =
+                8191u * 24u * sizeof(std::uint16_t);
+        },
+        "model.layers.19.ssmlp.up_scales "
+        "(model.layers.19.mlp.up_proj.MatMulNBits.scales)");
+    verify(
+        "missing MatMul role",
+        [](json& manifest) {
+            constexpr std::size_t object_index = 12u * 5u + 2u;
+            manifest["weight_objects"][object_index]["roles"].erase(
+                "qzeros");
+        },
+        "model.layers.12.attn.v_proj.MatMulNBits.qzeros");
+    verify(
+        "SSMLP norm shape",
+        [](json& manifest) {
+            constexpr std::size_t object_index = 27u * 5u + 4u;
+            const std::string initializer =
+                manifest["weight_objects"][object_index]["roles"]["norm0"];
+            auto& record = manifest["initializers"].at(initializer);
+            record["shape"] = {3071};
+            record["length"] =
+                3071u * sizeof(std::uint16_t);
+        },
+        "model.layers.27.ssmlp.norm0 "
+        "(model.layers.27.post_attention_layernorm.weight)");
+
+    if (!failures.empty()) {
+        throw std::runtime_error(
+            "component diagnostics did not identify their objects:" +
+            failures);
+    }
+}
+
 void TestOwnedScaleAndNormConversions(
     const SyntheticPackage& fixture,
     const std::shared_ptr<CorelibApi>& api) {
@@ -1184,6 +1258,7 @@ int main() {
         TestPathRangeAndHashRejections(fixture, api);
         TestWeightObjectRejections(fixture, api);
         TestExactSourceValidation(fixture, api);
+        TestComponentDiagnosticsIdentifyWeightObjects(fixture, api);
         TestOwnedScaleAndNormConversions(fixture, api);
         TestRopeUsesExactStridedContractAtGuardPage(fixture, api);
         TestFp32RopeSource(fixture, api);

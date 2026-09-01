@@ -1,5 +1,6 @@
 build
 build_*/
+/.build-*/
 /src/build-*/
 .vscode
 __pycache__

@@ -60,6 +60,12 @@ function(add_corelib_host_test TEST_NAME TEST_SOURCE)
     add_executable(${TEST_NAME}
         ${TEST_SOURCE}
         fake_corelib.cpp)
+    if(MSVC)
+        target_compile_options(${TEST_NAME} PRIVATE
+            /arch:AVX2
+            /fp:precise
+            $<$<CONFIG:Release>:/O2>)
+    endif()
     target_link_libraries(${TEST_NAME} PRIVATE
         flm_corelib_aie4_testlib)
     add_test(NAME ${TEST_NAME} COMMAND ${TEST_NAME})
@@ -72,6 +78,7 @@ enable_testing()
 add_corelib_host_test(test_corelib_api test_corelib_api.cpp)
 add_corelib_host_test(test_phi4_manifest test_phi4_manifest.cpp)
 add_corelib_host_test(test_phi4_shape_plan test_phi4_shape_plan.cpp)
+add_corelib_host_test(test_phi4_host test_phi4_host.cpp)
 add_corelib_host_test(test_phi4_weights test_phi4_weights.cpp)
 add_corelib_host_test(
     test_corelib_fatal_record

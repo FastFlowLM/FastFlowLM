@@ -1,4 +1,5 @@
 #include <models/phi4/phi4_corelib_manifest.hpp>
+#include <models/phi4/phi4_corelib_constants.hpp>
 
 #include "../../pull/picosha2.h"
 
@@ -32,13 +33,8 @@ constexpr std::string_view kManifestName =
     "corelib_phi4_manifest.json";
 constexpr std::size_t kExpectedInitializers = 743;
 constexpr std::size_t kExpectedWeightObjects = 161;
-constexpr std::int64_t kLayers = 32;
-constexpr std::int64_t kHidden = 3072;
-constexpr std::int64_t kIntermediate = 8192;
-constexpr std::int64_t kVocab = 200064;
-constexpr std::int64_t kMaxSeq = 4096;
-constexpr std::int64_t kRopeColumns = 48;
-constexpr std::uint32_t kGroupSize = 128;
+constexpr std::int64_t kRopeColumns =
+    constants::kRopeDimension / 2;
 
 [[noreturn]] void Throw(
     std::string_view context,
@@ -364,40 +360,42 @@ const std::vector<ExpectedWeightObject>& ExpectedWeightObjects() {
     static const std::vector<ExpectedWeightObject> expected = [] {
         std::vector<ExpectedWeightObject> values;
         values.reserve(kExpectedWeightObjects);
-        for (int layer = 0; layer < kLayers; ++layer) {
+        for (std::int64_t layer = 0;
+             layer < constants::kLayerCount;
+             ++layer) {
             const std::string base =
                 "model.layers." + std::to_string(layer) + ".attn.";
             values.push_back({
                 base + "q_proj.MatMulNBits",
                 WeightObjectKind::MatMul,
-                3072,
-                3072});
+                constants::kHiddenSize,
+                constants::kQueryDimension});
             values.push_back({
                 base + "k_proj.MatMulNBits",
                 WeightObjectKind::MatMul,
-                3072,
-                1024});
+                constants::kHiddenSize,
+                constants::kKvDimension});
             values.push_back({
                 base + "v_proj.MatMulNBits",
                 WeightObjectKind::MatMul,
-                3072,
-                1024});
+                constants::kHiddenSize,
+                constants::kKvDimension});
             values.push_back({
                 base + "o_proj.MatMulNBits",
                 WeightObjectKind::MatMul,
-                3072,
-                3072});
+                constants::kQueryDimension,
+                constants::kHiddenSize});
             values.push_back({
                 "model.layers." + std::to_string(layer) + ".ssmlp",
                 WeightObjectKind::SsMlp,
-                kHidden,
-                kIntermediate});
+                constants::kHiddenSize,
+                constants::kIntermediateSize});
         }
         values.push_back({
             "lm_head.MatMulNBits",
             WeightObjectKind::MatMul,
-            kHidden,
-            kVocab});
+            constants::kHiddenSize,
+            constants::kVocabularySize});
         return values;
     }();
     return expected;
@@ -454,11 +452,13 @@ void ValidateQuantizedProjection(
     std::int64_t k,
     std::int64_t n) {
     if (k <= 0 || n <= 0 || k % 2 != 0 ||
-        k % static_cast<std::int64_t>(kGroupSize) != 0) {
+        k % static_cast<std::int64_t>(
+                constants::kGroupSize) != 0) {
         Throw(role_prefix, "has an invalid quantized descriptor");
     }
     const std::int64_t groups =
-        k / static_cast<std::int64_t>(kGroupSize);
+        k / static_cast<std::int64_t>(
+                constants::kGroupSize);
 
     const auto validate = [&](
                               std::string_view component,
@@ -529,7 +529,7 @@ void ValidateHostInitializers(
     }
     RequireShape(
         embedding,
-        {kVocab, kHidden},
+        {constants::kVocabularySize, constants::kHiddenSize},
         "embedding");
     RequireSemanticRole(
         semantic_roles,
@@ -539,7 +539,10 @@ void ValidateHostInitializers(
     const auto& input_norm =
         package.Require("model.layers.0.input_layernorm.weight");
     RequireFloating(input_norm, "input_norm");
-    RequireShape(input_norm, {kHidden}, "input_norm");
+    RequireShape(
+        input_norm,
+        {constants::kHiddenSize},
+        "input_norm");
     RequireSemanticRole(
         semantic_roles,
         "model.layers.0.input_layernorm.weight",
@@ -550,7 +553,7 @@ void ValidateHostInitializers(
         RequireFloating(rope, name);
         if (
             rope.shape.size() != 2 ||
-            rope.shape[0] < kMaxSeq ||
+            rope.shape[0] < constants::kMaxSequenceLength ||
             rope.shape[1] < kRopeColumns) {
             Throw(name, "must be rank 2 and at least [4096,48]");
         }
@@ -638,39 +641,46 @@ void ValidateModelIdentity(const json& manifest) {
     if (ReadString(model.at("family"), "model.family") != "phi4") {
         Throw("model.family", "does not match phi4");
     }
-    RequireInteger(model.at("layers"), 32, "model.layers");
+    RequireInteger(
+        model.at("layers"),
+        constants::kLayerCount,
+        "model.layers");
     RequireInteger(
         model.at("hidden_size"),
-        3072,
+        constants::kHiddenSize,
         "model.hidden_size");
     RequireInteger(
         model.at("intermediate_size"),
-        8192,
+        constants::kIntermediateSize,
         "model.intermediate_size");
     RequireInteger(
         model.at("num_heads"),
-        24,
+        constants::kQueryHeadCount,
         "model.num_heads");
-    RequireInteger(model.at("kv_heads"), 8, "model.kv_heads");
+    RequireInteger(
+        model.at("kv_heads"),
+        constants::kKvHeadCount,
+        "model.kv_heads");
     RequireInteger(
         model.at("head_size"),
-        128,
+        constants::kHeadSize,
         "model.head_size");
     RequireInteger(
         model.at("vocab_size"),
-        200064,
+        constants::kVocabularySize,
         "model.vocab_size");
     RequireInteger(
         model.at("group_size"),
-        128,
+        constants::kGroupSize,
         "model.group_size");
     RequireInteger(
         model.at("rope_dim"),
-        96,
+        constants::kRopeDimension,
         "model.rope_dim");
     if (
         !model.at("rms_epsilon").is_number() ||
-        model.at("rms_epsilon").get<double>() != 0.00001) {
+        model.at("rms_epsilon").get<double>() !=
+            constants::kRmsEpsilon) {
         Throw(
             "model.rms_epsilon",
             "does not match the Phi-4 model identity");
@@ -680,7 +690,7 @@ void ValidateModelIdentity(const json& manifest) {
     RequireExactKeys(backend, {"max_seq"}, "backend");
     RequireInteger(
         backend.at("max_seq"),
-        kMaxSeq,
+        constants::kMaxSequenceLength,
         "backend.max_seq");
 }
 
@@ -1092,7 +1102,7 @@ Phi4Package Phi4Package::Load(
         }
         if (
             k != expected.k || n != expected.n ||
-            group_size != kGroupSize) {
+            group_size != constants::kGroupSize) {
             Throw(
                 name + ".descriptor",
                 "does not match the fixed Phi-4 descriptor");
@@ -1162,7 +1172,10 @@ Phi4Package Phi4Package::Load(
                     role,
                     component->second);
                 RequireFloating(view, context);
-                RequireShape(view, {kHidden}, context);
+                RequireShape(
+                    view,
+                    {constants::kHiddenSize},
+                    context);
                 RequireSemanticRole(
                     semantic_roles,
                     component->second,
@@ -1316,7 +1329,7 @@ std::span<const float> Phi4Package::MaterializeRopeFp32(
     const auto source_type = CorelibDType(source.dtype, name);
     if (
         source.shape.size() != 2 ||
-        source.shape[0] < kMaxSeq ||
+        source.shape[0] < constants::kMaxSequenceLength ||
         source.shape[1] < kRopeColumns) {
         Throw(
             name,
@@ -1325,7 +1338,8 @@ std::span<const float> Phi4Package::MaterializeRopeFp32(
     const auto source_columns =
         static_cast<std::size_t>(source.shape[1]);
     constexpr std::size_t count =
-        static_cast<std::size_t>(kMaxSeq * kRopeColumns);
+        static_cast<std::size_t>(
+            constants::kMaxSequenceLength * kRopeColumns);
     auto [buffer, inserted] =
         fp32_buffers_.try_emplace(std::string(name), count);
     try {

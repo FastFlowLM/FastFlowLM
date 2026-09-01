@@ -1,4 +1,5 @@
 #include <models/phi4/phi4_corelib_shape_plan.hpp>
+#include <models/phi4/phi4_corelib_constants.hpp>
 
 #include <algorithm>
 #include <cstddef>
@@ -13,19 +14,19 @@
 namespace flm::phi4 {
 namespace {
 
-constexpr std::int64_t kMaxLiveRows = 4096;
-constexpr std::int64_t kHiddenSize = 3072;
-constexpr std::int64_t kKvSize = 1024;
-constexpr std::int64_t kMlpSize = 8192;
-constexpr std::int64_t kVocabSize = 200064;
-constexpr std::uint32_t kGroupSize = 128;
+constexpr std::int64_t kShapePrecomputeMaxLiveRows = 4096;
+static_assert(
+    kShapePrecomputeMaxLiveRows ==
+        constants::kMaxSequenceLength,
+    "Phi4ShapePlan v1 queries every live row through the "
+    "physical attention window");
 
 constexpr ryzenai_corelib_flat_mha_bf16_desc kAttentionDesc{
-    24,
-    8,
-    128,
-    kMaxLiveRows,
-    96};
+    constants::kQueryHeadCount,
+    constants::kKvHeadCount,
+    constants::kHeadSize,
+    constants::kMaxSequenceLength,
+    constants::kRopeDimension};
 
 std::size_t RowUseIndex(RowUse use) {
     switch (use) {
@@ -70,12 +71,17 @@ MatMulPaddedShape QueryMatMul(
             &shape.m,
             &shape.k,
             &shape.n,
-            kGroupSize),
+            constants::kGroupSize),
         "ryzenai_corelib_matmul_bf16_pad_shape");
     if (shape.k != k || shape.n != n) {
         throw std::runtime_error(
             std::string(context) +
-            " MatMul helper changed requested K/N");
+            " MatMul K/N mismatch at live row " +
+            std::to_string(live_rows) +
+            ": requested K=" + std::to_string(k) +
+            ", N=" + std::to_string(n) +
+            "; returned K=" + std::to_string(shape.k) +
+            ", N=" + std::to_string(shape.n));
     }
     ValidatePaddedRows(context, live_rows, shape.m);
     return shape;
@@ -88,9 +94,9 @@ std::int64_t QuerySsMlp(
     api.Check(
         api.functions().ssmlp_pad_rows(
             &padded_rows,
-            kHiddenSize,
-            kMlpSize,
-            kGroupSize),
+            constants::kHiddenSize,
+            constants::kIntermediateSize,
+            constants::kGroupSize),
         "ryzenai_corelib_ssmlp_bf16_pad_rows");
     ValidatePaddedRows("SSMLP", live_rows, padded_rows);
     return padded_rows;
@@ -142,19 +148,19 @@ Phi4ShapePlan Phi4ShapePlan::Build(
         plan.transitions_[RowUseIndex(RowUse::SsMlp)];
 
     for (std::int64_t live_rows = 1;
-         live_rows <= kMaxLiveRows;
+         live_rows <= kShapePrecomputeMaxLiveRows;
          ++live_rows) {
         const auto query_shape = QueryMatMul(
             *api,
             live_rows,
-            kHiddenSize,
-            kHiddenSize,
+            constants::kHiddenSize,
+            constants::kQueryDimension,
             "query/output projection");
         const auto kv_shape = QueryMatMul(
             *api,
             live_rows,
-            kHiddenSize,
-            kKvSize,
+            constants::kHiddenSize,
+            constants::kKvDimension,
             "key/value projection");
         const auto ssmlp_rows = QuerySsMlp(*api, live_rows);
         const auto attention_rows = QueryAttention(
@@ -191,8 +197,8 @@ Phi4ShapePlan Phi4ShapePlan::Build(
     const auto lm_head_shape = QueryMatMul(
         *api,
         1,
-        kHiddenSize,
-        kVocabSize,
+        constants::kHiddenSize,
+        constants::kVocabularySize,
         "LM head");
     AppendTransition(
         plan.transitions_[RowUseIndex(RowUse::LmHead)],
@@ -208,7 +214,9 @@ std::int64_t Phi4ShapePlan::RowsFor(
     std::int64_t live_rows) const {
     const auto& transitions = Transitions(use);
     const std::int64_t max_live_rows =
-        use == RowUse::LmHead ? 1 : kMaxLiveRows;
+        use == RowUse::LmHead
+            ? 1
+            : kShapePrecomputeMaxLiveRows;
     if (live_rows < 1 || live_rows > max_live_rows) {
         throw std::out_of_range(
             "Phi4ShapePlan live rows are outside the cached range");

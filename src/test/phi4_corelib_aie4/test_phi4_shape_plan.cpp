@@ -284,6 +284,17 @@ void CheckTransitions(
     CHECK(actual == expected_transitions);
 }
 
+template <class Function>
+void CheckThrowsEquals(Function&& function, std::string_view expected) {
+    try {
+        function();
+    } catch (const std::exception& error) {
+        CHECK(std::string_view(error.what()) == expected);
+        return;
+    }
+    throw std::runtime_error("expected exception was not thrown");
+}
+
 void TestCompleteQueriesAndCachedTransitions(
     const std::shared_ptr<CorelibApi>& api) {
     g_helpers.Reset();
@@ -389,12 +400,24 @@ void TestMatMulDimensionMutationsRejectBuild(
         FaultKind kind;
         std::int64_t row;
         std::int64_t n;
-        std::string_view context;
+        std::string_view message;
     };
     constexpr std::array<Case, 3> cases{{
-        {FaultKind::MutateK, 37, 3072, "query/output projection"},
-        {FaultKind::MutateN, 93, 1024, "key/value projection"},
-        {FaultKind::MutateN, 1, 200064, "LM head"},
+        {FaultKind::MutateK,
+         37,
+         3072,
+         "query/output projection MatMul K/N mismatch at live row 37: "
+         "requested K=3072, N=3072; returned K=3073, N=3072"},
+        {FaultKind::MutateN,
+         93,
+         1024,
+         "key/value projection MatMul K/N mismatch at live row 93: "
+         "requested K=3072, N=1024; returned K=3072, N=1025"},
+        {FaultKind::MutateN,
+         1,
+         200064,
+         "LM head MatMul K/N mismatch at live row 1: "
+         "requested K=3072, N=200064; returned K=3072, N=200065"},
     }};
 
     for (const auto& test_case : cases) {
@@ -404,11 +427,11 @@ void TestMatMulDimensionMutationsRejectBuild(
             test_case.kind,
             test_case.row,
             test_case.n};
-        CheckThrowsContains(
+        CheckThrowsEquals(
             [&] {
                 (void)Phi4ShapePlan::Build(api);
             },
-            test_case.context);
+            test_case.message);
     }
 }
 

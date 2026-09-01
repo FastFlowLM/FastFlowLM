@@ -7,6 +7,15 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_path(RYZENAI_CORELIB_INCLUDE_DIR
           NAMES ryzenai/corelib.h
           REQUIRED)
+find_path(BOOST_INCLUDE_DIR
+          NAMES boost/any.hpp
+          HINTS
+              "$ENV{BOOST_INCLUDEDIR}"
+              "$ENV{BOOST_ROOT}"
+              "$ENV{CONDA_PREFIX}/Library/include"
+              "$ENV{USERPROFILE}/anaconda3/Library/include"
+              "C:/dev/boost_1_88_0"
+          REQUIRED)
 
 get_filename_component(
     FASTFLOW_SOURCE_DIR
@@ -25,6 +34,7 @@ add_library(flm_corelib_aie4_testlib STATIC
 target_include_directories(flm_corelib_aie4_testlib PUBLIC
     ${FASTFLOW_SOURCE_DIR}/include
     ${RYZENAI_CORELIB_INCLUDE_DIR}
+    ${BOOST_INCLUDE_DIR}
     ${XRT_INCLUDE_DIR})
 target_link_directories(flm_corelib_aie4_testlib PUBLIC
     ${XRT_LIB_DIR})
@@ -79,6 +89,9 @@ add_corelib_host_test(test_phi4_manifest test_phi4_manifest.cpp)
 add_corelib_host_test(test_phi4_shape_plan test_phi4_shape_plan.cpp)
 add_corelib_host_test(test_phi4_host test_phi4_host.cpp)
 add_corelib_host_test(test_phi4_weights test_phi4_weights.cpp)
+add_corelib_host_test(test_phi4_engine test_phi4_engine.cpp)
+target_link_libraries(test_phi4_engine PRIVATE
+    advapi32)
 add_corelib_host_test(
     test_corelib_fatal_record
     test_corelib_fatal_record.cpp)

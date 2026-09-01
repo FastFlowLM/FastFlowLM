@@ -135,12 +135,12 @@ public:
                 return false;
             }
         }
-        else if (parameter_name == "image-max-tokens") {
+        else if (parameter_name == "image_max_tokens") {
             try {
                 this->image_softtoken_budget = std::any_cast<int>(value);
                 
-                if(image_softtoken_budget != 70 || image_softtoken_budget != 140 ||
-                    image_softtoken_budget != 280 || image_softtoken_budget != 560 || image_softtoken_budget != 1120) {
+                if(image_softtoken_budget != 70 && image_softtoken_budget != 140 &&
+                    image_softtoken_budget != 280 && image_softtoken_budget != 560 && image_softtoken_budget != 1120) {
                     header_print("WARNING", "Invalid image budget value: " << image_softtoken_budget << ". Supported values are 70, 140, 280, 560, 1120. Using 280...");
                     this->image_softtoken_budget = 280;
                 }

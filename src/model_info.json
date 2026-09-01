@@ -418,8 +418,8 @@
         },
         {
             "type": "file",
-            "oid": "30cf4ed4cb1db8e9490ec880dbbc1bd06f85ddea",
-            "size": 3150,
+            "oid": "dab3112f362508161ad059a32d920770e27f02e7",
+            "size": 3158,
             "path": "tokenizer_config.json"
         }
     ],

@@ -2,6 +2,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include <array>
+#include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -38,6 +40,15 @@ nlohmann::ordered_json ModelErrorResponse(
 
 int HttpStatusForResponse(
     const nlohmann::ordered_json& response) noexcept;
+
+std::array<std::string, 2> OpenAiStreamingErrorFrames(
+    const nlohmann::ordered_json& error_response);
+
+void SendOpenAiStreamingError(
+    const nlohmann::ordered_json& error_response,
+    const std::function<void(
+        const nlohmann::ordered_json&,
+        bool)>& send_streaming_response);
 
 bool UseFinalStreamingErrorChunk(
     bool stream_started) noexcept;

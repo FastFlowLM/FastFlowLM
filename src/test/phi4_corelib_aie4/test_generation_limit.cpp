@@ -1,16 +1,21 @@
 #include <server/generation_limit.hpp>
 #include <server/npu_access_manager.hpp>
+#include <server/serve_lifecycle.hpp>
 
 #include "test_support.hpp"
 
+#include <array>
+#include <csignal>
 #include <condition_variable>
 #include <exception>
+#include <functional>
 #include <iostream>
 #include <mutex>
 #include <optional>
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <vector>
 
 namespace {
 
@@ -131,6 +136,39 @@ void TestNestedModelErrorAndHttpStatus() {
     CHECK(UseFinalStreamingErrorChunk(true));
 }
 
+void TestOpenAiStreamingErrorFramingAndParsing() {
+    const ordered_json error =
+        ModelErrorResponse("submission failed", 500, true);
+    std::vector<std::pair<std::string, bool>> transmitted;
+    SendOpenAiStreamingError(
+        error,
+        [&](const ordered_json& data, bool is_final) {
+            CHECK(data.is_string());
+            transmitted.emplace_back(
+                data.get<std::string>(),
+                is_final);
+        });
+    const std::string expected_error =
+        "data: " + error.dump() + "\n\n";
+
+    CHECK(transmitted.size() == 2);
+    CHECK(transmitted[0].first == expected_error);
+    CHECK(!transmitted[0].second);
+    CHECK(transmitted[1].first == "data: [DONE]\n\n");
+    CHECK(transmitted[1].second);
+
+    const auto parse_sse_data = [](const std::string& frame) {
+        CHECK(frame.starts_with("data: "));
+        CHECK(frame.ends_with("\n\n"));
+        return frame.substr(6, frame.size() - 8);
+    };
+    const ordered_json parsed =
+        ordered_json::parse(
+            parse_sse_data(transmitted[0].first));
+    CHECK(parsed["error"]["session_cleared"] == true);
+    CHECK(parse_sse_data(transmitted[1].first) == "[DONE]");
+}
+
 void TestCliLimitAndRecoverableNotice() {
     CHECK(!CliRequestedMaxNewTokens(-1).has_value());
     CHECK(!CliRequestedMaxNewTokens(0).has_value());
@@ -156,82 +194,45 @@ void TestAie4ModelInfoDetection() {
     CHECK(!IsCorelibAie4ModelInfo(ordered_json::object()));
 }
 
-void RunForcedGateInterleaving(bool queue_during_insert) {
+enum class HandlerExit {
+    NonStreaming,
+    Streaming,
+    Exception,
+    CancellationFinal
+};
+
+void RunProductionShapedGateInterleaving(HandlerExit exit) {
     CHECK(NPUAccessManager::is_npu_available());
     CHECK(NPUAccessManager::get_active_npu_requests() == 0);
+    CHECK(NPUAccessManager::try_acquire_npu_access());
 
     std::mutex mutex;
     std::condition_variable ready;
-    bool insert_entered = false;
-    bool generate_entered = false;
-    bool second_attempted = false;
+    bool final_response_sent = false;
+    bool second_attempted_while_handler_active = false;
     bool second_attempt_rejected = false;
-    bool generate_completed = false;
-    bool gate_released = false;
+    bool response_was_streaming = false;
+    bool cancellation_finalized = false;
+    bool post_response_cleanup_completed = false;
+    bool handler_returned = false;
+    bool completion_point_reached = false;
     bool second_insert_entered = false;
-    bool second_entered_early = false;
-    std::exception_ptr first_error;
+    bool second_entered_before_cleanup = false;
     std::exception_ptr second_error;
-
-    std::thread first([&] {
-        try {
-            if (!NPUAccessManager::try_acquire_npu_access()) {
-                throw std::runtime_error(
-                    "first request did not acquire NPU access");
-            }
-            {
-                std::unique_lock lock(mutex);
-                insert_entered = true;
-                ready.notify_all();
-                if (queue_during_insert) {
-                    ready.wait(
-                        lock,
-                        [&] { return second_attempted; });
-                }
-                generate_entered = true;
-                ready.notify_all();
-                if (!queue_during_insert) {
-                    ready.wait(
-                        lock,
-                        [&] { return second_attempted; });
-                }
-                generate_completed = true;
-            }
-            NPUAccessManager::release_npu_access();
-            {
-                std::lock_guard lock(mutex);
-                gate_released = true;
-            }
-            ready.notify_all();
-        } catch (...) {
-            first_error = std::current_exception();
-            ready.notify_all();
-        }
-    });
 
     std::thread second([&] {
         try {
             {
                 std::unique_lock lock(mutex);
-                ready.wait(
-                    lock,
-                    [&] {
-                        return queue_during_insert
-                                   ? insert_entered
-                                   : generate_entered;
-                    });
+                ready.wait(lock, [&] { return final_response_sent; });
             }
 
             const bool acquired_early =
                 NPUAccessManager::try_acquire_npu_access();
             {
                 std::lock_guard lock(mutex);
+                second_attempted_while_handler_active = true;
                 second_attempt_rejected = !acquired_early;
-                if (acquired_early) {
-                    second_insert_entered = true;
-                    second_entered_early = !generate_completed;
-                }
-                second_attempted = true;
             }
             ready.notify_all();
             if (acquired_early) {
@@ -241,7 +242,7 @@ void RunForcedGateInterleaving(bool queue_during_insert) {
 
             {
                 std::unique_lock lock(mutex);
-                ready.wait(lock, [&] { return gate_released; });
+                ready.wait(lock, [&] { return completion_point_reached; });
             }
             if (!NPUAccessManager::try_acquire_npu_access()) {
                 throw std::runtime_error(
@@ -250,7 +251,9 @@ void RunForcedGateInterleaving(bool queue_during_insert) {
             {
                 std::lock_guard lock(mutex);
                 second_insert_entered = true;
-                second_entered_early = !generate_completed;
+                second_entered_before_cleanup =
+                    !post_response_cleanup_completed ||
+                    !handler_returned;
             }
             NPUAccessManager::release_npu_access();
         } catch (...) {
@@ -259,19 +262,67 @@ void RunForcedGateInterleaving(bool queue_during_insert) {
         }
     });
 
-    first.join();
-    second.join();
-    if (first_error) {
-        std::rethrow_exception(first_error);
+    {
+        NPURequestCompletionGuard completion([&] {
+            NPUAccessManager::release_npu_access();
+            {
+                std::lock_guard lock(mutex);
+                completion_point_reached = true;
+            }
+            ready.notify_all();
+        });
+
+        try {
+            {
+                std::lock_guard lock(mutex);
+                response_was_streaming =
+                    exit == HandlerExit::Streaming ||
+                    exit == HandlerExit::CancellationFinal;
+                cancellation_finalized =
+                    exit == HandlerExit::CancellationFinal;
+                final_response_sent = true;
+            }
+            ready.notify_all();
+            {
+                std::unique_lock lock(mutex);
+                ready.wait(
+                    lock,
+                    [&] {
+                        return second_attempted_while_handler_active;
+                    });
+            }
+
+            if (exit == HandlerExit::Exception) {
+                throw std::runtime_error("forced handler failure");
+            }
+        } catch (const std::exception&) {
+            // Production process_task catches before its completion guard exits.
+        }
+
+        {
+            std::lock_guard lock(mutex);
+            post_response_cleanup_completed = true;
+            handler_returned = true;
+        }
     }
+
+    second.join();
     if (second_error) {
         std::rethrow_exception(second_error);
     }
 
     CHECK(second_attempt_rejected);
-    CHECK(generate_completed);
+    CHECK(
+        response_was_streaming ==
+        (exit == HandlerExit::Streaming ||
+         exit == HandlerExit::CancellationFinal));
+    CHECK(
+        cancellation_finalized ==
+        (exit == HandlerExit::CancellationFinal));
+    CHECK(post_response_cleanup_completed);
+    CHECK(handler_returned);
     CHECK(second_insert_entered);
-    CHECK(!second_entered_early);
+    CHECK(!second_entered_before_cleanup);
     CHECK(NPUAccessManager::is_npu_available());
     CHECK(NPUAccessManager::get_active_npu_requests() == 0);
 }
@@ -283,8 +334,63 @@ void TestCompleteRequestGate() {
     CHECK(requires_npu_access("POST", "/v1/completions"));
     CHECK(!requires_npu_access("GET", "/v1/completions"));
 
-    RunForcedGateInterleaving(true);
-    RunForcedGateInterleaving(false);
+    for (const HandlerExit exit : {
+             HandlerExit::NonStreaming,
+             HandlerExit::Streaming,
+             HandlerExit::Exception,
+             HandlerExit::CancellationFinal}) {
+        RunProductionShapedGateInterleaving(exit);
+    }
+
+    CHECK(NPUAccessManager::try_acquire_npu_access());
+    {
+        NPURequestCompletionGuard completion([] {
+            throw std::runtime_error("forced queue handoff failure");
+        });
+    }
+    CHECK(NPUAccessManager::is_npu_available());
+    CHECK(NPUAccessManager::get_active_npu_requests() == 0);
+}
+
+volatile std::sig_atomic_t g_signal_observation = 0;
+
+void PriorSignalHandler(int) {
+    g_signal_observation = 1;
+}
+
+void ServeSignalHandler(int) {
+    g_signal_observation = 2;
+}
+
+void TestServeSignalScopeAndShutdownOrder() {
+    const auto original = std::signal(SIGINT, PriorSignalHandler);
+    CHECK(original != SIG_ERR);
+    {
+        ScopedSignalHandler scope(SIGINT, ServeSignalHandler);
+        g_signal_observation = 0;
+        CHECK(std::raise(SIGINT) == 0);
+        CHECK(g_signal_observation == 2);
+    }
+
+    g_signal_observation = 0;
+    CHECK(std::raise(SIGINT) == 0);
+    CHECK(g_signal_observation == 1);
+    CHECK(std::signal(SIGINT, original) != SIG_ERR);
+
+    std::vector<std::string> order;
+    const bool healthy = CompleteServeShutdown(
+        [&] { order.push_back("stop-admission-and-wait-inflight"); },
+        [&] { order.push_back("destroy-server-handler-engine"); },
+        [&] {
+            order.push_back("shutdown-corelib");
+            return true;
+        });
+    CHECK(healthy);
+    CHECK(
+        order == std::vector<std::string>({
+                     "stop-admission-and-wait-inflight",
+                     "destroy-server-handler-engine",
+                     "shutdown-corelib"}));
 }
 
 }  // namespace
@@ -295,9 +401,11 @@ int main() {
         TestEndpointDefaultsAndPropagation();
         TestOllamaChatLimitStaysSoftOnly();
         TestNestedModelErrorAndHttpStatus();
+        TestOpenAiStreamingErrorFramingAndParsing();
         TestCliLimitAndRecoverableNotice();
         TestAie4ModelInfoDetection();
         TestCompleteRequestGate();
+        TestServeSignalScopeAndShutdownOrder();
         std::cout << "test_generation_limit: PASS\n";
         return 0;
     } catch (const std::exception& error) {

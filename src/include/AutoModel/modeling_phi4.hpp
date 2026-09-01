@@ -77,6 +77,13 @@ public:
     Phi4(flm_rt::device* npu_device_inst);
 
     void load_model(std::string model_path, json model_inf, int default_context_length = -1, bool enable_preemption = false) override;
+    bool uses_corelib_aie4() const noexcept override {
+#if defined(FLM_ENABLE_CORELIB_AIE4)
+        return uses_corelib_aie4_;
+#else
+        return false;
+#endif
+    }
     //void toggle_enable_think() override;
     bool insert(chat_meta_info_t& meta_info, lm_uniform_input_t& input, std::function<bool()> is_cancelled = [] { return false; }) override;
     std::string generate(chat_meta_info_t& meta_info, int length_limit, std::ostream& os, std::function<bool()> is_cancelled = [] { return false; }) override;

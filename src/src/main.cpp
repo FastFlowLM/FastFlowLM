@@ -7,6 +7,7 @@
 #pragma once
 #include "runner.hpp"
 #include "server.hpp"
+#include <server/serve_lifecycle.hpp>
 #include "model_list.hpp"
 #include "model_downloader.hpp"
 #include "update.hpp"
@@ -563,8 +564,6 @@ int main(int argc, char* argv[]) {
     // XRT backend: preload bundled XRT libraries from the executable directory.
     preload_bundled_libraries();
 #endif
-    std::signal(SIGINT, signal_handler);
-    
     // Parse command line arguments using Boost Program Options
     program_args_t parsed_args;
     if (!arg_utils::parse_options(argc, argv, parsed_args)) {
@@ -770,6 +769,9 @@ int main(int argc, char* argv[]) {
 
 
     try {
+#if defined(FLM_ENABLE_CORELIB_AIE4)
+        bool corelib_shutdown_complete = false;
+#endif
 
         // Load the model list with the models directory as the base
         ModelDownloader downloader(availble_models);
@@ -788,6 +790,8 @@ int main(int argc, char* argv[]) {
             runner.run();
 
         } else if (parsed_args.command == "serve") {
+            running.store(true);
+            ScopedSignalHandler sigint_scope(SIGINT, signal_handler);
             check_and_notify_new_version();
             // Create the server
             int port = utils::get_server_port(parsed_args.port);
@@ -810,8 +814,28 @@ int main(int argc, char* argv[]) {
                 std::unique_lock<std::mutex> lock(mtx);
                 cv.wait(lock, [] { return !running.load(); });
             }
-            // header_print("FLM", "Stopping server...");
-            // server->stop();
+            const bool healthy_shutdown = CompleteServeShutdown(
+                [&] {
+                    // Stop admission and join all synchronous request handlers.
+                    server->stop();
+                },
+                [&] {
+                    // Destroy routes, RestHandler, and the loaded AutoModel.
+                    server.reset();
+                },
+                [&] {
+#if defined(FLM_ENABLE_CORELIB_AIE4)
+                    return shutdown_corelib_process();
+#else
+                    return true;
+#endif
+                });
+            if (!healthy_shutdown) {
+                return 1;
+            }
+#if defined(FLM_ENABLE_CORELIB_AIE4)
+            corelib_shutdown_complete = true;
+#endif
         }
         else if (parsed_args.command == "pull") {
                 bool success = downloader.pull_model(parsed_args.model_tag, parsed_args.modelscope, parsed_args.force_redownload);
@@ -884,7 +908,8 @@ int main(int argc, char* argv[]) {
             return 1;
         }
 #if defined(FLM_ENABLE_CORELIB_AIE4)
-        if (!shutdown_corelib_process()) {
+        if (!corelib_shutdown_complete &&
+            !shutdown_corelib_process()) {
             return 1;
         }
 #endif

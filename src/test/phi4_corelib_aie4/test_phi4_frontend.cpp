@@ -342,6 +342,40 @@ public:
 
 namespace {
 
+class NonPhiModel final : public AutoModel {
+public:
+    NonPhiModel() : AutoModel(nullptr, "non-phi-test") {}
+
+    std::string generate(
+        chat_meta_info_t&,
+        int,
+        std::ostream&,
+        std::function<bool()>) override {
+        return {};
+    }
+
+    bool insert(
+        chat_meta_info_t&,
+        lm_uniform_input_t&,
+        std::function<bool()>) override {
+        return true;
+    }
+
+    std::string generate_with_prompt(
+        chat_meta_info_t&,
+        lm_uniform_input_t&,
+        int,
+        std::ostream&) override {
+        return {};
+    }
+
+    std::string apply_chat_template(
+        nlohmann::ordered_json&,
+        nlohmann::ordered_json) override {
+        return {};
+    }
+};
+
 using flm::phi4::ContinuationRoute;
 using flm::phi4::ForcedContinuationRoute;
 using flm::phi4::SelectContinuationRoute;
@@ -408,6 +442,7 @@ void TestLegacyRoutingAndUnknownBackend() {
     auto legacy = Load(package, ModelInfo(1024));
     CHECK(g_factory.calls == 1);
     CHECK(!g_factory.last_was_corelib);
+    CHECK(!legacy->uses_corelib_aie4());
     CHECK(Phi4FrontendTestAccess::HasLegacyNpu(*legacy));
 
     FakeEngine* legacy_engine = g_factory.engine;
@@ -439,6 +474,30 @@ void TestLegacyRoutingAndUnknownBackend() {
         },
         "invented_backend");
     CHECK(g_factory.calls == 1);
+}
+
+void TestLoadedBackendControlsOmittedLimit() {
+    const ParsedGenerationLimit omitted{false, -1};
+    const nlohmann::ordered_json misleading_catalog_info = {
+        {"details", {{"execution_backend", "corelib_aie4"}}},
+    };
+    CHECK(IsCorelibAie4ModelInfo(misleading_catalog_info));
+
+    NonPhiModel non_phi;
+    CHECK(!non_phi.uses_corelib_aie4());
+    CHECK(
+        GenerationLoopLimit(
+            omitted,
+            non_phi.uses_corelib_aie4()) == 4096);
+
+    TempModelPackage package({200020});
+    FactoryScope factory;
+    auto legacy_phi = Load(package, ModelInfo(1024));
+    CHECK(!legacy_phi->uses_corelib_aie4());
+    CHECK(
+        GenerationLoopLimit(
+            omitted,
+            legacy_phi->uses_corelib_aie4()) == 4096);
 }
 
 void TestLegacyExactRepeatPreservesEmptyPrefillPayload() {
@@ -530,6 +589,7 @@ void TestCorelibRoutingAndPreemption() {
         nullptr);
     CHECK(g_factory.calls == 1);
     CHECK(g_factory.last_was_corelib);
+    CHECK(model->uses_corelib_aie4());
     CHECK(!Phi4FrontendTestAccess::HasLegacyNpu(*model));
     CHECK(Phi4FrontendTestAccess::HasRuntime(*model));
 }
@@ -1252,6 +1312,7 @@ int main() {
     try {
         TestContinuationSelector();
         TestLegacyRoutingAndUnknownBackend();
+        TestLoadedBackendControlsOmittedLimit();
         TestLegacyExactRepeatPreservesEmptyPrefillPayload();
 #if defined(FLM_ENABLE_CORELIB_AIE4)
         ConfigureFakeCorelibDll();

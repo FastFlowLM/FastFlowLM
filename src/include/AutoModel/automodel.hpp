@@ -261,6 +261,11 @@ public:
 	/// \return the current model
 	std::string get_current_model();
 
+	/// \brief Whether the loaded model uses the corelib AIE4 backend
+	virtual bool uses_corelib_aie4() const noexcept {
+		return false;
+	}
+
 	/// \brief Get the current context length
 	/// \return the current context length
 	virtual int get_current_context_length();

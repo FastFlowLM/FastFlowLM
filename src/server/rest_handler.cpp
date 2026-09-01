@@ -431,16 +431,6 @@ bool RestHandler::ensure_model_loaded(const std::string& model_tag) {
     return true;
 }
 
-bool RestHandler::uses_corelib_aie4(const std::string& model_tag) {
-    if (!supported_models.is_model_supported(model_tag)) {
-        return false;
-    }
-    const auto [resolved_tag, model_info] =
-        supported_models.get_model_info(model_tag);
-    (void)resolved_tag;
-    return IsCorelibAie4ModelInfo(model_info);
-}
-
 ///@brief Ensure the asr model is loaded
 ///@param model_tag the model tag
 void RestHandler::ensure_asr_model_loaded(const std::string& model_tag) {
@@ -668,9 +658,6 @@ void RestHandler::handle_generate(const json& request,
         bool stream = request.value("stream", true);
         std::string model = request.value("model", current_model_tag);
         json options = request.value("options", json::object());
-        const bool corelib_aie4 = uses_corelib_aie4(model);
-        const int length_limit =
-            GenerationLoopLimit(parsed_limit, corelib_aie4);
         auto load_start_time = time_utils::now();
         // TODO: Use Another Check Function avoid loading again
         if (!ensure_model_loaded(model)) {
@@ -678,6 +665,10 @@ void RestHandler::handle_generate(const json& request,
             send_response(error_response);
             return;
         }
+        const int length_limit =
+            GenerationLoopLimit(
+                parsed_limit,
+                auto_chat_engine->uses_corelib_aie4());
         auto load_end_time = time_utils::now();
       
         chat_meta_info_t meta_info;
@@ -1183,9 +1174,6 @@ void RestHandler::handle_openai_chat_completion(const json& request,
         json current_messages = request["messages"];
         std::string model = request.value("model", current_model_tag);
         bool stream = request.value("stream", false);
-        const bool corelib_aie4 = uses_corelib_aie4(model);
-        const int length_limit =
-            GenerationLoopLimit(parsed_limit, corelib_aie4);
         json tools = request.value("tools", json::array());
         json options = request.value("options", json::object());
 
@@ -1195,6 +1183,10 @@ void RestHandler::handle_openai_chat_completion(const json& request,
             send_response(error_response);
             return;
         }
+        const bool corelib_aie4 =
+            auto_chat_engine->uses_corelib_aie4();
+        const int length_limit =
+            GenerationLoopLimit(parsed_limit, corelib_aie4);
         auto load_end_time = time_utils::now();
 
         configure_chat_engine_parameters(options, request);
@@ -1301,7 +1293,9 @@ void RestHandler::handle_openai_chat_completion(const json& request,
             } catch (const ModelRequestError& error) {
                 const json error_response = ModelErrorResponse(error);
                 if (UseFinalStreamingErrorChunk(stream_started)) {
-                    send_streaming_response(error_response, true);
+                    SendOpenAiStreamingError(
+                        error_response,
+                        send_streaming_response);
                 } else {
                     send_response(error_response);
                 }
@@ -1507,9 +1501,6 @@ void RestHandler::handle_openai_completion(const json& request,
         std::string reasoning_effort = request.value("reasoning_effort", "medium");
         bool stream = request.value("stream", false);
         json options = request.value("options", json::object());
-        const bool corelib_aie4 = uses_corelib_aie4(model);
-        const int length_limit =
-            GenerationLoopLimit(parsed_limit, corelib_aie4);
 
         // direct return if model not supported
         if (!supported_models.is_model_supported(model)) {
@@ -1521,6 +1512,10 @@ void RestHandler::handle_openai_completion(const json& request,
             send_response(error_response);
             return;
         }
+        const int length_limit =
+            GenerationLoopLimit(
+                parsed_limit,
+                auto_chat_engine->uses_corelib_aie4());
 
         configure_chat_engine_parameters(options, request);
 
@@ -1567,7 +1562,9 @@ void RestHandler::handle_openai_completion(const json& request,
             } catch (const ModelRequestError& error) {
                 const json error_response = ModelErrorResponse(error);
                 if (UseFinalStreamingErrorChunk(stream_started)) {
-                    send_streaming_response(error_response, true);
+                    SendOpenAiStreamingError(
+                        error_response,
+                        send_streaming_response);
                 } else {
                     send_response(error_response);
                 }

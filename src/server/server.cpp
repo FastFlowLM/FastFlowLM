@@ -638,6 +638,11 @@ bool WebServer::handle_request(http::request<http::string_body>& req,
     auto process_task = [this, it, req_ptr, res_ptr, session, needs_npu, key, is_json](bool is_deferred) {
         auto& req_ref = *req_ptr;
         auto& res_ref = *res_ptr;
+        NPURequestCompletionGuard npu_completion([this, needs_npu] {
+            if (needs_npu) {
+                this->process_next_npu_request();
+            }
+        });
 
         // Parse JSON request body
         json request_json;
@@ -659,9 +664,6 @@ bool WebServer::handle_request(http::request<http::string_body>& req,
             // Only write from callback when deferred
             if (is_deferred && session) session->write_response_from_callback();
 
-            if (needs_npu) {
-                this->process_next_npu_request();
-            }
             return;
         }
 
@@ -680,7 +682,7 @@ bool WebServer::handle_request(http::request<http::string_body>& req,
         register_active_request(request_id, cancellation_token);
 
         // catch is_deferred 
-        auto send_response = [res_ptr, session, this, request_id, needs_npu, is_deferred, cancellation_token](const json& response_data) {
+        auto send_response = [res_ptr, session, this, request_id, is_deferred, cancellation_token](const json& response_data) {
             auto& response_ref = *res_ptr;
             const int status_code =
                 HttpStatusForResponse(response_data);
@@ -698,16 +700,12 @@ bool WebServer::handle_request(http::request<http::string_body>& req,
             cancellation_token->complete();
             unregister_active_request(request_id);
 
-            if (needs_npu) {
-                this->process_next_npu_request();
-            }
-
             if (is_deferred && session) {
                 session->write_response_from_callback();
             }
         };
 
-        auto send_streaming_response = [session, this, request_id, needs_npu, cancellation_token](const json& data, bool is_final) {
+        auto send_streaming_response = [session, this, request_id, cancellation_token](const json& data, bool is_final) {
             if (is_final) {
                 cancellation_token->complete();
             }
@@ -717,10 +715,6 @@ bool WebServer::handle_request(http::request<http::string_body>& req,
             }
             if (is_final) {
                 unregister_active_request(request_id);
-
-                if (needs_npu) {
-                    this->process_next_npu_request();
-                }
             }
         };
 
@@ -736,10 +730,6 @@ bool WebServer::handle_request(http::request<http::string_body>& req,
             res_ref.set(http::field::content_type, "application/json");
             res_ref.prepare_payload();
 
-            if (needs_npu) {
-                this->process_next_npu_request();
-            }
-
             if (is_deferred && session) {
                 session->write_response_from_callback();
             }
@@ -752,10 +742,6 @@ bool WebServer::handle_request(http::request<http::string_body>& req,
             res_ref.body() = json{ {"error", "Unknown handler exception"} }.dump();
             res_ref.set(http::field::content_type, "application/json");
             res_ref.prepare_payload();
-
-            if (needs_npu) {
-                this->process_next_npu_request();
-            }
 
             if (is_deferred && session) {
                 session->write_response_from_callback();

@@ -109,7 +109,6 @@ public:
 
 private:
     bool ensure_model_loaded(const std::string& model_tag);
-    bool uses_corelib_aie4(const std::string& model_tag);
     void ensure_asr_model_loaded(const std::string& model_tag);
     void ensure_embed_model_loaded(const std::string& model_tag);
     void configure_chat_engine_parameters(const json& options, const json& request);

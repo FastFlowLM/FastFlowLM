@@ -98,6 +98,29 @@ int HttpStatusForResponse(
     }
 }
 
+std::array<std::string, 2> OpenAiStreamingErrorFrames(
+    const nlohmann::ordered_json& error_response) {
+    return {
+        "data: " + error_response.dump() + "\n\n",
+        "data: [DONE]\n\n",
+    };
+}
+
+void SendOpenAiStreamingError(
+    const nlohmann::ordered_json& error_response,
+    const std::function<void(
+        const nlohmann::ordered_json&,
+        bool)>& send_streaming_response) {
+    const auto frames =
+        OpenAiStreamingErrorFrames(error_response);
+    send_streaming_response(
+        nlohmann::ordered_json(frames[0]),
+        false);
+    send_streaming_response(
+        nlohmann::ordered_json(frames[1]),
+        true);
+}
+
 bool UseFinalStreamingErrorChunk(
     bool stream_started) noexcept {
     return stream_started;

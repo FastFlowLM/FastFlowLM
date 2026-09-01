@@ -150,7 +150,7 @@ ryzenai_corelib_status FakeMatmulWeightsGetData(
         *data = nullptr;
     }
     if (size != nullptr) {
-        *size = 0;
+        *size = 0x4D4D;
     }
     return ryzenai_corelib_status_success;
 }
@@ -190,7 +190,7 @@ ryzenai_corelib_status FakeSsmlpWeightsGetData(
         *data = nullptr;
     }
     if (size != nullptr) {
-        *size = 0;
+        *size = 0x5353;
     }
     return ryzenai_corelib_status_success;
 }

@@ -158,7 +158,17 @@ void CorelibRuntime::ShutdownHealthy() {
             "cannot clean up a terminating corelib process runtime");
     }
     if (api_->live_object_count() != 0) {
-        state_.store(ProcessState::Healthy, std::memory_order_release);
+#if defined(FLM_CORELIB_TESTING)
+        if (before_live_object_rollback_for_test_) {
+            before_live_object_rollback_for_test_();
+        }
+#endif
+        expected = ProcessState::Shutdown;
+        state_.compare_exchange_strong(
+            expected,
+            ProcessState::Healthy,
+            std::memory_order_acq_rel,
+            std::memory_order_acquire);
         throw std::logic_error(
             "cannot clean up corelib while live corelib objects remain");
     }
@@ -169,6 +179,13 @@ void CorelibRuntime::ShutdownHealthy() {
     }
     records_.RemoveUnusedPending();
 }
+
+#if defined(FLM_CORELIB_TESTING)
+void CorelibRuntime::SetBeforeLiveObjectRollbackForTest(
+    std::function<void()> hook) {
+    before_live_object_rollback_for_test_ = std::move(hook);
+}
+#endif
 
 [[noreturn]] void CorelibRuntime::TerminateAfterFailure(
     const FailureContext& failure) {

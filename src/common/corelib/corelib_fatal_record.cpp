@@ -385,13 +385,40 @@ std::string ReadRecord(const std::filesystem::path& path) {
     return contents;
 }
 
-void RemoveReportedRecord(const std::filesystem::path& path) {
-    std::error_code error;
-    const bool removed = std::filesystem::remove(path, error);
-    if (error || !removed) {
-        throw std::runtime_error(
-            "AIE4 fatal record removal failed for " + path.string() +
-            (error ? ": " + error.message() : ""));
+void EmitDrainWarning(
+    std::ostream& output,
+    std::string_view operation,
+    const std::filesystem::path& path,
+    std::string_view detail) noexcept {
+    try {
+        output << "AIE4 fatal record warning: failed to " << operation
+               << ' ' << path.string();
+        if (!detail.empty()) {
+            output << ": " << detail;
+        }
+        output << '\n';
+    } catch (...) {
+    }
+}
+
+void RemoveReportedRecord(
+    const std::filesystem::path& path,
+    std::ostream& output) noexcept {
+    try {
+        std::error_code error;
+        const bool removed = std::filesystem::remove(path, error);
+        if (!error && removed) {
+            return;
+        }
+        EmitDrainWarning(
+            output,
+            "remove",
+            path,
+            error ? error.message() : "record was not removed");
+    } catch (const std::exception& exception) {
+        EmitDrainWarning(output, "remove", path, exception.what());
+    } catch (...) {
+        EmitDrainWarning(output, "remove", path, "unknown error");
     }
 }
 
@@ -555,42 +582,61 @@ std::vector<std::string> FatalRecordStore::DrainPriorRecords(
     std::error_code error;
     if (!std::filesystem::exists(root, error)) {
         if (error) {
-            throw std::filesystem::filesystem_error(
-                "failed to inspect AIE4 fatal record directory",
+            EmitDrainWarning(
+                output,
+                "inspect",
                 root,
-                error);
+                error.message());
         }
         return {};
     }
     if (!std::filesystem::is_directory(root, error) || error) {
-        throw std::runtime_error(
-            "AIE4 fatal record root is not a readable directory: " +
-            root.string());
+        EmitDrainWarning(
+            output,
+            "inspect",
+            root,
+            error ? error.message() : "not a directory");
+        return {};
     }
 
     std::vector<std::filesystem::path> final_paths;
     std::vector<std::filesystem::path> pending_paths;
-    for (std::filesystem::directory_iterator iterator(root, error), end;
-         !error && iterator != end;
-         iterator.increment(error)) {
-        const auto filename = iterator->path().filename().string();
-        if (HasPrefixAndSuffix(
-                filename,
-                kFinalPrefix,
-                kFinalSuffix)) {
-            final_paths.push_back(iterator->path());
-        } else if (HasPrefixAndSuffix(
-                       filename,
-                       kPendingPrefix,
-                       kPendingSuffix)) {
-            pending_paths.push_back(iterator->path());
+    try {
+        for (std::filesystem::directory_iterator iterator(root, error), end;
+             !error && iterator != end;
+             iterator.increment(error)) {
+            const auto filename = iterator->path().filename().string();
+            if (HasPrefixAndSuffix(
+                    filename,
+                    kFinalPrefix,
+                    kFinalSuffix)) {
+                final_paths.push_back(iterator->path());
+            } else if (HasPrefixAndSuffix(
+                           filename,
+                           kPendingPrefix,
+                           kPendingSuffix)) {
+                pending_paths.push_back(iterator->path());
+            }
         }
+    } catch (const std::exception& exception) {
+        EmitDrainWarning(
+            output,
+            "enumerate",
+            root,
+            exception.what());
+    } catch (...) {
+        EmitDrainWarning(
+            output,
+            "enumerate",
+            root,
+            "unknown error");
     }
     if (error) {
-        throw std::filesystem::filesystem_error(
-            "failed to enumerate AIE4 fatal records",
+        EmitDrainWarning(
+            output,
+            "enumerate",
             root,
-            error);
+            error.message());
     }
     std::sort(final_paths.begin(), final_paths.end());
     std::sort(pending_paths.begin(), pending_paths.end());
@@ -598,10 +644,27 @@ std::vector<std::string> FatalRecordStore::DrainPriorRecords(
     std::vector<std::string> records;
     records.reserve(final_paths.size() + pending_paths.size());
     for (const auto& path : final_paths) {
-        std::string record = ReadRecord(path);
+        std::string record;
+        try {
+            record = ReadRecord(path);
+        } catch (const std::exception& exception) {
+            EmitDrainWarning(
+                output,
+                "read",
+                path,
+                exception.what());
+            continue;
+        } catch (...) {
+            EmitDrainWarning(
+                output,
+                "read",
+                path,
+                "unknown error");
+            continue;
+        }
         EmitRecord(output, record);
         records.push_back(std::move(record));
-        RemoveReportedRecord(path);
+        RemoveReportedRecord(path, output);
     }
 
     for (const auto& path : pending_paths) {
@@ -626,7 +689,7 @@ std::vector<std::string> FatalRecordStore::DrainPriorRecords(
             path.filename().string() + "\n";
         EmitRecord(output, record);
         records.push_back(std::move(record));
-        RemoveReportedRecord(path);
+        RemoveReportedRecord(path, output);
     }
     return records;
 }

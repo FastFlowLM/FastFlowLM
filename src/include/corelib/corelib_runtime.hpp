@@ -53,6 +53,10 @@ public:
     void ShutdownHealthy();
     [[noreturn]] void TerminateAfterFailure(
         const FailureContext& failure);
+#if defined(FLM_CORELIB_TESTING)
+    void SetBeforeLiveObjectRollbackForTest(
+        std::function<void()> hook);
+#endif
 
 private:
     CorelibRuntime(
@@ -67,6 +71,9 @@ private:
     mutable std::mutex execution_mutex_;
     std::atomic<ProcessState> state_{ProcessState::Shutdown};
     bool cleanup_called_ = false;
+#if defined(FLM_CORELIB_TESTING)
+    std::function<void()> before_live_object_rollback_for_test_;
+#endif
 };
 
 }  // namespace flm::corelib

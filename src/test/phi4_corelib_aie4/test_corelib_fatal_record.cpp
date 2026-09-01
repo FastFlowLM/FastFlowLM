@@ -60,6 +60,37 @@ private:
     std::filesystem::path path_;
 };
 
+class ScopedHandle final {
+public:
+    ScopedHandle(
+        const std::filesystem::path& path,
+        DWORD share_mode)
+        : handle_(CreateFileW(
+              path.c_str(),
+              GENERIC_READ,
+              share_mode,
+              nullptr,
+              OPEN_EXISTING,
+              FILE_ATTRIBUTE_NORMAL,
+              nullptr)) {
+        if (handle_ == INVALID_HANDLE_VALUE) {
+            throw std::runtime_error(
+                "failed to lock test record (error " +
+                std::to_string(GetLastError()) + ")");
+        }
+    }
+
+    ~ScopedHandle() noexcept {
+        CloseHandle(handle_);
+    }
+
+    ScopedHandle(const ScopedHandle&) = delete;
+    ScopedHandle& operator=(const ScopedHandle&) = delete;
+
+private:
+    HANDLE handle_;
+};
+
 std::optional<std::wstring> ReadEnvironment(const wchar_t* name) {
     std::size_t required = 0;
     if (_wgetenv_s(&required, nullptr, 0, name) != 0) {
@@ -314,6 +345,62 @@ void TestDrainOrdersFinalRecordsAndRemovesAfterEmission() {
     CHECK(!std::filesystem::exists(first));
     CHECK(!std::filesystem::exists(same_time_second));
     CHECK(!std::filesystem::exists(later));
+}
+
+void TestDrainContinuesPastUnreadableAndUnremovableRecords() {
+    TempDirectory temp;
+    const auto unreadable =
+        temp.path() / "corelib-fatal-20260831T1700000000000Z-1001.json";
+    const auto unremovable =
+        temp.path() / "corelib-fatal-20260831T1800000000000Z-1002.json";
+    const auto successful =
+        temp.path() / "corelib-fatal-20260831T1900000000000Z-1003.json";
+    WriteText(unreadable, "unreadable\n");
+    WriteText(unremovable, "unremovable\n");
+    WriteText(successful, "successful\n");
+    ScopedHandle deny_read(unreadable, 0);
+    ScopedHandle deny_delete(
+        unremovable,
+        FILE_SHARE_READ | FILE_SHARE_WRITE);
+    std::ostringstream output;
+
+    const auto records = FatalRecordStore::DrainPriorRecords(
+        temp.path(),
+        {},
+        output);
+
+    const std::vector<std::string> expected{
+        "unremovable\n",
+        "successful\n"};
+    CHECK(records == expected);
+    CHECK(output.str().find("warning") != std::string::npos);
+    CHECK(output.str().find("read") != std::string::npos);
+    CHECK(output.str().find(unreadable.filename().string()) !=
+          std::string::npos);
+    CHECK(output.str().find("remove") != std::string::npos);
+    CHECK(output.str().find(unremovable.filename().string()) !=
+          std::string::npos);
+    CHECK(output.str().find("unremovable\n") != std::string::npos);
+    CHECK(output.str().find("successful\n") != std::string::npos);
+    CHECK(std::filesystem::exists(unreadable));
+    CHECK(std::filesystem::exists(unremovable));
+    CHECK(!std::filesystem::exists(successful));
+}
+
+void TestDrainWarnsAndReturnsForInvalidRoot() {
+    TempDirectory temp;
+    const auto root_file = temp.path() / "not-a-directory";
+    WriteText(root_file, "not a directory");
+    std::ostringstream output;
+
+    const auto records = FatalRecordStore::DrainPriorRecords(
+        root_file,
+        {},
+        output);
+
+    CHECK(records.empty());
+    CHECK(output.str().find("warning") != std::string::npos);
+    CHECK(output.str().find(root_file.string()) != std::string::npos);
 }
 
 void TestDrainPreservesLivePendingRecord() {
@@ -588,6 +675,84 @@ void TestHealthyCleanupFollowsLastObjectRelease() {
 
 struct TerminationIntercept final {};
 
+void TestFailedShutdownRollbackPreservesConcurrentTermination() {
+    TempDirectory temp;
+    flm::test::ResetFakeCorelib();
+    auto api = ResolveCompleteCorelib();
+    auto runtime = CorelibRuntime::Create(
+        api,
+        MakeTestRecords(temp.path()),
+        [](unsigned int) {
+            throw TerminationIntercept{};
+        });
+    int storage = 0;
+    flm::corelib::UniqueTensor tensor(api, &storage);
+    std::atomic<bool> rollback_reached = false;
+    std::atomic<bool> release_rollback = false;
+    runtime->SetBeforeLiveObjectRollbackForTest([&] {
+        rollback_reached.store(true, std::memory_order_release);
+        while (!release_rollback.load(std::memory_order_acquire)) {
+            std::this_thread::yield();
+        }
+    });
+
+    std::exception_ptr shutdown_error;
+    std::thread shutdown([&] {
+        try {
+            runtime->ShutdownHealthy();
+        } catch (...) {
+            shutdown_error = std::current_exception();
+        }
+    });
+    const auto rollback_deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds{1};
+    while (!rollback_reached.load(std::memory_order_acquire) &&
+           std::chrono::steady_clock::now() < rollback_deadline) {
+        std::this_thread::yield();
+    }
+    const bool reached_rollback =
+        rollback_reached.load(std::memory_order_acquire);
+    if (!reached_rollback) {
+        release_rollback.store(true, std::memory_order_release);
+        shutdown.join();
+        CHECK(reached_rollback);
+    }
+
+    const FailureContext failure{
+        ryzenai_corelib_status_failure,
+        "ryzenai_corelib_matmul_bf16",
+        "concurrent terminal failure",
+        "qkv",
+        12,
+        4,
+        256};
+    std::exception_ptr termination_error;
+    std::thread termination([&] {
+        try {
+            runtime->TerminateAfterFailure(failure);
+        } catch (const TerminationIntercept&) {
+        } catch (...) {
+            termination_error = std::current_exception();
+        }
+    });
+    termination.join();
+    CHECK(!termination_error);
+    CHECK(runtime->state() == ProcessState::Terminating);
+
+    release_rollback.store(true, std::memory_order_release);
+    shutdown.join();
+
+    CHECK(shutdown_error);
+    CheckThrowsContains(
+        [&] {
+            std::rethrow_exception(shutdown_error);
+        },
+        "live corelib");
+    CHECK(runtime->state() == ProcessState::Terminating);
+    CHECK(!runtime->admission_open());
+    tensor.reset();
+}
+
 void TestTerminationClosesAdmissionBeforeTerminator() {
     TempDirectory temp;
     flm::test::ResetFakeCorelib();
@@ -685,6 +850,8 @@ int main() {
         TestPendingNamesUseStartTimeAndPid();
         TestPersistWritesCompleteUniqueRecords();
         TestDrainOrdersFinalRecordsAndRemovesAfterEmission();
+        TestDrainContinuesPastUnreadableAndUnremovableRecords();
+        TestDrainWarnsAndReturnsForInvalidRoot();
         TestDrainPreservesLivePendingRecord();
         TestDrainPreservesPendingWhenProbeFails();
         TestDrainReportsAndRemovesStalePendingRecord();
@@ -695,6 +862,7 @@ int main() {
         TestInitializationFailureCleansUpAndRemovesPending();
         TestMissingDeviceContextCleansUpAndRemovesPending();
         TestHealthyCleanupFollowsLastObjectRelease();
+        TestFailedShutdownRollbackPreservesConcurrentTermination();
         TestTerminationClosesAdmissionBeforeTerminator();
         TestStepSubmissionStateCrossesIrrevocableBoundary();
         TestGetOrCreateKeepsOneProcessRuntimeUntilExplicitShutdown();

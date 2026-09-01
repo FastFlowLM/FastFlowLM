@@ -161,6 +161,18 @@ void Touch(const std::filesystem::path& path) {
     }
 }
 
+void CheckGetDataIdentities(
+    const CorelibApi& api,
+    const std::unordered_map<std::string, void*>& expected) {
+    const auto& functions = api.functions();
+    CHECK(reinterpret_cast<void*>(functions.matmul_weights_get_data) ==
+          expected.at(
+              "ryzenai_corelib_matmul_bf16_weights_get_data"));
+    CHECK(reinterpret_cast<void*>(functions.ssmlp_weights_get_data) ==
+          expected.at(
+              "ryzenai_corelib_ssmlp_bf16_weights_get_data"));
+}
+
 void TestCompleteResolution() {
     auto resolver = flm::test::CompleteCorelibResolver();
     CHECK(resolver.size() == kRequiredSymbols.size());
@@ -243,6 +255,44 @@ void TestCompleteResolution() {
     CHECK_MEMBER_IDENTITY(flat_mha, ryzenai_corelib_flat_mha_bf16);
     CHECK_MEMBER_IDENTITY(cleanup, ryzenai_corelib_cleanup);
 #undef CHECK_MEMBER_IDENTITY
+}
+
+void TestTypeIdenticalGetDataSymbolsCannotBeSwapped() {
+    auto expected = flm::test::CompleteCorelibResolver();
+    const auto matmul_name =
+        "ryzenai_corelib_matmul_bf16_weights_get_data";
+    const auto ssmlp_name =
+        "ryzenai_corelib_ssmlp_bf16_weights_get_data";
+    CHECK(expected.at(matmul_name) != expected.at(ssmlp_name));
+
+    auto api = CorelibApi::ResolveForTest(
+        [&expected](std::string_view name) -> void* {
+            return expected.at(std::string(name));
+        });
+    std::size_t matmul_size = 0;
+    std::size_t ssmlp_size = 0;
+    CHECK(api->functions().matmul_weights_get_data(
+              nullptr,
+              nullptr,
+              &matmul_size) == ryzenai_corelib_status_success);
+    CHECK(api->functions().ssmlp_weights_get_data(
+              nullptr,
+              nullptr,
+              &ssmlp_size) == ryzenai_corelib_status_success);
+    CHECK(matmul_size == 0x4D4D);
+    CHECK(ssmlp_size == 0x5353);
+
+    auto swapped = expected;
+    std::swap(swapped.at(matmul_name), swapped.at(ssmlp_name));
+    auto swapped_api = CorelibApi::ResolveForTest(
+        [&swapped](std::string_view name) -> void* {
+            return swapped.at(std::string(name));
+        });
+    CheckThrowsContains(
+        [&] {
+            CheckGetDataIdentities(*swapped_api, expected);
+        },
+        "matmul_weights_get_data");
 }
 
 void TestMissingSymbolFailsAtomically() {
@@ -457,6 +507,7 @@ static_assert(
 int main() {
     try {
         TestCompleteResolution();
+        TestTypeIdenticalGetDataSymbolsCannotBeSwapped();
         TestMissingSymbolFailsAtomically();
         TestErrorDetailSurvivesStatusConversion();
         TestSuccessfulStatusDoesNotReadErrorState();

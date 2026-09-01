@@ -30,6 +30,7 @@ target_link_directories(flm_corelib_aie4_testlib PUBLIC
     ${XRT_LIB_DIR})
 target_compile_definitions(flm_corelib_aie4_testlib PUBLIC
     FLM_ENABLE_CORELIB_AIE4=1
+    FLM_CORELIB_TESTING=1
     DEV_BUILD=1
     __WINDOWS__
     USEAVX2=1

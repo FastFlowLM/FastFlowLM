@@ -42,7 +42,12 @@ target_compile_definitions(flm_corelib_aie4_testlib PUBLIC
     __NPU_VERSION__=\"${NPU_VERSION}\"
     WIN32_LEAN_AND_MEAN
     NOMINMAX)
-target_compile_options(flm_corelib_aie4_testlib PRIVATE /fp:precise)
+if(MSVC)
+    target_compile_options(flm_corelib_aie4_testlib PRIVATE
+        /arch:AVX2
+        /fp:precise
+        $<$<CONFIG:Release>:/O2>)
+endif()
 target_link_libraries(flm_corelib_aie4_testlib PUBLIC
     xrt_coreutil
     shell32
@@ -60,12 +65,6 @@ function(add_corelib_host_test TEST_NAME TEST_SOURCE)
     add_executable(${TEST_NAME}
         ${TEST_SOURCE}
         fake_corelib.cpp)
-    if(MSVC)
-        target_compile_options(${TEST_NAME} PRIVATE
-            /arch:AVX2
-            /fp:precise
-            $<$<CONFIG:Release>:/O2>)
-    endif()
     target_link_libraries(${TEST_NAME} PRIVATE
         flm_corelib_aie4_testlib)
     add_test(NAME ${TEST_NAME} COMMAND ${TEST_NAME})

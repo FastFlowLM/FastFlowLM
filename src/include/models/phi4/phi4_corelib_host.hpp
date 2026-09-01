@@ -40,6 +40,9 @@ void StageBf16(
     std::int64_t width,
     std::span<std::uint16_t> output);
 
+// Precondition: the caller has successfully synchronized the Stream after
+// V projection and before this host read. ScatterV deliberately owns no
+// Stream and performs no synchronization.
 void ScatterV(
     const corelib::CorelibApi& api,
     ryzenai_corelib_tensor_ptr source,

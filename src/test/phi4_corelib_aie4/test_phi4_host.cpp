@@ -62,6 +62,7 @@ struct RecordingState {
     std::vector<ConvertCall> converts;
     std::vector<ReadCall> reads;
     std::vector<WriteCall> writes;
+    std::size_t synchronize_calls = 0;
     std::vector<std::uint16_t> v_source;
     int v_tensor_storage = 0;
     int v_cache_storage = 0;
@@ -78,6 +79,7 @@ struct RecordingState {
         converts.clear();
         reads.clear();
         writes.clear();
+        synchronize_calls = 0;
     }
 };
 
@@ -238,6 +240,12 @@ ryzenai_corelib_status RecordingTensorWrite(
     return ryzenai_corelib_status_success;
 }
 
+ryzenai_corelib_status RecordingStreamSynchronize(
+    ryzenai_corelib_stream_ptr) {
+    ++g_recording.synchronize_calls;
+    return ryzenai_corelib_status_success;
+}
+
 template <class Function>
 void* FunctionAddress(Function function) {
     return reinterpret_cast<void*>(function);
@@ -257,6 +265,11 @@ std::shared_ptr<CorelibApi> ResolveRecordingCorelib() {
         FunctionAddress(
             static_cast<decltype(&::ryzenai_corelib_tensor_write)>(
                 &RecordingTensorWrite));
+    resolver["ryzenai_corelib_stream_synchronize"] =
+        FunctionAddress(
+            static_cast<
+                decltype(&::ryzenai_corelib_stream_synchronize)>(
+                &RecordingStreamSynchronize));
     return CorelibApi::ResolveForTest(
         [resolver = std::move(resolver)](std::string_view name) mutable
             -> void* {
@@ -367,23 +380,10 @@ void TestStageBf16UsesRneAndZerosOnlyInitialInputPrefixes(
     std::vector<std::uint16_t> hidden(8, kPoison);
     std::vector<std::uint16_t> residual_device(8, kPoison);
 
-    std::vector<std::uint16_t> q(8, kPoison);
-    std::vector<std::uint16_t> k(8, kPoison);
-    std::vector<std::uint16_t> v(8, kPoison);
-    std::vector<std::uint16_t> attention(8, kPoison);
-    std::vector<std::uint16_t> skip_sum(8, kPoison);
-    std::vector<std::uint16_t> next_hidden(8, kPoison);
-    const std::array<std::vector<std::uint16_t>*, 6>
-        kernel_outputs{
-            &q,
-            &k,
-            &v,
-            &attention,
-            &skip_sum,
-            &next_hidden};
-    for (auto* output : kernel_outputs) {
-        std::fill_n(output->begin(), 4, 0x1234u);
-    }
+    // Task 7 has no production consumer for q/k/attention/skip-sum/
+    // next-hidden padded tails. Task 8's dispatch test must poison those
+    // actual persistent buffers and prove its live/helper-authorized
+    // regions exclude stale values.
 
     g_recording.ResetCalls();
     StageBf16(*api, normalized, 2, 3, 2, hidden);
@@ -457,17 +457,6 @@ void TestStageBf16UsesRneAndZerosOnlyInitialInputPrefixes(
         residual_device.end(),
         expected_residual.begin(),
         expected_residual.end()));
-
-    for (const auto* output : kernel_outputs) {
-        CHECK(std::all_of(
-            output->begin(),
-            output->begin() + 4,
-            [](std::uint16_t value) { return value == 0x1234u; }));
-        CHECK(std::all_of(
-            output->begin() + 4,
-            output->end(),
-            [](std::uint16_t value) { return value == kPoison; }));
-    }
 }
 
 std::uint16_t VValue(
@@ -533,7 +522,7 @@ void CheckScatterWrites(
     }
 }
 
-void TestScatterVReadsOnlyLiveRowsAndReusesOneBuffer(
+void TestScatterVReadsOnlyLiveRowsWithoutHiddenSynchronize(
     const std::shared_ptr<CorelibApi>& api) {
     constexpr std::size_t heads = 8;
     constexpr std::size_t width = 128;
@@ -559,6 +548,7 @@ void TestScatterVReadsOnlyLiveRowsAndReusesOneBuffer(
     CHECK(g_recording.reads.front().size == read_size);
     CHECK(g_recording.reads.front().offset == 0);
     CHECK(g_recording.reads.front().destination == staging.data());
+    CHECK(g_recording.synchronize_calls == 0);
     CheckScatterWrites(3, 17);
 
     const auto* staging_begin = staging.data();
@@ -599,6 +589,7 @@ void TestScatterVReadsOnlyLiveRowsAndReusesOneBuffer(
     CHECK(
         g_recording.reads.front().size ==
         heads * width * sizeof(std::uint16_t));
+    CHECK(g_recording.synchronize_calls == 0);
     CheckScatterWrites(1, 20);
     CHECK(metrics.read_calls == 2);
     CHECK(metrics.write_calls == 16);
@@ -699,7 +690,7 @@ int main() {
         TestGatherEmbeddingUsesOneReusableContiguousConversion(api);
         TestRmsNormUsesFp32AccumulationAndSharedEpsilon();
         TestStageBf16UsesRneAndZerosOnlyInitialInputPrefixes(api);
-        TestScatterVReadsOnlyLiveRowsAndReusesOneBuffer(api);
+        TestScatterVReadsOnlyLiveRowsWithoutHiddenSynchronize(api);
         TestArgmaxLowestChoosesLowestTokenOnTie();
         TestInvalidHostArgumentsFailBeforeCorelib(api);
         std::cout << "phi4 host operation tests passed\n";

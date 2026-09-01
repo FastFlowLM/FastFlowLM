@@ -10,7 +10,7 @@ nav_order: 4
 This section reports the performance on NPU with FastFlowLM (FLM).
 
 > **Note:** 
-> - Results are based on FastFlowLM v0.9.40.
+> - Results are based on FastFlowLM v1.0.4.
 > - Under FLM's default NPU power mode (Performance)  
 > - Newer versions may deliver improved performance.
 > - Fine-tuned models show performance comparable to their base models. 

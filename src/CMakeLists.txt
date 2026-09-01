@@ -97,6 +97,16 @@ else()
     if(WIN32)
         set(XRT_INCLUDE_DIR C:/dev/XRT/src/runtime_src/core/include CACHE PATH "Where XRT headers live")
         set(XRT_LIB_DIR     C:/dev/xrtNPUfromDLL                    CACHE PATH "Where XRT libs live")
+        if(FLM_ENABLE_CORELIB_AIE4)
+            target_include_directories(flm_corelib_aie4 PUBLIC
+                ${XRT_INCLUDE_DIR})
+            target_link_directories(flm_corelib_aie4 PUBLIC
+                ${XRT_LIB_DIR})
+            target_link_libraries(flm_corelib_aie4 PUBLIC
+                xrt_coreutil
+                shell32
+                ole32)
+        endif()
     else()
         find_package(PkgConfig)
         if(PkgConfig_FOUND)

@@ -245,7 +245,13 @@ std::filesystem::path CorelibApi::ResolveLibraryPath(
     const std::filesystem::path& executable_dir) {
     if (const auto configured =
             ReadWideEnvironment(kCorelibPathEnvironment)) {
-        auto path = MakeAbsolute(std::filesystem::path(*configured));
+        std::filesystem::path path(*configured);
+        if (!path.is_absolute()) {
+            throw std::invalid_argument(
+                "RYZENAI_CORELIB_PATH must be an absolute file or "
+                "directory path");
+        }
+        path = path.lexically_normal();
         std::error_code error;
         if (std::filesystem::is_directory(path, error)) {
             path /= kCorelibFilename;

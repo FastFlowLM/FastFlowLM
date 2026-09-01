@@ -183,30 +183,66 @@ void TestCompleteResolution() {
     }
 
     const auto& functions = api->functions();
-    CHECK(functions.status_to_string != nullptr);
-    CHECK(functions.get_last_error_message != nullptr);
-    CHECK(functions.selftest_dependencies != nullptr);
-    CHECK(functions.has_device_context != nullptr);
-    CHECK(functions.object_release != nullptr);
-    CHECK(functions.create_stream != nullptr);
-    CHECK(functions.stream_synchronize != nullptr);
-    CHECK(functions.create_device_tensor != nullptr);
-    CHECK(functions.tensor_write != nullptr);
-    CHECK(functions.tensor_read != nullptr);
-    CHECK(functions.tensor_get_byte_size != nullptr);
-    CHECK(functions.convert != nullptr);
-    CHECK(functions.convert_strided != nullptr);
-    CHECK(functions.matmul_pad_shape != nullptr);
-    CHECK(functions.matmul_weights_from_onnx != nullptr);
-    CHECK(functions.matmul_weights_get_data != nullptr);
-    CHECK(functions.matmul != nullptr);
-    CHECK(functions.ssmlp_pad_rows != nullptr);
-    CHECK(functions.ssmlp_weights_from_onnx != nullptr);
-    CHECK(functions.ssmlp_weights_get_data != nullptr);
-    CHECK(functions.ssmlp != nullptr);
-    CHECK(functions.flat_mha_pad_rows != nullptr);
-    CHECK(functions.flat_mha != nullptr);
-    CHECK(functions.cleanup != nullptr);
+#define CHECK_MEMBER_IDENTITY(member, symbol)                          \
+    CHECK(reinterpret_cast<void*>(functions.member) ==                \
+          resolver.at(#symbol))
+    CHECK_MEMBER_IDENTITY(
+        status_to_string,
+        ryzenai_corelib_status_to_string);
+    CHECK_MEMBER_IDENTITY(
+        get_last_error_message,
+        ryzenai_corelib_get_last_error_message);
+    CHECK_MEMBER_IDENTITY(
+        selftest_dependencies,
+        ryzenai_corelib_selftest_dependencies);
+    CHECK_MEMBER_IDENTITY(
+        has_device_context,
+        ryzenai_corelib_has_device_context);
+    CHECK_MEMBER_IDENTITY(
+        object_release,
+        ryzenai_corelib_object_release);
+    CHECK_MEMBER_IDENTITY(create_stream, ryzenai_corelib_create_stream);
+    CHECK_MEMBER_IDENTITY(
+        stream_synchronize,
+        ryzenai_corelib_stream_synchronize);
+    CHECK_MEMBER_IDENTITY(
+        create_device_tensor,
+        ryzenai_corelib_create_device_tensor);
+    CHECK_MEMBER_IDENTITY(tensor_write, ryzenai_corelib_tensor_write);
+    CHECK_MEMBER_IDENTITY(tensor_read, ryzenai_corelib_tensor_read);
+    CHECK_MEMBER_IDENTITY(
+        tensor_get_byte_size,
+        ryzenai_corelib_tensor_get_byte_size);
+    CHECK_MEMBER_IDENTITY(convert, ryzenai_corelib_convert);
+    CHECK_MEMBER_IDENTITY(
+        convert_strided,
+        ryzenai_corelib_convert_strided);
+    CHECK_MEMBER_IDENTITY(
+        matmul_pad_shape,
+        ryzenai_corelib_matmul_bf16_pad_shape);
+    CHECK_MEMBER_IDENTITY(
+        matmul_weights_from_onnx,
+        ryzenai_corelib_matmul_bf16_weights_create_from_onnx_components);
+    CHECK_MEMBER_IDENTITY(
+        matmul_weights_get_data,
+        ryzenai_corelib_matmul_bf16_weights_get_data);
+    CHECK_MEMBER_IDENTITY(matmul, ryzenai_corelib_matmul_bf16);
+    CHECK_MEMBER_IDENTITY(
+        ssmlp_pad_rows,
+        ryzenai_corelib_ssmlp_bf16_pad_rows);
+    CHECK_MEMBER_IDENTITY(
+        ssmlp_weights_from_onnx,
+        ryzenai_corelib_ssmlp_bf16_weights_create_from_onnx_components);
+    CHECK_MEMBER_IDENTITY(
+        ssmlp_weights_get_data,
+        ryzenai_corelib_ssmlp_bf16_weights_get_data);
+    CHECK_MEMBER_IDENTITY(ssmlp, ryzenai_corelib_ssmlp_bf16);
+    CHECK_MEMBER_IDENTITY(
+        flat_mha_pad_rows,
+        ryzenai_corelib_flat_mha_bf16_pad_rows);
+    CHECK_MEMBER_IDENTITY(flat_mha, ryzenai_corelib_flat_mha_bf16);
+    CHECK_MEMBER_IDENTITY(cleanup, ryzenai_corelib_cleanup);
+#undef CHECK_MEMBER_IDENTITY
 }
 
 void TestMissingSymbolFailsAtomically() {
@@ -352,6 +388,40 @@ void TestExplicitCorelibDirectoryWins() {
           (explicit_directory / "ryzenai_corelib.dll").lexically_normal());
 }
 
+void TestRelativeCorelibFileOverrideIsRejected() {
+    TempDirectory temp;
+    const auto executable_dir = temp.path() / "bin";
+    std::filesystem::create_directories(executable_dir);
+    Touch(temp.path() / "relative-corelib.dll");
+    ScopedCurrentPath current_path{temp.path()};
+    ScopedEnvironment override_path{
+        L"RYZENAI_CORELIB_PATH",
+        L"relative-corelib.dll"};
+
+    CheckThrowsContains(
+        [&] {
+            (void)CorelibApi::ResolveLibraryPath(executable_dir);
+        },
+        "absolute");
+}
+
+void TestRelativeCorelibDirectoryOverrideIsRejected() {
+    TempDirectory temp;
+    const auto executable_dir = temp.path() / "bin";
+    std::filesystem::create_directories(executable_dir);
+    std::filesystem::create_directories(temp.path() / "relative-runtime");
+    ScopedCurrentPath current_path{temp.path()};
+    ScopedEnvironment override_path{
+        L"RYZENAI_CORELIB_PATH",
+        L"relative-runtime"};
+
+    CheckThrowsContains(
+        [&] {
+            (void)CorelibApi::ResolveLibraryPath(executable_dir);
+        },
+        "absolute");
+}
+
 void TestFallbackIgnoresCurrentDirectoryAndPath() {
     TempDirectory temp;
     const auto executable_dir = temp.path() / "application";
@@ -395,6 +465,8 @@ int main() {
         TestNullResetDoesNotRelease();
         TestExplicitCorelibFileWins();
         TestExplicitCorelibDirectoryWins();
+        TestRelativeCorelibFileOverrideIsRejected();
+        TestRelativeCorelibDirectoryOverrideIsRejected();
         TestFallbackIgnoresCurrentDirectoryAndPath();
         std::cout << "test_corelib_api: PASS\n";
         return 0;

@@ -43,7 +43,17 @@ target_compile_definitions(flm_corelib_aie4_testlib PUBLIC
     NOMINMAX)
 target_compile_options(flm_corelib_aie4_testlib PRIVATE /fp:precise)
 target_link_libraries(flm_corelib_aie4_testlib PUBLIC
-    xrt_coreutil)
+    xrt_coreutil
+    shell32
+    ole32)
+
+add_library(fake_ryzenai_corelib SHARED
+    fake_corelib.cpp)
+target_include_directories(fake_ryzenai_corelib PRIVATE
+    ${RYZENAI_CORELIB_INCLUDE_DIR})
+target_compile_definitions(fake_ryzenai_corelib PRIVATE
+    RYZENAI_CORELIB_EXPORT=1
+    FLM_FAKE_CORELIB_DLL=1)
 
 function(add_corelib_host_test TEST_NAME TEST_SOURCE)
     add_executable(${TEST_NAME}
@@ -59,3 +69,11 @@ endfunction()
 
 enable_testing()
 add_corelib_host_test(test_corelib_api test_corelib_api.cpp)
+add_corelib_host_test(
+    test_corelib_fatal_record
+    test_corelib_fatal_record.cpp)
+add_dependencies(
+    test_corelib_fatal_record
+    fake_ryzenai_corelib)
+target_link_libraries(test_corelib_fatal_record PRIVATE
+    advapi32)

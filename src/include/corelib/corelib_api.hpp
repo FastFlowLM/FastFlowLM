@@ -20,9 +20,14 @@ struct CorelibError final : std::runtime_error {
         std::string detail,
         std::string status_text);
 
+    CorelibError WithContext(std::string_view context) const;
+
     ryzenai_corelib_status status;
     std::string call;
     std::string detail;
+
+private:
+    std::string status_text_;
 };
 
 struct CorelibFunctions {

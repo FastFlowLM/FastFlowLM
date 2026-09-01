@@ -18,6 +18,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <stdexcept>
@@ -32,6 +33,7 @@
 namespace {
 
 using flm::corelib::CorelibApi;
+using flm::corelib::CorelibError;
 using flm::phi4::Phi4Package;
 using flm::phi4::Phi4Weights;
 using flm::phi4::WeightObjectKind;
@@ -106,6 +108,8 @@ struct RecordingState {
     std::size_t get_data_calls = 0;
     bool every_get_data_pointer_argument_was_null = true;
     bool every_get_data_size_argument_was_nonnull = true;
+    std::size_t matmul_packed_bytes = kMatMulPackedBytes;
+    std::size_t ssmlp_packed_bytes = kSsMlpPackedBytes;
 };
 
 RecordingState* g_recording = nullptr;
@@ -228,7 +232,7 @@ ryzenai_corelib_status RecordingMatMulGetData(
             "intentional Task 6 MatMul get-data failure");
         return ryzenai_corelib_status_unsupported;
     }
-    *size = kMatMulPackedBytes;
+    *size = state.matmul_packed_bytes;
     return ryzenai_corelib_status_success;
 }
 
@@ -289,7 +293,7 @@ ryzenai_corelib_status RecordingSsMlpGetData(
             "intentional Task 6 SSMLP get-data failure");
         return ryzenai_corelib_status_unsupported;
     }
-    *size = kSsMlpPackedBytes;
+    *size = state.ssmlp_packed_bytes;
     return ryzenai_corelib_status_success;
 }
 
@@ -493,11 +497,8 @@ public:
     void AddMatMul(
         const std::string& name,
         std::int64_t k,
-        std::int64_t n,
-        bool opaque_qweight = false) {
-        const std::string qweight =
-            opaque_qweight ? "opaque-qweight-from-explicit-role"
-                           : name + ".qweight";
+        std::int64_t n) {
+        const std::string qweight = name + ".qweight";
         const std::string scales = name + ".scales";
         const std::string qzeros = name + ".qzeros";
         manifest_["weight_objects"].push_back({
@@ -630,8 +631,7 @@ public:
             AddMatMul(
                 base + "q_proj.MatMulNBits",
                 3072,
-                3072,
-                layer == 0);
+                3072);
             AddMatMul(
                 base + "k_proj.MatMulNBits",
                 3072,
@@ -878,8 +878,6 @@ void TestExactConstructionAndLifetime(
 
         const auto& objects = package->weight_objects();
         CHECK(objects.size() == 161);
-        CHECK(Role(objects.front(), "qweight") ==
-              "opaque-qweight-from-explicit-role");
         for (std::size_t layer = 0; layer < 32; ++layer) {
             const std::size_t object_base = layer * 5;
             const std::size_t matmul_base = layer * 4;
@@ -1063,13 +1061,15 @@ void TestMoveAssignmentReleasesBeforeOwners(
 void CheckLoadFailure(
     RecordingState& state,
     const std::shared_ptr<CorelibApi>& api,
-    const std::shared_ptr<Phi4Package>& package,
+    std::shared_ptr<Phi4Package> package,
     FailurePoint failure,
+    std::size_t failure_ordinal,
+    std::size_t expected_created,
     std::string_view object_name,
     std::string_view call,
     std::string_view detail) {
     state.failure = failure;
-    state.failure_ordinal = 1;
+    state.failure_ordinal = failure_ordinal;
     state.matmul_create_attempts = 0;
     state.matmul_get_attempts = 0;
     state.ssmlp_create_attempts = 0;
@@ -1088,18 +1088,35 @@ void CheckLoadFailure(
     flm::test::SetLastErrorMessage({});
 
     try {
-        (void)Phi4Weights::Load(api, package);
-    } catch (const std::exception& error) {
-        const std::string_view message(error.what());
-        CHECK(message.find(object_name) != std::string_view::npos);
-        CHECK(message.find(call) != std::string_view::npos);
-        CHECK(message.find(detail) != std::string_view::npos);
+        (void)Phi4Weights::Load(api, std::move(package));
+    } catch (const CorelibError& error) {
+        const std::string expected_context =
+            "Phi-4 weight object '" + std::string(object_name) + "'";
+        const std::string expected_detail =
+            expected_context + ": " + std::string(detail);
+        const std::string expected_what =
+            std::string(call) + " failed: unsupported: " +
+            expected_detail;
+        CHECK(error.status == ryzenai_corelib_status_unsupported);
+        CHECK(error.call == call);
+        CHECK(error.detail == expected_detail);
+        CHECK(std::string_view(error.what()) == expected_what);
+        CHECK(state.creation_order.size() == expected_created);
+        CHECK(state.release_order.size() == expected_created);
+        CheckReleaseOrder(
+            state.creation_order,
+            state.release_order);
         CHECK(api->live_object_count() == 0);
         CHECK(std::all_of(
             state.package_alive_at_release.begin(),
             state.package_alive_at_release.end(),
             [](bool value) { return value; }));
+        CHECK(state.current_package.expired());
         return;
+    } catch (const std::exception& error) {
+        throw std::runtime_error(
+            "expected typed CorelibError for " +
+            std::string(object_name) + ", got: " + error.what());
     }
     throw std::runtime_error(
         "expected Phi4Weights::Load failure was not thrown");
@@ -1111,50 +1128,117 @@ void TestActionableFailures(const SyntheticPackage& fixture) {
     auto api = ResolveRecordingCorelib(state);
     auto package = fixture.Load(api);
 
-    CheckThrowsContains(
+    const auto check_validation_error = [](
+                                            auto&& action,
+                                            std::string_view expected) {
+        try {
+            action();
+        } catch (const CorelibError&) {
+            throw std::runtime_error(
+                "non-corelib validation became CorelibError");
+        } catch (const std::invalid_argument& error) {
+            CHECK(std::string_view(error.what()).find(expected) !=
+                  std::string_view::npos);
+            return;
+        }
+        throw std::runtime_error(
+            "expected non-corelib validation error");
+    };
+    check_validation_error(
         [&] {
             (void)Phi4Weights::Load(nullptr, package);
         },
         "CorelibApi");
-    CheckThrowsContains(
+    check_validation_error(
         [&] {
             (void)Phi4Weights::Load(api, nullptr);
         },
         "Phi4Package");
+    package.reset();
 
     CheckLoadFailure(
         state,
         api,
-        package,
+        fixture.Load(api),
         FailurePoint::MatMulCreate,
-        "model.layers.0.attn.q_proj.MatMulNBits",
+        70,
+        86,
+        "model.layers.17.attn.k_proj.MatMulNBits",
         "ryzenai_corelib_matmul_bf16_weights_create_from_onnx_components",
         "intentional Task 6 MatMul create failure");
     CheckLoadFailure(
         state,
         api,
-        package,
+        fixture.Load(api),
         FailurePoint::MatMulGetData,
-        "model.layers.0.attn.q_proj.MatMulNBits",
+        75,
+        93,
+        "model.layers.18.attn.v_proj.MatMulNBits",
         "ryzenai_corelib_matmul_bf16_weights_get_data",
         "intentional Task 6 MatMul get-data failure");
     CheckLoadFailure(
         state,
         api,
-        package,
+        fixture.Load(api),
         FailurePoint::SsMlpCreate,
-        "model.layers.0.ssmlp",
+        24,
+        119,
+        "model.layers.23.ssmlp",
         "ryzenai_corelib_ssmlp_bf16_weights_create_from_onnx_components",
         "intentional Task 6 SSMLP create failure");
     CheckLoadFailure(
         state,
         api,
-        package,
+        fixture.Load(api),
         FailurePoint::SsMlpGetData,
-        "model.layers.0.ssmlp",
+        29,
+        145,
+        "model.layers.28.ssmlp",
         "ryzenai_corelib_ssmlp_bf16_weights_get_data",
         "intentional Task 6 SSMLP get-data failure");
     g_recording = nullptr;
+}
+
+void TestNonCorelibObjectFailureRemainsDistinct(
+    const SyntheticPackage& fixture) {
+    RecordingState state;
+    state.matmul_packed_bytes =
+        std::numeric_limits<std::size_t>::max();
+    flm::test::ResetFakeCorelib();
+    auto api = ResolveRecordingCorelib(state);
+    auto package = fixture.Load(api);
+    const std::weak_ptr<Phi4Package> package_lifetime = package;
+    state.current_package = package;
+
+    try {
+        (void)Phi4Weights::Load(api, std::move(package));
+    } catch (const CorelibError&) {
+        throw std::runtime_error(
+            "packed-byte validation became CorelibError");
+    } catch (const std::runtime_error& error) {
+        const std::string_view message(error.what());
+        CHECK(
+            message.find(
+                "model.layers.0.attn.k_proj.MatMulNBits") !=
+            std::string_view::npos);
+        CHECK(message.find("overflows size_t") !=
+              std::string_view::npos);
+        CHECK(state.creation_order.size() == 2);
+        CHECK(state.release_order.size() == 2);
+        CheckReleaseOrder(
+            state.creation_order,
+            state.release_order);
+        CHECK(std::all_of(
+            state.package_alive_at_release.begin(),
+            state.package_alive_at_release.end(),
+            [](bool value) { return value; }));
+        CHECK(package_lifetime.expired());
+        CHECK(api->live_object_count() == 0);
+        g_recording = nullptr;
+        return;
+    }
+    throw std::runtime_error(
+        "expected packed-byte validation failure");
 }
 
 static_assert(!std::is_copy_constructible_v<Phi4Weights>);
@@ -1170,6 +1254,7 @@ int main() {
         TestExactConstructionAndLifetime(fixture);
         TestMoveAssignmentReleasesBeforeOwners(fixture);
         TestActionableFailures(fixture);
+        TestNonCorelibObjectFailureRemainsDistinct(fixture);
         std::cout << "test_phi4_weights: PASS\n";
         return 0;
     } catch (const std::exception& error) {

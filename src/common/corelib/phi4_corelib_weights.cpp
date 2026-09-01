@@ -46,6 +46,13 @@ void AddPackedBytes(
 
 [[noreturn]] void ThrowObjectError(
     const WeightObjectView& object,
+    const corelib::CorelibError& error) {
+    throw error.WithContext(
+        "Phi-4 weight object '" + object.name + "'");
+}
+
+[[noreturn]] void ThrowObjectError(
+    const WeightObjectView& object,
     const std::exception& error) {
     throw std::runtime_error(
         "failed to load Phi-4 weight object '" + object.name +
@@ -105,6 +112,8 @@ corelib::UniqueMatMulWeights CreateMatMul(
             kMatMulGetDataCall);
         AddPackedBytes(packed_size, packed_bytes);
         return weights;
+    } catch (const corelib::CorelibError& error) {
+        ThrowObjectError(object, error);
     } catch (const std::exception& error) {
         ThrowObjectError(object, error);
     }
@@ -201,6 +210,8 @@ corelib::UniqueSsMlpWeights CreateSsMlp(
             kSsMlpGetDataCall);
         AddPackedBytes(packed_size, packed_bytes);
         return weights;
+    } catch (const corelib::CorelibError& error) {
+        ThrowObjectError(object, error);
     } catch (const std::exception& error) {
         ThrowObjectError(object, error);
     }

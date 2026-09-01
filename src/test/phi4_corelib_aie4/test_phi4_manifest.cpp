@@ -743,18 +743,10 @@ void ExpectLoadFailure(
         std::string(expected) + "'");
 }
 
-void TestValidMappingAndExplicitGrouping(
+void TestValidMappingAndExplicitRoles(
     const SyntheticPackage& fixture,
     const std::shared_ptr<CorelibApi>& api) {
-    json manifest = fixture.manifest();
-    const std::string original =
-        "model.layers.0.attn.q_proj.MatMulNBits.qweight";
-    const std::string opaque = "opaque-initializer-000";
-    manifest["initializers"][opaque] =
-        manifest["initializers"].at(original);
-    manifest["initializers"].erase(original);
-    manifest["weight_objects"][0]["roles"]["qweight"] = opaque;
-    fixture.Write(manifest);
+    fixture.Write(fixture.manifest());
 
     auto package = Phi4Package::Load(fixture.path(), api, false);
     CHECK(package.weight_objects().size() == 161);
@@ -766,7 +758,9 @@ void TestValidMappingAndExplicitGrouping(
     CHECK(first.n == 3072);
     CHECK(first.group_size == 128);
     CHECK(!first.has_bias);
-    CHECK(first.components.at("qweight") == opaque);
+    CHECK(
+        first.components.at("qweight") ==
+        "model.layers.0.attn.q_proj.MatMulNBits.qweight");
 
     const auto& last = package.weight_objects().back();
     CHECK(last.name == "lm_head.MatMulNBits");
@@ -959,6 +953,43 @@ void TestWeightObjectRejections(
                 manifest["weight_objects"][0]["roles"]["qweight"];
         },
         "duplicate initializer");
+}
+
+void TestRoleInitializerIdentityRejections(
+    const SyntheticPackage& fixture,
+    const std::shared_ptr<CorelibApi>& api) {
+    ExpectLoadFailure(
+        fixture,
+        api,
+        [](json& manifest) {
+            auto& q_role =
+                manifest["weight_objects"][0]["roles"]["qweight"];
+            auto& o_role =
+                manifest["weight_objects"][3]["roles"]["qweight"];
+            const std::string q_initializer =
+                q_role.get<std::string>();
+            q_role = o_role.get<std::string>();
+            o_role = q_initializer;
+        },
+        "model.layers.0.attn.q_proj.MatMulNBits.qweight "
+        "(model.layers.0.attn.o_proj.MatMulNBits.qweight)");
+    ExpectLoadFailure(
+        fixture,
+        api,
+        [](json& manifest) {
+            constexpr std::size_t layer5 = 5u * 5u + 4u;
+            constexpr std::size_t layer31 = 31u * 5u + 4u;
+            auto& layer5_norm =
+                manifest["weight_objects"][layer5]["roles"]["norm1"];
+            auto& layer31_norm =
+                manifest["weight_objects"][layer31]["roles"]["norm1"];
+            const std::string initializer =
+                layer5_norm.get<std::string>();
+            layer5_norm = layer31_norm.get<std::string>();
+            layer31_norm = initializer;
+        },
+        "model.layers.5.ssmlp.norm1 "
+        "(model.layers.32.final_norm_layernorm.weight)");
 }
 
 void TestExactSourceValidation(
@@ -1253,10 +1284,11 @@ int main() {
     try {
         SyntheticPackage fixture;
         auto api = ResolveRecordingCorelib();
-        TestValidMappingAndExplicitGrouping(fixture, api);
+        TestValidMappingAndExplicitRoles(fixture, api);
         TestMappedOwnerOutlivesPackage(fixture, api);
         TestPathRangeAndHashRejections(fixture, api);
         TestWeightObjectRejections(fixture, api);
+        TestRoleInitializerIdentityRejections(fixture, api);
         TestExactSourceValidation(fixture, api);
         TestComponentDiagnosticsIdentifyWeightObjects(fixture, api);
         TestOwnedScaleAndNormConversions(fixture, api);

@@ -197,7 +197,22 @@ CorelibError::CorelibError(
           detail_value)),
       status(status_value),
       call(std::move(call_value)),
-      detail(std::move(detail_value)) {}
+      detail(std::move(detail_value)),
+      status_text_(std::move(status_text)) {}
+
+CorelibError CorelibError::WithContext(
+    std::string_view context) const {
+    std::string enriched_detail(context);
+    if (!enriched_detail.empty() && !detail.empty()) {
+        enriched_detail += ": ";
+    }
+    enriched_detail += detail;
+    return CorelibError{
+        status,
+        call,
+        std::move(enriched_detail),
+        status_text_};
+}
 
 std::shared_ptr<CorelibApi> CorelibApi::Load(
     const std::filesystem::path& absolute_path) {

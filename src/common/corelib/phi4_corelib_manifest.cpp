@@ -354,48 +354,92 @@ struct ExpectedWeightObject {
     WeightObjectKind kind;
     std::int64_t k;
     std::int64_t n;
+    std::map<std::string, std::string> components;
 };
+
+std::map<std::string, std::string> ExpectedMatMulComponents(
+    const std::string& object_name) {
+    return {
+        {"qweight", object_name + ".qweight"},
+        {"scales", object_name + ".scales"},
+        {"qzeros", object_name + ".qzeros"}};
+}
+
+std::map<std::string, std::string> ExpectedSsMlpComponents(
+    std::int64_t layer) {
+    const std::string base =
+        "model.layers." + std::to_string(layer);
+    std::map<std::string, std::string> components{
+        {"norm0", base + ".post_attention_layernorm.weight"},
+        {"norm1",
+         layer + 1 == constants::kLayerCount
+             ? "model.layers.32.final_norm_layernorm.weight"
+             : "model.layers." + std::to_string(layer + 1) +
+                   ".input_layernorm.weight"}};
+    for (const std::string projection : {"gate", "up", "down"}) {
+        const std::string initializer =
+            base + ".mlp." + projection + "_proj.MatMulNBits.";
+        components.emplace(
+            projection + "_qweight",
+            initializer + "qweight");
+        components.emplace(
+            projection + "_scales",
+            initializer + "scales");
+        components.emplace(
+            projection + "_qzeros",
+            initializer + "qzeros");
+    }
+    return components;
+}
 
 const std::vector<ExpectedWeightObject>& ExpectedWeightObjects() {
     static const std::vector<ExpectedWeightObject> expected = [] {
         std::vector<ExpectedWeightObject> values;
         values.reserve(kExpectedWeightObjects);
+        const auto add_matmul = [&](
+                                    std::string name,
+                                    std::int64_t k,
+                                    std::int64_t n) {
+            auto components = ExpectedMatMulComponents(name);
+            values.push_back({
+                std::move(name),
+                WeightObjectKind::MatMul,
+                k,
+                n,
+                std::move(components)});
+        };
         for (std::int64_t layer = 0;
              layer < constants::kLayerCount;
              ++layer) {
             const std::string base =
                 "model.layers." + std::to_string(layer) + ".attn.";
-            values.push_back({
+            add_matmul(
                 base + "q_proj.MatMulNBits",
-                WeightObjectKind::MatMul,
                 constants::kHiddenSize,
-                constants::kQueryDimension});
-            values.push_back({
+                constants::kQueryDimension);
+            add_matmul(
                 base + "k_proj.MatMulNBits",
-                WeightObjectKind::MatMul,
                 constants::kHiddenSize,
-                constants::kKvDimension});
-            values.push_back({
+                constants::kKvDimension);
+            add_matmul(
                 base + "v_proj.MatMulNBits",
-                WeightObjectKind::MatMul,
                 constants::kHiddenSize,
-                constants::kKvDimension});
-            values.push_back({
+                constants::kKvDimension);
+            add_matmul(
                 base + "o_proj.MatMulNBits",
-                WeightObjectKind::MatMul,
                 constants::kQueryDimension,
-                constants::kHiddenSize});
+                constants::kHiddenSize);
             values.push_back({
                 "model.layers." + std::to_string(layer) + ".ssmlp",
                 WeightObjectKind::SsMlp,
                 constants::kHiddenSize,
-                constants::kIntermediateSize});
+                constants::kIntermediateSize,
+                ExpectedSsMlpComponents(layer)});
         }
-        values.push_back({
+        add_matmul(
             "lm_head.MatMulNBits",
-            WeightObjectKind::MatMul,
             constants::kHiddenSize,
-            constants::kVocabularySize});
+            constants::kVocabularySize);
         return values;
     }();
     return expected;
@@ -1147,6 +1191,23 @@ Phi4Package Phi4Package::Load(
                     "duplicate initializer reference across weight objects");
             }
             components.emplace(role, initializer_name);
+        }
+        for (const auto& [role, expected_initializer] :
+             expected.components) {
+            const auto component = components.find(role);
+            if (
+                component == components.end() ||
+                component->second != expected_initializer) {
+                Throw(
+                    component == components.end()
+                        ? ComponentContext(name, role)
+                        : ComponentContext(
+                              name,
+                              role,
+                              component->second),
+                    "does not match fixed Phi-4 initializer " +
+                        expected_initializer);
+            }
         }
 
         if (kind == WeightObjectKind::MatMul) {

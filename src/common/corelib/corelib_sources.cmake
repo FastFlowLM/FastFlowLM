@@ -1,0 +1,2 @@
+set(FLM_CORELIB_AIE4_SOURCES
+    "${CMAKE_CURRENT_LIST_DIR}/corelib_api.cpp")

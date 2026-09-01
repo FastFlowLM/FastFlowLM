@@ -48,6 +48,30 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_RELEASE ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
 # ———————————————————————————————————————————————
 option(FLM_USE_HRX "Use the HRX amdxdna NPU runtime instead of XRT (0=XRT default, 1=HRX)" OFF)
 option(FLM_PORTABLE_BUILD "Build portable distribution with bundled runtime libraries" OFF)
+option(FLM_ENABLE_CORELIB_AIE4
+       "Enable optional Phi-4 AIE4 execution through ryzenai-corelib" OFF)
+
+if(FLM_ENABLE_CORELIB_AIE4 AND (NOT WIN32 OR FLM_USE_HRX))
+    message(FATAL_ERROR
+        "FLM_ENABLE_CORELIB_AIE4 requires Windows and the XRT backend")
+endif()
+
+if(FLM_ENABLE_CORELIB_AIE4)
+    find_path(RYZENAI_CORELIB_INCLUDE_DIR
+              NAMES ryzenai/corelib.h
+              REQUIRED)
+    include("${CMAKE_SOURCE_DIR}/common/corelib/corelib_sources.cmake")
+    add_library(flm_corelib_aie4 STATIC
+        ${FLM_CORELIB_AIE4_SOURCES})
+    target_include_directories(flm_corelib_aie4 PUBLIC
+        ${CMAKE_SOURCE_DIR}/include
+        ${RYZENAI_CORELIB_INCLUDE_DIR})
+    target_compile_definitions(flm_corelib_aie4 PUBLIC
+        FLM_ENABLE_CORELIB_AIE4=1
+        WIN32_LEAN_AND_MEAN
+        NOMINMAX)
+    target_compile_options(flm_corelib_aie4 PRIVATE /fp:precise)
+endif()
 
 if(FLM_USE_HRX)
     set(FLM_RUNTIME_NAME "hrx")
@@ -236,6 +260,7 @@ add_subdirectory(${CMAKE_SOURCE_DIR}/../third_party/tokenizers-cpp
 # Gather your sources
 # ———————————————————————————————————————————————
 file(GLOB SOURCES "src/*.cpp" "runner/*.cpp" "common/*.cpp" "common/*/*.cpp" "server/*.cpp" "pull/*.cpp" )
+list(FILTER SOURCES EXCLUDE REGEX ".*/common/corelib/.*\\.cpp$")
 file(GLOB HEADERS "include/*.hpp" "runner/*.hpp" "common/*.hpp" "common/*/*.hpp" "server/*.hpp" "pull/*.hpp")
 
 # Exclude files that depend on missing libraries for Linux
@@ -268,6 +293,10 @@ endif()
 
 
 add_executable(flm ${SOURCES} ${HEADERS})
+
+if(FLM_ENABLE_CORELIB_AIE4)
+    target_link_libraries(flm PRIVATE flm_corelib_aie4)
+endif()
 
 if(WIN32)
     if(VCPKG_TOOLCHAIN)

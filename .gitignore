@@ -5,3 +5,4 @@ __pycache__
 _site
 .jekyll-metadata
 *.csv
+/docs/superpowers/

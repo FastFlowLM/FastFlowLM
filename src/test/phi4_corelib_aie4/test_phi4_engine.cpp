@@ -20,6 +20,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iostream>
 #include <limits>
 #include <map>
@@ -61,6 +62,17 @@ constexpr std::uint16_t kPoison = 0xDEADu;
 std::int64_t PaddedRows(std::int64_t rows) {
     return rows == 1 ? 1 : ((rows + 3) / 4) * 4;
 }
+
+using PadRowsFunction =
+    std::function<std::int64_t(std::int64_t)>;
+
+struct PaddingFunctions {
+    PadRowsFunction query_projection = PaddedRows;
+    PadRowsFunction kv_projection = PaddedRows;
+    PadRowsFunction lm_head = PaddedRows;
+    PadRowsFunction ssmlp = PaddedRows;
+    PadRowsFunction attention = PaddedRows;
+};
 
 class TempDirectory final {
 public:
@@ -672,6 +684,7 @@ struct FakeTensor final : FakeObject {
     ryzenai_corelib_data_type data_type;
     std::vector<std::int64_t> shape;
     std::size_t byte_size;
+    std::string last_producer;
     std::unordered_map<std::size_t, std::unique_ptr<Page>> pages;
 };
 
@@ -732,6 +745,7 @@ enum class FailurePoint {
     FirstQ,
     KAfterQ,
     Synchronize,
+    DestructionSynchronize,
     StageBadAlloc,
     ScatterBadAlloc,
     ScatterUnknown
@@ -749,12 +763,14 @@ struct RecordingState {
     std::vector<SsMlpCall> ssmlp_calls;
     std::vector<MhaCall> mha_calls;
     std::vector<TensorWriteCall> stage_writes;
+    PaddingFunctions padding;
     std::set<FakeTensor*> q_tensors;
     std::set<FakeTensor*> k_tensors;
     std::set<FakeTensor*> v_tensors;
     std::set<FakeTensor*> attention_tensors;
     std::set<FakeTensor*> skip_sum_tensors;
     std::set<FakeTensor*> normalized_tensors;
+    FakeTensor* lm_input = nullptr;
     FakeTensor* staged_hidden = nullptr;
     FakeTensor* staged_residual = nullptr;
     FailurePoint failure = FailurePoint::None;
@@ -766,6 +782,8 @@ struct RecordingState {
     bool input_poison_observed = false;
     bool host_read_poison_observed = false;
     bool cache_publish_poison_observed = false;
+    bool destruction_failure_returned = false;
+    std::filesystem::path post_failure_marker;
     bool terminator_called = false;
     unsigned int termination_code = 0;
     std::optional<std::thread::id> load_thread;
@@ -892,6 +910,29 @@ int WeightLayer(const std::string& label) {
     return std::stoi(label.substr(label.find('_') + 1));
 }
 
+std::int64_t MatMulPaddedRows(
+    const RecordingState& state,
+    const ryzenai_corelib_matmul_bf16_weights_desc& desc,
+    std::int64_t rows) {
+    if (
+        desc.k == constants::kHiddenSize &&
+        desc.n == constants::kVocabularySize) {
+        return state.padding.lm_head(rows);
+    }
+    if (
+        desc.k == constants::kHiddenSize &&
+        desc.n == constants::kKvDimension) {
+        return state.padding.kv_projection(rows);
+    }
+    if (
+        desc.k == constants::kHiddenSize &&
+        desc.n == constants::kQueryDimension) {
+        return state.padding.query_projection(rows);
+    }
+    throw std::runtime_error(
+        "engine fake received an unknown matmul shape");
+}
+
 ryzenai_corelib_status RecordingConvert(
     ryzenai_corelib_data_type source_type,
     const void* source,
@@ -954,14 +995,20 @@ ryzenai_corelib_status RecordingConvertStrided(
 
 ryzenai_corelib_status RecordingMatMulPadShape(
     std::int64_t* m,
-    std::int64_t*,
-    std::int64_t*,
+    std::int64_t* k,
+    std::int64_t* n,
     std::uint32_t) {
-    State().ObserveLoadThread();
-    if (m == nullptr || *m <= 0) {
+    auto& state = State();
+    state.ObserveLoadThread();
+    if (
+        m == nullptr || k == nullptr || n == nullptr ||
+        *m <= 0 || *k <= 0 || *n <= 0) {
         return ryzenai_corelib_status_bad_argument;
     }
-    *m = PaddedRows(*m);
+    ryzenai_corelib_matmul_bf16_weights_desc desc{};
+    desc.k = *k;
+    desc.n = *n;
+    *m = MatMulPaddedRows(state, desc, *m);
     return ryzenai_corelib_status_success;
 }
 
@@ -970,22 +1017,24 @@ ryzenai_corelib_status RecordingSsMlpPadRows(
     std::int64_t,
     std::int64_t,
     std::uint32_t) {
-    State().ObserveLoadThread();
+    auto& state = State();
+    state.ObserveLoadThread();
     if (m == nullptr || *m <= 0) {
         return ryzenai_corelib_status_bad_argument;
     }
-    *m = PaddedRows(*m);
+    *m = state.padding.ssmlp(*m);
     return ryzenai_corelib_status_success;
 }
 
 ryzenai_corelib_status RecordingMhaPadRows(
     std::int64_t* m,
     const ryzenai_corelib_flat_mha_bf16_desc*) {
-    State().ObserveLoadThread();
+    auto& state = State();
+    state.ObserveLoadThread();
     if (m == nullptr || *m <= 0) {
         return ryzenai_corelib_status_bad_argument;
     }
-    *m = PaddedRows(*m);
+    *m = state.padding.attention(*m);
     return ryzenai_corelib_status_success;
 }
 
@@ -1018,6 +1067,9 @@ ryzenai_corelib_status RecordingCreateTensor(
         TensorBytes(data_type, dimensions),
         "tensor_" + std::to_string(ordinal));
     state.tensors.push_back(tensor);
+    if (ordinal == 8) {
+        state.lm_input = tensor;
+    }
     *out = tensor;
     return ryzenai_corelib_status_success;
 }
@@ -1072,6 +1124,20 @@ ryzenai_corelib_status RecordingTensorWrite(
         state.events.push_back(
             "tensor_write_v_head_" + std::to_string(head));
     } else if (
+        state.active_layer >= 0 &&
+        (value->last_producer == "q" ||
+         value->last_producer == "k" ||
+         value->last_producer == "attention" ||
+         value->last_producer == "o" ||
+         value->last_producer == "normalized")) {
+        state.events.push_back(
+            "padding_write_" + value->last_producer);
+    } else if (
+        value == state.lm_input &&
+        value->last_producer.empty()) {
+        state.events.emplace_back("padding_write_lm_input");
+        value->last_producer = "lm_initialized";
+    } else if (
         value->data_type == ryzenai_corelib_data_type_bf16 &&
         value->shape ==
             std::vector<std::int64_t>{4096, 3072}) {
@@ -1115,9 +1181,13 @@ ryzenai_corelib_status RecordingTensorRead(
             state.host_read_poison_observed = true;
         }
     } else if (
-        value->shape ==
-        std::vector<std::int64_t>{1, 200064}) {
+        value->shape.size() == 2 &&
+        value->shape[1] == constants::kVocabularySize) {
         state.events.emplace_back("tensor_read_logits");
+        state.active_layer = -1;
+        if (state.lm_input != nullptr) {
+            state.lm_input->last_producer.clear();
+        }
     }
 
     state.host_read_poison_observed =
@@ -1232,14 +1302,16 @@ ryzenai_corelib_status RecordingMatMul(
         return ryzenai_corelib_status_failure;
     }
 
+    const std::int64_t padded_rows =
+        MatMulPaddedRows(state, weight->desc, rows);
     const std::size_t input_words =
-        static_cast<std::size_t>(PaddedRows(rows)) *
+        static_cast<std::size_t>(padded_rows) *
         static_cast<std::size_t>(weight->desc.k);
     state.input_poison_observed =
         state.input_poison_observed ||
         input_tensor->ContainsPoisonWords(0, input_words);
     const std::size_t output_words =
-        static_cast<std::size_t>(PaddedRows(rows)) *
+        static_cast<std::size_t>(padded_rows) *
         static_cast<std::size_t>(weight->desc.n);
     output_tensor->FillWords(
         0,
@@ -1251,6 +1323,7 @@ ryzenai_corelib_status RecordingMatMul(
                                 std::max(layer, 0) * 8 +
                                 static_cast<int>(
                                     state.matmul_calls.size() % 8))));
+    output_tensor->last_producer = projection;
 
     if (projection == "q") {
         state.q_tensors.insert(output_tensor);
@@ -1296,7 +1369,7 @@ ryzenai_corelib_status RecordingSsMlp(
          rows});
 
     const std::size_t words =
-        static_cast<std::size_t>(PaddedRows(rows)) *
+        static_cast<std::size_t>(state.padding.ssmlp(rows)) *
         static_cast<std::size_t>(constants::kHiddenSize);
     state.input_poison_observed =
         state.input_poison_observed ||
@@ -1304,6 +1377,8 @@ ryzenai_corelib_status RecordingSsMlp(
         residual_tensor->ContainsPoisonWords(0, words);
     skip_tensor->FillWords(0, words, 0x2200u);
     normalized_tensor->FillWords(0, words, 0x2300u);
+    skip_tensor->last_producer = "skip_sum";
+    normalized_tensor->last_producer = "normalized";
     state.skip_sum_tensors.insert(skip_tensor);
     state.normalized_tensors.insert(normalized_tensor);
     return ryzenai_corelib_status_success;
@@ -1360,7 +1435,7 @@ ryzenai_corelib_status RecordingFlatMha(
          position});
 
     const std::size_t padded =
-        static_cast<std::size_t>(PaddedRows(rows));
+        static_cast<std::size_t>(state.padding.attention(rows));
     state.input_poison_observed =
         state.input_poison_observed ||
         q->ContainsPoisonWords(
@@ -1392,6 +1467,7 @@ ryzenai_corelib_status RecordingFlatMha(
         padded *
             static_cast<std::size_t>(constants::kQueryDimension),
         0x3200u);
+    out->last_producer = "attention";
     state.attention_tensors.insert(out);
     return ryzenai_corelib_status_success;
 }
@@ -1405,20 +1481,42 @@ ryzenai_corelib_status RecordingSynchronize(
     }
     ++state.synchronize_calls;
     state.events.emplace_back("synchronize");
-    if (state.failure == FailurePoint::Synchronize) {
+    if (
+        state.failure == FailurePoint::Synchronize ||
+        state.failure == FailurePoint::DestructionSynchronize) {
+        state.destruction_failure_returned =
+            state.failure == FailurePoint::DestructionSynchronize;
         flm::test::SetLastErrorMessage("injected synchronize failure");
         return ryzenai_corelib_status_failure;
     }
     return ryzenai_corelib_status_success;
 }
 
+void MarkPostDestructionFailure(std::string_view action) {
+    auto& state = State();
+    if (
+        !state.destruction_failure_returned ||
+        state.post_failure_marker.empty()) {
+        return;
+    }
+    std::ofstream output(
+        state.post_failure_marker,
+        std::ios::binary | std::ios::app);
+    output << action << '\n';
+}
+
 void RecordingRelease(ryzenai_corelib_object_ptr object) {
     auto& state = State();
+    MarkPostDestructionFailure("release");
     auto* value = state.Object(object);
     CHECK(value != nullptr);
     CHECK(!value->released);
     value->released = true;
     state.release_labels.push_back(value->label);
+}
+
+void RecordingCleanup() {
+    MarkPostDestructionFailure("cleanup");
 }
 
 template <class Function>
@@ -1433,6 +1531,9 @@ std::shared_ptr<CorelibApi> ResolveRecordingCorelib(
     resolver["ryzenai_corelib_object_release"] = FunctionAddress(
         static_cast<decltype(&::ryzenai_corelib_object_release)>(
             &RecordingRelease));
+    resolver["ryzenai_corelib_cleanup"] = FunctionAddress(
+        static_cast<decltype(&::ryzenai_corelib_cleanup)>(
+            &RecordingCleanup));
     resolver["ryzenai_corelib_create_stream"] = FunctionAddress(
         static_cast<decltype(&::ryzenai_corelib_create_stream)>(
             &RecordingCreateStream));
@@ -1527,15 +1628,31 @@ FatalRecordStore MakeRecords(const std::filesystem::path& root) {
         });
 }
 
+json ReadFatalRecord(const std::filesystem::path& root) {
+    for (const auto& entry :
+         std::filesystem::directory_iterator(root)) {
+        const auto name = entry.path().filename().string();
+        if (
+            name.starts_with("corelib-fatal-") &&
+            name.ends_with(".json")) {
+            std::ifstream input(entry.path(), std::ios::binary);
+            return json::parse(input);
+        }
+    }
+    throw std::runtime_error("expected corelib fatal record");
+}
+
 struct TerminationIntercept final {};
 
 class EngineFixture final {
 public:
     explicit EngineFixture(
         const SyntheticPackage& package,
-        std::uint32_t max_length = 4096)
+        std::uint32_t max_length = 4096,
+        PaddingFunctions padding = {})
         : fatal_root_("fastflowlm-phi4-engine-fatal") {
         flm::test::ResetFakeCorelib();
+        state.padding = std::move(padding);
         api_ = ResolveRecordingCorelib(state);
         runtime = CorelibRuntime::Create(
             api_,
@@ -1555,6 +1672,15 @@ public:
 
     ~EngineFixture() noexcept {
         try {
+            if (
+                runtime &&
+                runtime->state() == ProcessState::Terminating) {
+                (void)engine.release();
+                if (g_state == &state) {
+                    g_state = nullptr;
+                }
+                return;
+            }
             engine.reset();
             if (runtime && runtime->state() == ProcessState::Healthy) {
                 runtime->ShutdownHealthy();
@@ -1575,17 +1701,7 @@ public:
     }
 
     json FatalRecord() const {
-        for (const auto& entry :
-             std::filesystem::directory_iterator(fatal_root_.path())) {
-            const auto name = entry.path().filename().string();
-            if (
-                name.starts_with("corelib-fatal-") &&
-                name.ends_with(".json")) {
-                std::ifstream input(entry.path(), std::ios::binary);
-                return json::parse(input);
-            }
-        }
-        throw std::runtime_error("expected corelib fatal record");
+        return ReadFatalRecord(fatal_root_.path());
     }
 
     RecordingState state;
@@ -1618,17 +1734,18 @@ void CheckLayerOrder(const std::vector<std::string>& events) {
         "synchronize",
         "ssmlp",
         "synchronize"};
-    CHECK(events.size() == 32u * expected.size() + 3u);
+    CHECK(events.size() == 32u * expected.size() + 4u);
     for (std::size_t layer = 0; layer < 32; ++layer) {
         CHECK(std::equal(
             expected.begin(),
             expected.end(),
             events.begin() + layer * expected.size()));
     }
-    const auto final = events.end() - 3;
-    CHECK(final[0] == "matmul_lm_head");
-    CHECK(final[1] == "synchronize");
-    CHECK(final[2] == "tensor_read_logits");
+    const auto final = events.end() - 4;
+    CHECK(final[0] == "padding_write_lm_input");
+    CHECK(final[1] == "matmul_lm_head");
+    CHECK(final[2] == "synchronize");
+    CHECK(final[3] == "tensor_read_logits");
 }
 
 void CheckDistinctAndPingPong(const RecordingState& state) {
@@ -1694,6 +1811,15 @@ void CheckMetrics(
     CHECK(metrics.weight_create_count == 161);
     CHECK(metrics.dispatch_count == passes * 193u);
     CHECK(metrics.synchronize_count == passes * 129u);
+    CHECK(metrics.padding_write_calls == passes);
+    CHECK(
+        metrics.padding_bytes ==
+        passes *
+            static_cast<std::uint64_t>(constants::kHiddenSize) *
+            sizeof(std::uint16_t));
+    CHECK(metrics.attention_extent_queries == passes);
+    CHECK(metrics.output_projection_extent_queries == passes);
+    CHECK(metrics.lm_head_extent_queries == passes);
     CHECK(metrics.v_read_calls == passes * 32u);
     CHECK(metrics.v_write_calls == passes * 32u * 8u);
     CHECK(metrics.v_bytes > 0);
@@ -1972,6 +2098,136 @@ void TestOrderBuffersTailsStateAndMetrics(
         }));
 }
 
+std::size_t EventCount(
+    const RecordingState& state,
+    std::string_view event) {
+    return static_cast<std::size_t>(std::count(
+        state.events.begin(),
+        state.events.end(),
+        event));
+}
+
+std::int64_t AlignRows(std::int64_t rows, std::int64_t alignment) {
+    return ((rows + alignment - 1) / alignment) * alignment;
+}
+
+void CheckNoStaleConsumption(const RecordingState& state) {
+    CHECK(!state.input_poison_observed);
+    CHECK(!state.host_read_poison_observed);
+    CHECK(!state.cache_publish_poison_observed);
+}
+
+void TestDivergentPaddingGrids(const SyntheticPackage& package) {
+    {
+        PaddingFunctions padding;
+        padding.query_projection =
+            [](std::int64_t rows) { return AlignRows(rows, 4); };
+        padding.kv_projection = padding.query_projection;
+        padding.attention =
+            [](std::int64_t rows) { return AlignRows(rows, 8); };
+        padding.ssmlp = padding.attention;
+        padding.lm_head =
+            [](std::int64_t rows) { return AlignRows(rows, 8); };
+        EngineFixture fixture(package, 4096, std::move(padding));
+
+        fixture.state.ResetExecutionRecords();
+        std::vector<int> prompt{1, 2, 3};
+        (void)fixture.engine->prefill(prompt);
+        CheckNoStaleConsumption(fixture.state);
+        CHECK(EventCount(fixture.state, "padding_write_q") == 32);
+        CHECK(EventCount(fixture.state, "padding_write_k") == 32);
+        CHECK(
+            EventCount(fixture.state, "padding_write_attention") ==
+            0);
+        CHECK(EventCount(fixture.state, "padding_write_o") == 32);
+        CHECK(
+            EventCount(fixture.state, "padding_write_normalized") ==
+            0);
+        CHECK(
+            EventCount(fixture.state, "padding_write_lm_input") ==
+            1);
+        CHECK(fixture.state.stage_writes.size() == 2);
+        CHECK(
+            fixture.state.stage_writes[0].size ==
+            4u * static_cast<std::size_t>(constants::kHiddenSize) *
+                sizeof(std::uint16_t));
+        CHECK(
+            fixture.state.stage_writes[1].size ==
+            8u * static_cast<std::size_t>(constants::kHiddenSize) *
+                sizeof(std::uint16_t));
+        const auto& metrics = fixture.engine->metrics();
+        CHECK(metrics.padding_write_calls == 97);
+        CHECK(metrics.attention_extent_queries == 1);
+        CHECK(metrics.output_projection_extent_queries == 1);
+        CHECK(metrics.lm_head_extent_queries == 1);
+        CHECK(
+            metrics.padding_bytes ==
+            32u * 4u *
+                    static_cast<std::uint64_t>(
+                        2 * constants::kHiddenSize +
+                        constants::kKvDimension) *
+                    sizeof(std::uint16_t) +
+                8u *
+                    static_cast<std::uint64_t>(
+                        constants::kHiddenSize) *
+                    sizeof(std::uint16_t));
+    }
+
+    {
+        PaddingFunctions padding;
+        padding.query_projection =
+            [](std::int64_t rows) { return AlignRows(rows, 8); };
+        padding.kv_projection = padding.query_projection;
+        padding.attention =
+            [](std::int64_t rows) { return AlignRows(rows, 4); };
+        padding.ssmlp = padding.attention;
+        padding.lm_head =
+            [](std::int64_t rows) { return AlignRows(rows, 8); };
+        EngineFixture fixture(package, 4096, std::move(padding));
+
+        fixture.state.ResetExecutionRecords();
+        std::vector<int> prompt{1, 2, 3};
+        (void)fixture.engine->prefill(prompt);
+        CheckNoStaleConsumption(fixture.state);
+        CHECK(EventCount(fixture.state, "padding_write_q") == 0);
+        CHECK(EventCount(fixture.state, "padding_write_k") == 0);
+        CHECK(
+            EventCount(fixture.state, "padding_write_attention") ==
+            32);
+        CHECK(EventCount(fixture.state, "padding_write_o") == 0);
+        CHECK(
+            EventCount(fixture.state, "padding_write_normalized") ==
+            31);
+        CHECK(
+            EventCount(fixture.state, "padding_write_lm_input") ==
+            1);
+        CHECK(fixture.state.stage_writes.size() == 2);
+        CHECK(
+            fixture.state.stage_writes[0].size ==
+            8u * static_cast<std::size_t>(constants::kHiddenSize) *
+                sizeof(std::uint16_t));
+        CHECK(
+            fixture.state.stage_writes[1].size ==
+            4u * static_cast<std::size_t>(constants::kHiddenSize) *
+                sizeof(std::uint16_t));
+        const auto& metrics = fixture.engine->metrics();
+        CHECK(metrics.padding_write_calls == 64);
+        CHECK(metrics.attention_extent_queries == 1);
+        CHECK(metrics.output_projection_extent_queries == 1);
+        CHECK(metrics.lm_head_extent_queries == 1);
+        CHECK(
+            metrics.padding_bytes ==
+            63u * 4u *
+                    static_cast<std::uint64_t>(
+                        constants::kHiddenSize) *
+                    sizeof(std::uint16_t) +
+                8u *
+                    static_cast<std::uint64_t>(
+                        constants::kHiddenSize) *
+                    sizeof(std::uint16_t));
+    }
+}
+
 void TestRecoverablePreSubmitFailures(
     const SyntheticPackage& package) {
     EngineFixture fixture(package);
@@ -2128,16 +2384,143 @@ void TestSynchronizeFailureTerminatesWithoutSubmissionFlag() {
     g_state = nullptr;
 }
 
+std::filesystem::path CurrentExecutablePath() {
+    std::vector<wchar_t> buffer(32768);
+    const DWORD length = GetModuleFileNameW(
+        nullptr,
+        buffer.data(),
+        static_cast<DWORD>(buffer.size()));
+    if (length == 0 || length == buffer.size()) {
+        throw std::runtime_error(
+            "failed to resolve engine-test executable path");
+    }
+    return std::filesystem::path(
+        std::wstring(buffer.data(), length));
+}
+
+std::wstring QuoteProcessArgument(
+    const std::filesystem::path& argument) {
+    const std::wstring value = argument.wstring();
+    if (value.find(L'"') != std::wstring::npos) {
+        throw std::runtime_error(
+            "engine-test child argument contains a quote");
+    }
+    return L"\"" + value + L"\"";
+}
+
+int RunDestructorFailureChild(
+    const std::filesystem::path& model_path,
+    const std::filesystem::path& fatal_root,
+    const std::filesystem::path& post_failure_marker) {
+    RecordingState state;
+    state.post_failure_marker = post_failure_marker;
+    flm::test::ResetFakeCorelib();
+    auto api = ResolveRecordingCorelib(state);
+    auto runtime = CorelibRuntime::Create(
+        api,
+        MakeRecords(fatal_root),
+        [](unsigned int code) {
+            (void)TerminateProcess(GetCurrentProcess(), code);
+            ExitProcess(code);
+        });
+    LM_Config config;
+    {
+        phi4_corelib_aie4 engine(
+            std::move(config),
+            model_path,
+            runtime,
+            4096);
+        state.failure = FailurePoint::DestructionSynchronize;
+    }
+    return 3;
+}
+
+void TestDestructorSynchronizeFailureChild(
+    const SyntheticPackage& package) {
+    TempDirectory fatal_root(
+        "fastflowlm-phi4-destruction-fatal");
+    const auto marker =
+        fatal_root.path() / "post-failure-cleanup.txt";
+    const auto executable = CurrentExecutablePath();
+    std::wstring command =
+        QuoteProcessArgument(executable) +
+        L" --destructor-failure-child " +
+        QuoteProcessArgument(package.path()) + L" " +
+        QuoteProcessArgument(fatal_root.path()) + L" " +
+        QuoteProcessArgument(marker);
+    std::vector<wchar_t> mutable_command(
+        command.begin(),
+        command.end());
+    mutable_command.push_back(L'\0');
+
+    STARTUPINFOW startup{};
+    startup.cb = sizeof(startup);
+    PROCESS_INFORMATION process{};
+    if (!CreateProcessW(
+            nullptr,
+            mutable_command.data(),
+            nullptr,
+            nullptr,
+            FALSE,
+            0,
+            nullptr,
+            nullptr,
+            &startup,
+            &process)) {
+        throw std::runtime_error(
+            "failed to start destruction-failure child");
+    }
+    CloseHandle(process.hThread);
+    const DWORD wait_result =
+        WaitForSingleObject(process.hProcess, 120000);
+    if (wait_result != WAIT_OBJECT_0) {
+        (void)TerminateProcess(process.hProcess, 2);
+        CloseHandle(process.hProcess);
+        throw std::runtime_error(
+            "destruction-failure child did not exit");
+    }
+    DWORD exit_code = 0;
+    const BOOL queried =
+        GetExitCodeProcess(process.hProcess, &exit_code);
+    CloseHandle(process.hProcess);
+    CHECK(queried != FALSE);
+    CHECK(exit_code == 0xE0040001u);
+    CHECK(!std::filesystem::exists(marker));
+
+    const json record = ReadFatalRecord(fatal_root.path());
+    CHECK(
+        record.at("status") ==
+        ryzenai_corelib_status_failure);
+    CHECK(
+        record.at("call") ==
+        "ryzenai_corelib_stream_synchronize");
+    CHECK(record.at("phase") == "destruction");
+    CHECK(record.at("layer").is_null());
+    CHECK(record.at("rows") == 0);
+    CHECK(record.at("position") == 0);
+}
+
 static_assert(std::is_base_of_v<causal_lm, phi4_corelib_aie4>);
 static_assert(std::has_virtual_destructor_v<phi4_corelib_aie4>);
 
 }  // namespace
 
-int main() {
+int wmain(int argc, wchar_t* argv[]) {
     try {
+        if (
+            argc == 5 &&
+            std::wstring_view(argv[1]) ==
+                L"--destructor-failure-child") {
+            return RunDestructorFailureChild(
+                argv[2],
+                argv[3],
+                argv[4]);
+        }
         SyntheticPackage package;
         TestOrderBuffersTailsStateAndMetrics(package);
+        TestDivergentPaddingGrids(package);
         TestRecoverablePreSubmitFailures(package);
+        TestDestructorSynchronizeFailureChild(package);
         TestIrrevocableFailurePolicies(package);
         TestSynchronizeFailureTerminatesWithoutSubmissionFlag();
         std::cout << "test_phi4_engine: PASS\n";

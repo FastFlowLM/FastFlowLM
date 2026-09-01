@@ -35,6 +35,11 @@ struct Phi4Aie4Metrics {
     std::uint64_t weight_create_count = 0;
     std::uint64_t dispatch_count = 0;
     std::uint64_t synchronize_count = 0;
+    std::uint64_t padding_write_calls = 0;
+    std::uint64_t padding_bytes = 0;
+    std::uint64_t attention_extent_queries = 0;
+    std::uint64_t output_projection_extent_queries = 0;
+    std::uint64_t lm_head_extent_queries = 0;
     std::uint64_t v_read_calls = 0;
     std::uint64_t v_write_calls = 0;
     std::uint64_t v_bytes = 0;

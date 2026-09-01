@@ -332,6 +332,13 @@ struct phi4_corelib_aie4::Impl final {
         embedding_fp32.resize(layer_elements);
         normalized_fp32.resize(layer_elements);
         bf16_staging.resize(layer_elements);
+        const std::size_t lm_head_elements = CheckedElements(
+            capacities.lm_head_rows,
+            constants::kHiddenSize,
+            "Phi-4 LM-head padding staging");
+        padding_zero_staging.resize(
+            std::max(layer_elements, lm_head_elements),
+            0);
         v_staging.reserve(
             CheckedElements(
                 capacities.layer_rows,
@@ -439,14 +446,6 @@ struct phi4_corelib_aie4::Impl final {
     }
 
     ~Impl() noexcept {
-#if defined(FLM_CORELIB_TESTING)
-        if (
-            runtime &&
-            runtime->state() == corelib::ProcessState::Terminating) {
-            ReleaseResourcesWithoutSynchronization();
-            return;
-        }
-#endif
         if (!stream) {
             ReleaseResourcesWithoutSynchronization();
             return;
@@ -600,7 +599,97 @@ struct phi4_corelib_aie4::Impl final {
         }
     }
 
-    void StageInput(std::span<const int> token_ids) {
+    struct RunRowExtents {
+        std::int64_t query_projection;
+        std::int64_t kv_projection;
+        std::int64_t attention;
+        std::int64_t output_projection;
+        std::int64_t ssmlp;
+        std::int64_t lm_head;
+
+        std::int64_t ProjectionInput() const noexcept {
+            return std::max(query_projection, kv_projection);
+        }
+    };
+
+    RunRowExtents RowsForRun(std::int64_t rows) {
+        RunRowExtents extents{
+            shape_plan->RowsFor(RowUse::QueryProjection, rows),
+            shape_plan->RowsFor(RowUse::KvProjection, rows),
+            shape_plan->RowsFor(RowUse::Attention, rows),
+            shape_plan->RowsFor(RowUse::OutputProjection, rows),
+            shape_plan->RowsFor(RowUse::SsMlp, rows),
+            shape_plan->RowsFor(RowUse::LmHead, 1)};
+        ++metrics.attention_extent_queries;
+        ++metrics.output_projection_extent_queries;
+        ++metrics.lm_head_extent_queries;
+        return extents;
+    }
+
+    void WriteZeroRows(
+        corelib::UniqueTensor& tensor,
+        std::int64_t first_row,
+        std::int64_t row_count,
+        std::int64_t width,
+        std::string_view context) {
+        if (row_count <= 0) {
+            return;
+        }
+        if (first_row < 0) {
+            throw std::out_of_range(
+                "Phi-4 padding write has a negative row offset");
+        }
+        const std::size_t offset =
+            first_row == 0
+                ? 0
+                : CheckedBytes(
+                      first_row,
+                      width,
+                      sizeof(std::uint16_t),
+                      context);
+        const std::size_t bytes = CheckedBytes(
+            row_count,
+            width,
+            sizeof(std::uint16_t),
+            context);
+        const std::size_t words = CheckedElements(
+            row_count,
+            width,
+            context);
+        if (words > padding_zero_staging.size()) {
+            throw std::out_of_range(
+                "Phi-4 padding write exceeds host staging capacity");
+        }
+        api->Check(
+            api->functions().tensor_write(
+                tensor.get(),
+                padding_zero_staging.data(),
+                bytes,
+                offset),
+            kTensorWriteCall);
+        ++metrics.padding_write_calls;
+        metrics.padding_bytes += bytes;
+    }
+
+    void BridgePadding(
+        corelib::UniqueTensor& tensor,
+        std::int64_t producer_rows,
+        std::int64_t consumer_rows,
+        std::int64_t width,
+        std::string_view context) {
+        if (consumer_rows > producer_rows) {
+            WriteZeroRows(
+                tensor,
+                producer_rows,
+                consumer_rows - producer_rows,
+                width,
+                context);
+        }
+    }
+
+    void StageInput(
+        std::span<const int> token_ids,
+        const RunRowExtents& extents) {
         const auto rows =
             static_cast<std::int64_t>(token_ids.size());
         const std::size_t live_elements = CheckedElements(
@@ -631,9 +720,8 @@ struct phi4_corelib_aie4::Impl final {
             static_cast<float>(constants::kRmsEpsilon),
             normalized_output);
 
-        const std::int64_t hidden_rows = std::max(
-            shape_plan->RowsFor(RowUse::QueryProjection, rows),
-            shape_plan->RowsFor(RowUse::KvProjection, rows));
+        const std::int64_t hidden_rows =
+            extents.ProjectionInput();
         StageBf16(
             *api,
             normalized_output,
@@ -654,8 +742,7 @@ struct phi4_corelib_aie4::Impl final {
                 0),
             kTensorWriteCall);
 
-        const std::int64_t residual_rows =
-            shape_plan->RowsFor(RowUse::SsMlp, rows);
+        const std::int64_t residual_rows = extents.ssmlp;
         StageBf16(
             *api,
             embedding_output,
@@ -743,7 +830,9 @@ struct phi4_corelib_aie4::Impl final {
         metrics.v_scatter_ns = v_metrics.nanoseconds;
     }
 
-    void PrepareLastHidden(std::int64_t rows) {
+    void PrepareLastHidden(
+        std::int64_t rows,
+        std::int64_t lm_head_rows) {
         const std::size_t row_bytes = CheckedBytes(
             1,
             constants::kHiddenSize,
@@ -751,6 +840,12 @@ struct phi4_corelib_aie4::Impl final {
             "Phi-4 last hidden");
         const std::size_t source_offset =
             static_cast<std::size_t>(rows - 1) * row_bytes;
+        WriteZeroRows(
+            lm_input_tensor,
+            0,
+            lm_head_rows,
+            constants::kHiddenSize,
+            "Phi-4 LM-head input initialization");
         api->Check(
             api->functions().tensor_read(
                 current_hidden->get(),
@@ -814,7 +909,8 @@ struct phi4_corelib_aie4::Impl final {
                 ++metrics.synchronize_count;
             };
 
-            StageInput(token_ids);
+            const RunRowExtents extents = RowsForRun(rows);
+            StageInput(token_ids, extents);
 
             for (int layer = 0;
                  layer < constants::kLayerCount;
@@ -853,6 +949,18 @@ struct phi4_corelib_aie4::Impl final {
                     position);
 
                 active_phase = "flat_mha";
+                BridgePadding(
+                    query_tensor,
+                    extents.query_projection,
+                    extents.attention,
+                    constants::kQueryDimension,
+                    "Phi-4 query-to-attention padding");
+                BridgePadding(
+                    key_tensor,
+                    extents.kv_projection,
+                    extents.attention,
+                    constants::kKvDimension,
+                    "Phi-4 key-to-attention padding");
                 checked_submit(
                     SubmitMha(
                         static_cast<std::size_t>(layer),
@@ -862,6 +970,12 @@ struct phi4_corelib_aie4::Impl final {
                 checked_synchronize();
 
                 active_phase = "o";
+                BridgePadding(
+                    attention_tensor,
+                    extents.attention,
+                    extents.output_projection,
+                    constants::kQueryDimension,
+                    "Phi-4 attention-to-output padding");
                 checked_submit(
                     SubmitMatMul(
                         attention_tensor,
@@ -872,6 +986,12 @@ struct phi4_corelib_aie4::Impl final {
                 checked_synchronize();
 
                 active_phase = "ssmlp";
+                BridgePadding(
+                    *current_hidden,
+                    extents.output_projection,
+                    extents.ssmlp,
+                    constants::kHiddenSize,
+                    "Phi-4 output-to-SSMLP padding");
                 checked_submit(
                     SubmitSsMlp(
                         *current_hidden,
@@ -882,13 +1002,22 @@ struct phi4_corelib_aie4::Impl final {
                         rows),
                     "ssmlp");
                 checked_synchronize();
+                if (layer + 1 < constants::kLayerCount) {
+                    active_phase = "next_layer_padding";
+                    BridgePadding(
+                        *next_hidden,
+                        extents.ssmlp,
+                        extents.ProjectionInput(),
+                        constants::kHiddenSize,
+                        "Phi-4 SSMLP-to-projection padding");
+                }
                 std::swap(current_hidden, next_hidden);
                 std::swap(current_residual, next_skip_sum);
             }
 
             active_layer.reset();
             active_phase = "lm_head";
-            PrepareLastHidden(rows);
+            PrepareLastHidden(rows, extents.lm_head);
             checked_submit(
                 SubmitMatMul(
                     lm_input_tensor,
@@ -1021,6 +1150,7 @@ struct phi4_corelib_aie4::Impl final {
     std::vector<float> embedding_fp32;
     std::vector<float> normalized_fp32;
     std::vector<std::uint16_t> bf16_staging;
+    std::vector<std::uint16_t> padding_zero_staging;
     std::vector<std::uint16_t> v_staging;
     std::vector<std::uint16_t> last_hidden_staging;
 

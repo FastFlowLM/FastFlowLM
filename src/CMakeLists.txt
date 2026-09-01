@@ -417,6 +417,7 @@ target_link_libraries(flm PUBLIC
     gemma_npu
     gemma_text_npu
     gemma4e_npu
+    gemma4_12b_npu
     gpt_oss_npu
     whisper_npu
     gemma_embedding

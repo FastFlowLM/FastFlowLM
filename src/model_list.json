@@ -134,8 +134,43 @@
                     "chat-transcription"
                 ],
                 "footprint": 9.1
+            },
+            "12b": {
+                "name": "Gemma4-12B-IT-NPU2",
+                "url": "https://huggingface.co/FastFlowLM/Gemma4-12B-IT-NPU2",
+                "file_url": "https://huggingface.co/api/models/FastFlowLM/Gemma4-12B-IT-NPU2/tree/main",
+                "ms_url": "https://modelscope.cn/models/amd/Gemma4-12B-IT-NPU2",
+                "size": 12000000000,
+                "flm_min_version": "1.0.4",
+                "files": [
+                    "config.json",
+                    "model.q4nx",
+                    "tokenizer.json",
+                    "tokenizer_config.json",
+                    "chat_template.jinja",
+                    "image_audio_weights.q4nx"
+                ],
+                "vlm": true,
+                "asr": true,
+                "default_context_length": 32768,
+                "max_prefill_len": 4096,
+                "details": {
+                    "format": "NPU2",
+                    "family": "gemma4-12b",
+                    "think": true,
+                    "parameter_size": "12B",
+                    "quantization_level": "Q4_1"
+                },
+                "label": [
+                    "audio",
+                    "vision",
+                    "reasoning",
+                    "tool-calling",
+                    "chat-transcription"
+                ],
+                "footprint": 9.4
             }
-        },        
+        },
         "qwen3.5": {
             "0.8b": {
                 "name": "Qwen3.5-0.8B-NPU2",
@@ -160,13 +195,13 @@
                     "family": "qwen3.5",
                     "think": true,
                     "parameter_size": "0.8B",
-                    "quantization_level": "Q4_1"
+                    "quantization_level": "Q4_K"
                 },
                 "label": [
                     "vision",
                     "reasoning"
                 ],
-                "footprint": 1.4
+                "footprint": 1.3
             },
             "2b": {
                 "name": "Qwen3.5-2B-NPU2",
@@ -191,14 +226,14 @@
                     "family": "qwen3.5",
                     "think": true,
                     "parameter_size": "2B",
-                    "quantization_level": "Q4_1"
+                    "quantization_level": "Q4_K"
                 },
                 "label": [
                     "vision",
                     "reasoning",
                     "tool-calling"
                 ],
-                "footprint": 3.2
+                "footprint": 3.1
             },
             "4b": {
                 "name": "Qwen3.5-4B-NPU2",
@@ -223,14 +258,14 @@
                     "family": "qwen3.5",
                     "think": true,
                     "parameter_size": "4B",
-                    "quantization_level": "Q4_1"
+                    "quantization_level": "Q4_K"
                 },
                 "label": [
                     "vision",
                     "reasoning",
                     "tool-calling"
                 ],
-                "footprint": 5.2
+                "footprint": 5.0
             },
             "9b":{
                 "name": "Qwen3.5-9B-NPU2",
@@ -255,14 +290,14 @@
                     "family": "qwen3.5",
                     "think": true,
                     "parameter_size": "9B",
-                    "quantization_level": "Q4_1"
+                    "quantization_level": "Q4_K"
                 },
                 "label": [
                     "vision",
                     "reasoning",
                     "tool-calling"
                 ],
-                "footprint": 8.94
+                "footprint": 8.7
             }
         },
 
@@ -290,14 +325,14 @@
                     "family": "qwen3.6-moe",
                     "think": true,
                     "parameter_size": "35B",
-                    "quantization_level": "Q4_K_S"
+                    "quantization_level": "Q4_K"
                 },
                 "label": [
                     "vision",
                     "reasoning",
                     "tool-calling"
                 ],
-                "footprint": 24.3
+                "footprint": 22.1
             }
         },
         "lfm2": {

@@ -370,8 +370,8 @@
         },
         {
             "type": "file",
-            "oid": "4741bf6e4132ba23a5537f9d6e74e9a6d613d7cd",
-            "size": 18683,
+            "oid": "c699d6fa0e521a3cba62442214d90ff91da99446",
+            "size": 18568,
             "path": "chat_template.jinja"
         },
         {

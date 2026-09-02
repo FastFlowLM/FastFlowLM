@@ -59,14 +59,22 @@ function(flm_aie4_warn_if_unstageable)
     endif()
 endfunction()
 
-function(flm_aie4_stage_command output stage_dir report)
+function(flm_aie4_stage_command output stage_dir report audit)
+    # FLM_AIE4_DEPENDENCY_DIRS is a CMake list. Interpolating it into a
+    # command argument unescaped turns each `;` into an argument separator, so
+    # `-DFLM_AIE4_EXTRA_DIRS=a;b` reaches cmake as two argv entries: the
+    # variable silently loses everything after the first directory, and the
+    # staging then fails telling the developer to add a directory they already
+    # added. Escaping keeps the whole list in one argument.
+    string(REPLACE ";" "\\;" _extra_dirs "${FLM_AIE4_DEPENDENCY_DIRS}")
     set(${output}
         "${CMAKE_COMMAND}"
         "-DFLM_AIE4_CORELIB_DIR=${RYZENAI_CORELIB_RUNTIME_DIR}"
         "-DFLM_AIE4_XRT_DIR=${XRT_RUNTIME_DIR}"
-        "-DFLM_AIE4_EXTRA_DIRS=${FLM_AIE4_DEPENDENCY_DIRS}"
+        "-DFLM_AIE4_EXTRA_DIRS=${_extra_dirs}"
         "-DFLM_AIE4_DESTINATION=${stage_dir}"
         "-DFLM_AIE4_REPORT=${report}"
+        "-DFLM_AIE4_AUDIT=${audit}"
         -P "${FLM_AIE4_STAGE_SCRIPT}"
         PARENT_SCOPE)
 endfunction()
@@ -74,6 +82,10 @@ endfunction()
 # Stages the derived closure beside a just-built binary so a developer can run
 # the AIE4 path without an install. Skipped, with no error, when the runtime
 # directory is not configured.
+#
+# The staged directory is what the installer scripts copy, so it gets the
+# shippable report. The audit record, which names build-machine absolute
+# paths, stays in the build tree.
 function(flm_aie4_stage_for_target target)
     if(NOT FLM_ENABLE_CORELIB_AIE4 OR NOT WIN32)
         return()
@@ -86,7 +98,8 @@ function(flm_aie4_stage_for_target target)
         string(MD5 _stage_id "${_stage_dir}")
         flm_aie4_stage_command(_command
             "${_stage_dir}"
-            "${CMAKE_BINARY_DIR}/aie4-closure-${_stage_id}.txt")
+            "${_stage_dir}/aie4-closure.txt"
+            "${CMAKE_BINARY_DIR}/aie4-closure-audit-${_stage_id}.txt")
         add_custom_command(TARGET ${target} POST_BUILD
             COMMAND ${_command}
             COMMENT "Deriving the Phi-4 AIE4 runtime closure")
@@ -116,6 +129,7 @@ set(FLM_AIE4_EXTRA_DIRS [[${FLM_AIE4_DEPENDENCY_DIRS}]])
 set(FLM_AIE4_DESTINATION [[${_arg_DESTINATION}]])
 set(FLM_AIE4_REPORT
     \"\${CMAKE_INSTALL_PREFIX}/${_arg_DESTINATION}/aie4-closure.txt\")
+set(FLM_AIE4_AUDIT [[${CMAKE_BINARY_DIR}/aie4-closure-audit-install.txt]])
 "
         ${_component_args})
     install(SCRIPT "${FLM_AIE4_STAGE_SCRIPT}" ${_component_args})

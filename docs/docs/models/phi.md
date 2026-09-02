@@ -44,10 +44,21 @@ before any download starts.
 
 The assembled model directory has two provenances. The weights, tokenizer and
 vocabulary are downloaded from the pinned upstream revision and hash-checked
-against its published metadata. Four files -- `config.json`,
-`tokenizer_config.json`, `corelib_phi4_manifest.json` and `provenance.json` --
-are authored by FastFlowLM and installed with the product, because the upstream
-repository ships no `config.json` and its tokenizer configuration carries
-neither a chat template nor the EOS token IDs this backend needs. Those files
-restate the model contract for FastFlowLM's existing readers; they never
-override it, and a model whose weights disagree with them fails to load.
+against its published metadata. Four further files are shipped inside
+FastFlowLM rather than fetched, and they are not all the same kind of file:
+
+- **Authored, with no upstream counterpart.** `config.json`,
+  `corelib_phi4_manifest.json` and `provenance.json` do not exist in the
+  upstream repository at all. The upstream package ships no `config.json`, and
+  the other two describe FastFlowLM's own packaging.
+- **Shadowing an upstream file.** `tokenizer_config.json` *does* exist
+  upstream, and the shipped copy replaces it, because the published one carries
+  neither a chat template nor the EOS token IDs this backend requires.
+
+The distinction is not cosmetic: an upstream metadata record is expected for
+the shadowing file and is a provenance error for the authored ones, since it
+would mean FastFlowLM's own package contract had been published to the model
+repository.
+
+These files restate the model contract for FastFlowLM's existing readers; they
+never override it, and a model whose weights disagree with them fails to load.

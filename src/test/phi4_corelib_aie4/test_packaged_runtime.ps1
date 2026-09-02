@@ -17,6 +17,16 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+# Skipped work is reported as skipped, never as passed. A script that prints a
+# success line for blocks it never entered reads as coverage it does not have,
+# which is the defect test_real_corelib had to fix in Task 10R. Exit code 77 is
+# CTest's SKIP_RETURN_CODE, so a partial run shows as Skipped rather than
+# Passed.
+$ran = @()
+$skipped = @()
+$SKIP_EXIT = 77
+
 $sourceRoot = (Resolve-Path (Join-Path $PSScriptRoot "../..")).Path
 $modulePath = Join-Path $sourceRoot "cmake/ConfigureAie4Runtime.cmake"
 $stageScript = Join-Path $sourceRoot "cmake/StageAie4Runtime.cmake"
@@ -34,6 +44,27 @@ public static class FlmAie4Loader {
     public static extern bool FreeLibrary(IntPtr module);
 }
 "@
+
+# Get-FileHash is not reliably resolvable in the constrained -NoProfile host
+# CTest launches, so hash through .NET directly rather than depending on module
+# autoloading.
+function Get-Sha256Hex {
+    param([string]$Path)
+    $algorithm = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $stream = [System.IO.File]::OpenRead($Path)
+        try {
+            $bytes = $algorithm.ComputeHash($stream)
+        } finally {
+            $stream.Dispose()
+        }
+    } finally {
+        $algorithm.Dispose()
+    }
+    return (
+        -join ($bytes | ForEach-Object { $_.ToString("x2") })
+    )
+}
 
 function Invoke-Configure {
     param(
@@ -158,6 +189,7 @@ try {
         }
     }
     [xml]$parsedWix = $wix
+    $ran += "installer-manifests"
 
     # The main installer must still build with no AIE4 closure present.
     # Hard-failing here would make the AIE4 feature a precondition of shipping
@@ -168,28 +200,63 @@ try {
             throw "$script still fails the non-AIE4 package build"
         }
     }
+    $ran += "optional-feature-packaging"
 
     # flm.exe must never gain a link-time dependency on ryzenai_corelib. The
     # DLL is resolved at run time by absolute path precisely so that a binary
     # without the AIE4 runtime installed still starts. dumpbin on the packaged
     # exe is the end check, but it only runs where an exe exists; this catches
     # the regression at its source.
-    foreach ($buildFile in @(
-        "CMakeLists.txt",
-        "cmake/ConfigureAie4Runtime.cmake",
-        "common/corelib/corelib_sources.cmake"
-    )) {
-        $path = Join-Path $sourceRoot $buildFile
-        if (-not (Test-Path $path)) { continue }
-        foreach ($line in Get-Content $path) {
-            if (
-                $line -match "target_link_libraries" -and
-                $line -match "ryzenai_corelib"
-            ) {
-                throw "$buildFile links ryzenai_corelib: $line"
+    #
+    # The scan reads whole balanced-paren command invocations, not lines. Every
+    # link call in this tree spans multiple lines -- the AIE4 target's own does
+    # -- so a line-at-a-time match would miss the exact form the regression
+    # would take and report success for a check it never performed.
+    $cmakeFiles = @(
+        Get-ChildItem -Path $sourceRoot -Recurse -File -Include @(
+            "CMakeLists.txt", "*.cmake"
+        ) | Where-Object {
+            $_.FullName -notmatch "[\\/](build|out|third_party)[^\\/]*[\\/]"
+        }
+    )
+    if ($cmakeFiles.Count -lt 3) {
+        throw "The link-guard scan found only $($cmakeFiles.Count) CMake files"
+    }
+    $scannedLinkCalls = 0
+    foreach ($file in $cmakeFiles) {
+        $text = Get-Content $file.FullName -Raw
+        if ($null -eq $text) { continue }
+        # Strip line comments so a commented-out example cannot trip the guard
+        # and, more importantly, cannot hide a real call behind an unbalanced
+        # parenthesis inside a comment.
+        $text = [regex]::Replace($text, '(?m)#.*$', '')
+        foreach ($match in [regex]::Matches(
+            $text, '(?i)\b(target_link_libraries|link_libraries)\s*\(')) {
+            $depth = 1
+            $index = $match.Index + $match.Length
+            while ($index -lt $text.Length -and $depth -gt 0) {
+                if ($text[$index] -eq '(') { $depth++ }
+                elseif ($text[$index] -eq ')') { $depth-- }
+                $index++
+            }
+            if ($depth -ne 0) {
+                throw "Unbalanced $($match.Value) in $($file.FullName)"
+            }
+            $scannedLinkCalls++
+            $body = $text.Substring(
+                $match.Index, $index - $match.Index)
+            if ($body -match '(?i)\bryzenai_corelib\b') {
+                $relative = $file.FullName.Substring($sourceRoot.Length + 1)
+                throw (
+                    "$relative links ryzenai_corelib: " +
+                    ($body -replace '\s+', ' '))
             }
         }
     }
+    if ($scannedLinkCalls -lt 1) {
+        throw "The link-guard scan matched no link calls; it is inert"
+    }
+    $ran += "no-corelib-import-guard ($scannedLinkCalls link calls)"
 
     New-Item -ItemType Directory -Path $temporary | Out-Null
     $fixture = Join-Path $temporary "fixture"
@@ -259,9 +326,19 @@ flm_aie4_install_runtime(DESTINATION bin/aie4 COMPONENT AIE4)
     if ($emptyInstall -notmatch "no ryzenai_corelib\.dll") {
         throw "Empty runtime directory was not reported.`n$emptyInstall"
     }
+    $ran += "packaging-configure-and-install-contract"
 
     if ($CorelibRuntimeDir) {
         $resolvedCorelib = (Resolve-Path $CorelibRuntimeDir).Path
+        # -DependencyDir is a semicolon-separated list, matching the CMake
+        # cache variable it feeds. Resolving each entry separately is also what
+        # exercises the multi-entry path end to end: a single interpolated
+        # string silently loses everything after the first `;`.
+        $resolvedDependencies = @(
+            $DependencyDir -split ';' |
+                Where-Object { $_ } |
+                ForEach-Object { (Resolve-Path $_).Path }
+        )
         $realBuild = Join-Path $temporary "real"
         Invoke-Configure `
             -Build $realBuild `
@@ -269,8 +346,7 @@ flm_aie4_install_runtime(DESTINATION bin/aie4 COMPONENT AIE4)
             -Corelib $resolvedCorelib `
             -Xrt $(if ($XrtRuntimeDir) {
                 (Resolve-Path $XrtRuntimeDir).Path } else { "" }) `
-            -Dependency $(if ($DependencyDir) {
-                (Resolve-Path $DependencyDir).Path } else { "" }) | Out-Null
+            -Dependency ($resolvedDependencies -join ';') | Out-Null
         $realStage = Join-Path $temporary "real-stage"
         Invoke-Install -Build $realBuild -Prefix $realStage | Out-Null
         $stagedDir = Join-Path $realStage "bin/aie4"
@@ -301,6 +377,24 @@ flm_aie4_install_runtime(DESTINATION bin/aie4 COMPONENT AIE4)
         }
         if ($derived -contains "msvcp140.dll") {
             throw "The closure staged a build-machine Visual C++ runtime"
+        }
+        # The report ships inside bin/aie4, so it must not carry absolute
+        # paths from the machine that built it. The audit record that does
+        # name them stays in the build tree.
+        foreach ($line in Get-Content $report) {
+            if ($line -match '(?i)[a-z]:[\\/]') {
+                throw "The shipped closure report leaks a build path: $line"
+            }
+        }
+        foreach ($line in Get-Content $report) {
+            $fields = $line -split "`t"
+            if ($fields.Count -ne 3 -or $fields[2] -notmatch '^[0-9a-f]{64}$') {
+                throw "The shipped closure report lacks a SHA-256: $line"
+            }
+            $actual = Get-Sha256Hex (Join-Path $stagedDir $fields[1])
+            if ($actual -ne $fields[2]) {
+                throw "Staged $($fields[1]) does not match its recorded hash"
+            }
         }
 
         # CLOSURE-2, positive control.
@@ -338,6 +432,11 @@ flm_aie4_install_runtime(DESTINATION bin/aie4 COMPONENT AIE4)
         if ($proved -lt 1) {
             throw "No staged dependency was proven load-bearing"
         }
+        $ran += "real-closure (CLOSURE-1/2, $proved load-bearing DLLs proven)"
+    } else {
+        $skipped += (
+            "real-closure (CLOSURE-1/2): pass -CorelibRuntimeDir, and " +
+            "-DependencyDir where the corelib's own dependencies live")
     }
 
     if ($FlmExe) {
@@ -398,11 +497,33 @@ flm_aie4_install_runtime(DESTINATION bin/aie4 COMPONENT AIE4)
         if ($LASTEXITCODE -ne 0) {
             throw "Non-AIE4 command failed without the AIE4 directory"
         }
+        $ran += "flm-exe (Step 7 clean environment, Step 8 dumpbin)"
+    } else {
+        $skipped += (
+            "flm-exe (Step 7 clean environment, Step 8 dumpbin): " +
+            "pass -FlmExe, and -RunAie4ModelLoad on AIE4 hardware")
     }
 
-    Write-Output "packaged runtime tests passed"
+    foreach ($item in $ran) {
+        Write-Output "RAN     : $item"
+    }
+    foreach ($item in $skipped) {
+        Write-Output "SKIPPED : $item"
+    }
+    if ($skipped.Count -gt 0) {
+        Write-Output (
+            "packaged runtime tests INCOMPLETE: " +
+            "$($ran.Count) block(s) ran, $($skipped.Count) skipped")
+        $script:exitCode = $SKIP_EXIT
+    } else {
+        Write-Output (
+            "packaged runtime tests passed: $($ran.Count) block(s), " +
+            "none skipped")
+        $script:exitCode = 0
+    }
 } finally {
     if (Test-Path $temporary) {
         Remove-Item $temporary -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
+exit $script:exitCode

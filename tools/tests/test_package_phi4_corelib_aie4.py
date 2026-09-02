@@ -707,6 +707,44 @@ class Phi4CatalogProvenanceTests(unittest.TestCase):
         self.assertEqual(size, entry["size"])
         self.assertEqual(footprint, entry["footprint"])
 
+    def test_inlined_chat_template_matches_upstream_jinja(self):
+        # AutoModel prefers the standalone chat_template.jinja and overwrites
+        # the tokenizer_config key with it, so the inlined copy is dead unless
+        # the two are byte-identical. Drift would be silent.
+        _, _, overlay = self._committed()
+        package_tool._require_inlined_template_matches_upstream(overlay)
+
+        tokenizer_config = json.loads(
+            (overlay / "tokenizer_config.json").read_text(encoding="utf-8")
+        )
+        provenance = json.loads(
+            (overlay / "provenance.json").read_text(encoding="utf-8")
+        )
+        record = provenance["upstream"]["inputs"]["chat_template.jinja"]
+        encoded = tokenizer_config["chat_template"].encode("utf-8")
+        self.assertEqual(len(encoded), record["size"])
+        self.assertEqual(hashlib.sha256(encoded).hexdigest(), record["sha256"])
+
+    def test_drifted_inlined_chat_template_is_rejected(self):
+        _, _, overlay = self._committed()
+        with tempfile.TemporaryDirectory() as directory:
+            drifted = Path(directory) / "phi4-mini-it-aie4"
+            drifted.mkdir()
+            for name in package_tool.OVERLAY_FILES:
+                (drifted / name).write_bytes((overlay / name).read_bytes())
+            tokenizer_config = json.loads(
+                (drifted / "tokenizer_config.json").read_text(encoding="utf-8")
+            )
+            # A single trailing newline is enough: it is the kind of edit that
+            # looks harmless and would be silently discarded at run time.
+            tokenizer_config["chat_template"] += "\n"
+            (drifted / "tokenizer_config.json").write_text(
+                json.dumps(tokenizer_config), encoding="utf-8"
+            )
+            with self.assertRaises(ValueError) as caught:
+                package_tool._require_inlined_template_matches_upstream(drifted)
+            self.assertIn("silently ignored", str(caught.exception))
+
     def test_genai_config_is_not_carried_through(self):
         # MODEL-2: flm.exe runs no ORT or genai graph, and an unused config
         # invites a future reader to believe it is authoritative.

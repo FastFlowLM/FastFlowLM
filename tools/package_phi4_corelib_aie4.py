@@ -325,9 +325,12 @@ def generate_overlay(
     tokenizer_config = json.loads(
         (upstream_dir / "tokenizer_config.json").read_text(encoding="utf-8")
     )
-    chat_template = (upstream_dir / "chat_template.jinja").read_text(
-        encoding="utf-8"
-    )
+    # Read bytes and decode explicitly. `read_text` applies universal newline
+    # translation, which would turn a CRLF template into an LF string and break
+    # the byte-equality that `_require_inlined_template_matches_upstream`
+    # depends on.
+    chat_template_bytes = (upstream_dir / "chat_template.jinja").read_bytes()
+    chat_template = chat_template_bytes.decode("utf-8")
 
     _write_json(
         overlay_dir / "config.json",
@@ -361,6 +364,7 @@ def generate_overlay(
         git_files,
     )
     _write_json(overlay_dir / "provenance.json", provenance)
+    _require_inlined_template_matches_upstream(overlay_dir)
     return provenance
 
 
@@ -417,6 +421,52 @@ def build_catalog_entry(
     }
 
 
+def _require_inlined_template_matches_upstream(overlay_dir: Path) -> None:
+    """Require the inlined chat template to equal the upstream jinja file.
+
+    `AutoModel::setup_tokenizer` prefers a standalone `chat_template.jinja`
+    over the `chat_template` key in `tokenizer_config.json`: when the file is
+    present it *overwrites* the key. Both are in the package, so the upstream
+    file wins at run time and the overlay's inlined copy is dead code unless
+    the two are byte-identical.
+
+    That makes any drift silent and one-directional -- the overlay would look
+    edited while the model kept using the upstream template -- so the equality
+    is asserted rather than assumed. The check is offline: `provenance.json`
+    records the upstream file's SHA-256, so no download is needed.
+    """
+    overlay_dir = Path(overlay_dir)
+    tokenizer_config = json.loads(
+        (overlay_dir / "tokenizer_config.json").read_text(encoding="utf-8")
+    )
+    provenance = json.loads(
+        (overlay_dir / "provenance.json").read_text(encoding="utf-8")
+    )
+    inlined = tokenizer_config.get("chat_template")
+    if not isinstance(inlined, str) or not inlined:
+        raise ValueError(
+            "overlay tokenizer_config.json has no string chat_template"
+        )
+    record = _require_mapping(
+        _require_mapping(
+            _require_mapping(provenance.get("upstream"), "upstream").get(
+                "inputs"
+            ),
+            "upstream.inputs",
+        ).get("chat_template.jinja"),
+        "upstream.inputs['chat_template.jinja']",
+    )
+    encoded = inlined.encode("utf-8")
+    actual = hashlib.sha256(encoded).hexdigest()
+    if actual != record.get("sha256") or len(encoded) != record.get("size"):
+        raise ValueError(
+            "the overlay's inlined chat_template does not match the upstream "
+            "chat_template.jinja it was generated from. AutoModel prefers the "
+            "standalone .jinja file, so the inlined copy would be silently "
+            "ignored: regenerate the overlay instead of editing it."
+        )
+
+
 def validate_catalog_provenance(
     entry: dict[str, object],
     upstream_records: list[dict[str, object]],
@@ -446,6 +496,8 @@ def validate_catalog_provenance(
         raise ValueError("this tag has no ModelScope publication")
     if "ms_url" in entry:
         raise ValueError("a tag without a ModelScope publication has no ms_url")
+
+    _require_inlined_template_matches_upstream(overlay_dir)
 
     overlays = _require_mapping(entry.get("bundled_overlays"), "bundled_overlays")
     if set(overlays) != set(OVERLAY_FILES):

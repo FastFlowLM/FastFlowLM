@@ -144,6 +144,45 @@ if(RYZENAI_CORELIB_RUNTIME_DIR)
         "PATH=path_list_prepend:${XRT_LIB_DIR};PATH=path_list_prepend:${RYZENAI_CORELIB_RUNTIME_DIR}")
 endif()
 
+# The packaging and clean-environment checks run by default rather than only
+# when someone remembers the command. Every regression guard in that script --
+# the derived closure, the CLOSURE-2 negative control, the no-corelib-import
+# rule, and the requirement that the ordinary NPU2 installer still builds
+# without an AIE4 closure -- is invisible if it is never invoked.
+#
+# It reports SKIPPED via SKIP_RETURN_CODE when its optional inputs are absent,
+# so a partial run never reads as full coverage.
+find_program(FLM_POWERSHELL_EXECUTABLE
+             NAMES pwsh powershell
+             DOC "PowerShell used to run the packaging tests")
+if(FLM_POWERSHELL_EXECUTABLE)
+    set(_packaged_runtime_args "")
+    if(RYZENAI_CORELIB_RUNTIME_DIR)
+        list(APPEND _packaged_runtime_args
+            -CorelibRuntimeDir "${RYZENAI_CORELIB_RUNTIME_DIR}")
+    endif()
+    if(RYZENAI_CORELIB_EXTRA_DLL_DIRS)
+        list(JOIN RYZENAI_CORELIB_EXTRA_DLL_DIRS ";" _packaged_runtime_deps)
+        list(APPEND _packaged_runtime_args
+            -DependencyDir "${_packaged_runtime_deps}")
+    endif()
+    add_test(NAME test_packaged_runtime
+             COMMAND "${FLM_POWERSHELL_EXECUTABLE}"
+                     -NoProfile
+                     -ExecutionPolicy Bypass
+                     -File
+                     "${CMAKE_CURRENT_LIST_DIR}/test_packaged_runtime.ps1"
+                     ${_packaged_runtime_args})
+    set_tests_properties(test_packaged_runtime PROPERTIES
+        SKIP_RETURN_CODE 77
+        TIMEOUT 1800)
+else()
+    message(WARNING
+        "PowerShell was not found, so test_packaged_runtime is not "
+        "registered. The AIE4 packaging and clean-environment guards will "
+        "not run in this build.")
+endif()
+
 add_corelib_host_test(test_corelib_api test_corelib_api.cpp)
 add_corelib_host_test(test_phi4_manifest test_phi4_manifest.cpp)
 add_corelib_host_test(test_phi4_shape_plan test_phi4_shape_plan.cpp)

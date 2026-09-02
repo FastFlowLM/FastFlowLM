@@ -19,7 +19,11 @@
 #   FLM_AIE4_EXTRA_DIRS    additional dependency search directories
 #   FLM_AIE4_DESTINATION   directory to stage into; relative paths resolve
 #                          against CMAKE_INSTALL_PREFIX
-#   FLM_AIE4_REPORT        optional path for the derived closure report
+#   FLM_AIE4_REPORT        optional path for the SHIPPABLE closure report:
+#                          file names and hashes only, no build-machine paths
+#   FLM_AIE4_AUDIT         optional path for the build-side audit record, which
+#                          does name absolute source paths and must stay in the
+#                          build tree
 
 cmake_minimum_required(VERSION 3.24)
 
@@ -159,19 +163,38 @@ foreach(_flm_aie4_file IN LISTS _flm_aie4_files)
          FOLLOW_SYMLINK_CHAIN)
 endforeach()
 
-# The report records both the derived closure and the directories it was
-# derived from. The source path of every staged DLL is the audit trail: it is
-# what shows, after the fact, that a shipped dependency came from the intended
-# package rather than from whatever the build machine happened to have.
+# Two records, deliberately different.
+#
+# The shippable report lists the derived closure by name and SHA-256 only. It
+# is written into the staged directory, which the installer scripts copy
+# verbatim, so it must not carry absolute paths from the machine that built it:
+# a customer artifact naming a developer's conda prefix leaks build-machine
+# layout for no benefit to the reader. The hashes are what a recipient can
+# actually act on, since they verify the staged bits.
 if(FLM_AIE4_REPORT)
-    set(_flm_aie4_report_text "root\t${_flm_aie4_root}\n")
+    set(_flm_aie4_report_text "")
+    foreach(_flm_aie4_file IN LISTS _flm_aie4_files)
+        get_filename_component(_flm_aie4_leaf "${_flm_aie4_file}" NAME)
+        file(SHA256 "${_flm_aie4_file}" _flm_aie4_hash)
+        string(APPEND _flm_aie4_report_text
+            "staged\t${_flm_aie4_leaf}\t${_flm_aie4_hash}\n")
+    endforeach()
+    file(WRITE "${FLM_AIE4_REPORT}" "${_flm_aie4_report_text}")
+endif()
+
+# The audit record stays in the build tree and does name the source path of
+# every staged DLL. That path is what shows, after the fact, that a shipped
+# dependency came from the intended package rather than from whatever the
+# build machine happened to have.
+if(FLM_AIE4_AUDIT)
+    set(_flm_aie4_audit_text "root\t${_flm_aie4_root}\n")
     foreach(_flm_aie4_dir IN LISTS _flm_aie4_search_dirs)
-        string(APPEND _flm_aie4_report_text "search\t${_flm_aie4_dir}\n")
+        string(APPEND _flm_aie4_audit_text "search\t${_flm_aie4_dir}\n")
     endforeach()
     foreach(_flm_aie4_file IN LISTS _flm_aie4_files)
         get_filename_component(_flm_aie4_leaf "${_flm_aie4_file}" NAME)
-        string(APPEND _flm_aie4_report_text
+        string(APPEND _flm_aie4_audit_text
             "staged\t${_flm_aie4_leaf}\t${_flm_aie4_file}\n")
     endforeach()
-    file(WRITE "${FLM_AIE4_REPORT}" "${_flm_aie4_report_text}")
+    file(WRITE "${FLM_AIE4_AUDIT}" "${_flm_aie4_audit_text}")
 endif()

@@ -232,6 +232,54 @@ void CheckRealShapePlan(const std::shared_ptr<CorelibApi>& api) {
     std::cout << "matmul padded K/N equals logical K/N for all three "
                  "Phi-4 descriptors\n";
 
+    // The LM head ships M = 1 and M = 128 and NOTHING ABOVE, and asking for
+    // more is an error rather than a larger answer. This is the constraint
+    // that makes Phi4ShapePlan correct: it queries the LM head at m = 1
+    // only, and RowsFor(LmHead, n>1) throws. If the real library ever
+    // started rounding an out-of-grid M up instead of refusing, that design
+    // would be resting on a property the library no longer has -- so assert
+    // the refusal here rather than inferring it from the code that avoids
+    // it.
+    for (const std::int64_t rows :
+         {std::int64_t{1}, std::int64_t{2}, std::int64_t{128}}) {
+        std::int64_t m = rows;
+        std::int64_t k = constants::kHiddenSize;
+        std::int64_t n = constants::kVocabularySize;
+        api->Check(
+            api->functions().matmul_pad_shape(
+                &m,
+                &k,
+                &n,
+                constants::kGroupSize),
+            "ryzenai_corelib_matmul_bf16_pad_shape");
+        CHECK(m == (rows == 1 ? 1 : 128));
+    }
+    for (const std::int64_t rows :
+         {std::int64_t{129},
+          std::int64_t{256},
+          std::int64_t{2048},
+          std::int64_t{4096}}) {
+        std::int64_t m = rows;
+        std::int64_t k = constants::kHiddenSize;
+        std::int64_t n = constants::kVocabularySize;
+        const auto status = api->functions().matmul_pad_shape(
+            &m,
+            &k,
+            &n,
+            constants::kGroupSize);
+        if (status == ryzenai_corelib_status_success) {
+            throw std::runtime_error(
+                "real corelib accepted LM-head rows " +
+                std::to_string(rows) + " and padded to " +
+                std::to_string(m) +
+                "; Phi4ShapePlan assumes the LM head is single-row and "
+                "RowsFor(LmHead) throws above 1, which is only safe while "
+                "the library refuses");
+        }
+    }
+    std::cout << "LM head pads 1->1 and 2..128->128, and refuses every M "
+                 "above 128\n";
+
     // rows = 1 must stay 1 on every helper: decode allocates a single row
     // and the header says flat MHA pads its KV window instead.
     for (const auto& descriptor : kMatMulDescriptors) {
@@ -345,6 +393,11 @@ void CheckRealShapePlan(const std::shared_ptr<CorelibApi>& api) {
 
 }  // namespace
 
+// CTest's SKIP_RETURN_CODE. Returning 0 here would report Passed, and a
+// green-and-inert check is worse than an absent one because it reads as
+// coverage.
+constexpr int kCTestSkipReturnCode = 77;
+
 int main() {
     const std::string runtime_dir(FLM_REAL_CORELIB_RUNTIME_DIR);
     if (runtime_dir.empty()) {
@@ -352,7 +405,7 @@ int main() {
             << "test_real_corelib: SKIPPED -- configure with "
                "-DRYZENAI_CORELIB_RUNTIME_DIR=<dir containing "
                "ryzenai_corelib.dll> to run it.\n";
-        return 0;
+        return kCTestSkipReturnCode;
     }
 
     try {

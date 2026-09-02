@@ -115,10 +115,13 @@ target_compile_definitions(test_generation_limit PRIVATE
     FLM_TEST_SOURCE_DIR="${FASTFLOW_SOURCE_DIR}")
 add_test(NAME test_generation_limit COMMAND test_generation_limit)
 
-# Validates FastFlow against the REAL corelib rather than the fake. It is
-# a normal CTest test, and it SKIPS (passing, with a notice) only when the
-# runtime directory is unset -- a configured-but-missing DLL fails, so a
-# stale or absent runtime cannot hide behind a green suite.
+# Validates FastFlow against the REAL corelib rather than the fake.
+#
+# With no runtime directory it reports SKIPPED to CTest via
+# SKIP_RETURN_CODE, NOT Passed: this is the suite's highest-value check and
+# a green-but-inert result would read as coverage it does not have. A
+# configured-but-missing DLL is still a hard failure, so a stale or absent
+# runtime cannot hide behind a green suite either.
 set(RYZENAI_CORELIB_RUNTIME_DIR
     ""
     CACHE PATH
@@ -133,6 +136,7 @@ add_corelib_host_test(test_real_corelib test_real_corelib.cpp)
 target_compile_definitions(test_real_corelib PRIVATE
     FLM_REAL_CORELIB_RUNTIME_DIR="${RYZENAI_CORELIB_RUNTIME_DIR}"
     FLM_REAL_CORELIB_EXTRA_DLL_DIRS="${RYZENAI_CORELIB_EXTRA_DLL_DIRS_ESCAPED}")
+set_tests_properties(test_real_corelib PROPERTIES SKIP_RETURN_CODE 77)
 if(RYZENAI_CORELIB_RUNTIME_DIR)
     set_tests_properties(test_real_corelib PROPERTIES
         ENVIRONMENT_MODIFICATION

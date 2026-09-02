@@ -538,6 +538,136 @@ void TestInvalidInputsRejectWithoutHelperCalls(
     CHECK(g_helpers.TotalCalls() == calls_after_build);
 }
 
+// Everything above drives Phi4ShapePlan through a synthetic padding grid,
+// which is what lets it test the plan's own logic. This one does the
+// opposite: it builds against the UNMODIFIED fake, whose pad helpers encode
+// the grid measured from the real e5258d2 library.
+//
+// It exists because that grid was otherwise consumed only by
+// test_real_corelib, which skips without a runtime directory. The two
+// together form a chain -- test_real_corelib asserts fake == library, and
+// this asserts fake == the numbers written down here -- so a regression in
+// either end fails something that runs by default.
+std::shared_ptr<CorelibApi> ResolveUnmodifiedFake() {
+    auto resolver = flm::test::CompleteCorelibResolver();
+    return CorelibApi::ResolveForTest(
+        [resolver = std::move(resolver)](std::string_view name) mutable
+            -> void* {
+            const auto found = resolver.find(std::string(name));
+            return found == resolver.end() ? nullptr : found->second;
+        });
+}
+
+void TestFakeReproducesTheShippedKernelGrid() {
+    auto api = ResolveUnmodifiedFake();
+    const Phi4ShapePlan plan = Phi4ShapePlan::Build(api);
+
+    const std::vector<std::pair<std::int64_t, std::int64_t>> expected{
+        {1, 1},
+        {2, 64},
+        {65, 128},
+        {129, 256},
+        {257, 512},
+        {513, 1024},
+        {1025, 2048},
+        {2049, 3072},
+        {3073, 4096}};
+    for (const RowUse use : {
+             RowUse::QueryProjection,
+             RowUse::KvProjection,
+             RowUse::Attention,
+             RowUse::OutputProjection,
+             RowUse::SsMlp}) {
+        CHECK(plan.Transitions(use) == expected);
+    }
+    CHECK(
+        plan.Transitions(RowUse::LmHead) ==
+        (std::vector<std::pair<std::int64_t, std::int64_t>>{{1, 1}}));
+    CHECK(plan.capacities().layer_rows == 4096);
+    CHECK(plan.capacities().lm_head_rows == 1);
+
+    // Decode stays unpadded on every helper.
+    for (const RowUse use : {
+             RowUse::QueryProjection,
+             RowUse::KvProjection,
+             RowUse::Attention,
+             RowUse::OutputProjection,
+             RowUse::SsMlp,
+             RowUse::LmHead}) {
+        CHECK(plan.RowsFor(use, 1) == 1);
+    }
+    CHECK(plan.RowsFor(RowUse::SsMlp, 2) == 64);
+    CHECK(plan.RowsFor(RowUse::Attention, 64) == 64);
+    CHECK(plan.RowsFor(RowUse::QueryProjection, 65) == 128);
+    CHECK(plan.RowsFor(RowUse::QueryProjection, 3072) == 3072);
+    CHECK(plan.RowsFor(RowUse::QueryProjection, 4096) == 4096);
+}
+
+// The LM head ships M = 1 and M = 128 and refuses anything larger rather
+// than rounding up. Phi4ShapePlan never asks for more, so this branch of
+// the fake had no other caller -- and an unexercised branch is not a model
+// of the library, it is dead code that happens to be written down.
+void TestFakeRefusesOutOfGridLmHeadRows() {
+    auto api = ResolveUnmodifiedFake();
+    const auto& functions = api->functions();
+
+    for (const auto& expectation : std::vector<
+             std::pair<std::int64_t, std::int64_t>>{
+             {1, 1},
+             {2, 128},
+             {128, 128}}) {
+        std::int64_t m = expectation.first;
+        std::int64_t k = 3072;
+        std::int64_t n = 200064;
+        CHECK(
+            functions.matmul_pad_shape(&m, &k, &n, 128) ==
+            ryzenai_corelib_status_success);
+        CHECK(m == expectation.second);
+        // K and N are never padded; MEM-5 rests on that.
+        CHECK(k == 3072);
+        CHECK(n == 200064);
+    }
+
+    for (const std::int64_t rows :
+         {std::int64_t{129}, std::int64_t{256}, std::int64_t{4096}}) {
+        std::int64_t m = rows;
+        std::int64_t k = 3072;
+        std::int64_t n = 200064;
+        CHECK(
+            functions.matmul_pad_shape(&m, &k, &n, 128) ==
+            ryzenai_corelib_status_unsupported);
+    }
+
+    // The layer shapes have no such ceiling: 4096 is on their grid.
+    std::int64_t m = 4096;
+    std::int64_t k = 3072;
+    std::int64_t n = 3072;
+    CHECK(
+        functions.matmul_pad_shape(&m, &k, &n, 128) ==
+        ryzenai_corelib_status_success);
+    CHECK(m == 4096);
+
+    // And nothing beyond the grid is silently accepted anywhere.
+    m = 4097;
+    CHECK(
+        functions.matmul_pad_shape(&m, &k, &n, 128) ==
+        ryzenai_corelib_status_unsupported);
+    m = 4097;
+    CHECK(
+        functions.ssmlp_pad_rows(&m, 3072, 8192, 128) ==
+        ryzenai_corelib_status_unsupported);
+    const ryzenai_corelib_flat_mha_bf16_desc desc{
+        24,
+        8,
+        128,
+        4096,
+        96};
+    m = 4097;
+    CHECK(
+        functions.flat_mha_pad_rows(&m, &desc) ==
+        ryzenai_corelib_status_unsupported);
+}
+
 }  // namespace
 
 int main() {
@@ -548,6 +678,8 @@ int main() {
         TestUnsupportedRowsRejectBuild(api);
         TestInvalidPaddedRowsRejectBuild(api);
         TestInvalidInputsRejectWithoutHelperCalls(api);
+        TestFakeReproducesTheShippedKernelGrid();
+        TestFakeRefusesOutOfGridLmHeadRows();
         std::cout << "test_phi4_shape_plan: PASS\n";
         return 0;
     } catch (const std::exception& error) {

@@ -20,6 +20,7 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -179,10 +180,21 @@ void TestOllamaChatAie4LimitAndAdmission() {
 //
 // It reads the two production sources, finds every RestHandler::handle_*
 // whose body reaches the causal engine's generate() or
-// generate_with_prompt(), maps those handlers to the routes server.cpp
-// registers for them, and requires each such route to be declared in
-// GenerationRoutes(). A new generation endpoint fails this test until it
-// is.
+// generate_with_prompt(), and maps those handlers to the routes server.cpp
+// registers for them. Each such handler must then satisfy two conditions,
+// because the defect that motivated this rule had BOTH shapes available
+// and took the second:
+//
+//   1. its route is declared in GenerationRoutes() -- catches a fifth
+//      endpoint appearing with no declaration at all; and
+//   2. it obtains its limit through the shared functions --
+//      ParseGenerationLimit, GenerationLoopLimit and RequestedMaxNewTokens
+//      -- and calls no other *GenerationLoopLimit.
+//
+// handle_chat was declared and routed all along. What it did wrong was
+// compute its limit privately, through OllamaChatGenerationLoopLimit, and
+// a rule that only checked the route set would have passed it. Condition 2
+// is what makes this guard able to catch the bug it exists for.
 std::string ReadSource(const char* relative) {
     const std::filesystem::path path =
         std::filesystem::path(FLM_TEST_SOURCE_DIR) / relative;
@@ -196,14 +208,20 @@ std::string ReadSource(const char* relative) {
     return buffer.str();
 }
 
-std::set<std::string> GeneratingHandlerNames() {
+struct GeneratingHandler {
+    std::string name;
+    std::string body;
+};
+
+std::vector<GeneratingHandler> GeneratingHandlers() {
     const std::string source = ReadSource("server/rest_handler.cpp");
-    std::set<std::string> generating;
+    std::vector<GeneratingHandler> generating;
     constexpr std::string_view kDefinition = "void RestHandler::handle_";
     for (std::size_t at = source.find(kDefinition);
          at != std::string::npos;
          at = source.find(kDefinition, at + 1)) {
-        const std::size_t name_start = at + std::string("void RestHandler::").size();
+        const std::size_t name_start =
+            at + std::string("void RestHandler::").size();
         const std::size_t name_end = source.find('(', name_start);
         if (name_end == std::string::npos) {
             continue;
@@ -222,10 +240,61 @@ std::set<std::string> GeneratingHandlerNames() {
                 std::string::npos ||
             body.find("auto_chat_engine->generate_with_prompt(") !=
                 std::string::npos) {
-            generating.insert(name);
+            generating.push_back({name, body});
         }
     }
     return generating;
+}
+
+bool IsIdentifierCharacter(char value) noexcept {
+    return value == '_' ||
+           (value >= '0' && value <= '9') ||
+           (value >= 'a' && value <= 'z') ||
+           (value >= 'A' && value <= 'Z');
+}
+
+// True when `body` calls something whose name ENDS in the given suffix but
+// is not exactly it -- OllamaChatGenerationLoopLimit for
+// GenerationLoopLimit, say. That is the private-path shape.
+std::string FindQualifiedVariantCall(
+    const std::string& body,
+    const std::string& call) {
+    for (std::size_t at = body.find(call);
+         at != std::string::npos;
+         at = body.find(call, at + 1)) {
+        if (at == 0 || !IsIdentifierCharacter(body[at - 1])) {
+            continue;
+        }
+        std::size_t start = at;
+        while (start > 0 && IsIdentifierCharacter(body[start - 1])) {
+            --start;
+        }
+        return body.substr(start, at + call.size() - start - 1);
+    }
+    return {};
+}
+
+// The (method, path) the handler declares to RequireGenerationEndpoint.
+std::pair<std::string, std::string> DeclaredRoute(
+    const std::string& body) {
+    constexpr std::string_view kCall = "RequireGenerationEndpoint(";
+    const std::size_t at = body.find(kCall);
+    if (at == std::string::npos) {
+        return {};
+    }
+    const std::size_t method_start = body.find('"', at + kCall.size());
+    if (method_start == std::string::npos) {
+        return {};
+    }
+    const std::size_t method_end = body.find('"', method_start + 1);
+    const std::size_t path_start = body.find('"', method_end + 1);
+    const std::size_t path_end = body.find('"', path_start + 1);
+    if (path_end == std::string::npos) {
+        return {};
+    }
+    return {
+        body.substr(method_start + 1, method_end - method_start - 1),
+        body.substr(path_start + 1, path_end - path_start - 1)};
 }
 
 std::map<std::string, std::pair<std::string, std::string>>
@@ -280,7 +349,7 @@ RegisteredRoutesByHandler() {
 }
 
 void TestEveryGenerationRouteIsDeclared() {
-    const auto generating = GeneratingHandlerNames();
+    const auto generating = GeneratingHandlers();
     const auto registered = RegisteredRoutesByHandler();
     CHECK(!generating.empty());
     CHECK(!registered.empty());
@@ -299,22 +368,69 @@ void TestEveryGenerationRouteIsDeclared() {
     }
 
     std::set<std::string> discovered;
-    for (const std::string& handler : generating) {
-        const auto found = registered.find(handler);
+    for (const GeneratingHandler& handler : generating) {
+        const auto found = registered.find(handler.name);
         if (found == registered.end()) {
             throw std::runtime_error(
-                "generation handler " + handler +
+                "generation handler " + handler.name +
                 " is not registered on any route in server.cpp");
         }
         const std::string route =
             found->second.first + " " + found->second.second;
         discovered.insert(route);
+
+        // Condition 1: the route is declared.
         if (!declared.contains(route)) {
             throw std::runtime_error(
                 "route " + route + " reaches the causal engine but is "
                 "missing from GenerationRoutes(); it would bypass the "
                 "AIE4 admission rule");
         }
+
+        // Condition 2: the handler goes through the shared rule. This is
+        // the one that catches the /api/chat defect, which was declared
+        // and routed but parsed its own limit.
+        for (const std::string& required : {
+                 std::string("ParseGenerationLimit("),
+                 std::string("GenerationLoopLimit("),
+                 std::string("RequestedMaxNewTokens("),
+                 std::string("RequireGenerationEndpoint(")}) {
+            if (handler.body.find(required) == std::string::npos) {
+                throw std::runtime_error(
+                    handler.name + " serves " + route +
+                    " but never calls " + required +
+                    "; a generation handler must obtain its limit "
+                    "through the shared rule, not privately");
+            }
+        }
+        const std::string variant =
+            FindQualifiedVariantCall(
+                handler.body,
+                "GenerationLoopLimit(");
+        if (!variant.empty()) {
+            throw std::runtime_error(
+                handler.name + " serves " + route + " and calls " +
+                variant +
+                "; that is the private limit path /api/chat used, and it "
+                "bypasses the admission rule and the HTTP 400 response");
+        }
+
+        // The route it declares must be the route it is registered on, so
+        // a copy-pasted path cannot silently select another endpoint's
+        // limit field.
+        const auto declared_route = DeclaredRoute(handler.body);
+        if (declared_route != found->second) {
+            throw std::runtime_error(
+                handler.name + " is registered on " + route +
+                " but declares RequireGenerationEndpoint(\"" +
+                declared_route.first + "\", \"" +
+                declared_route.second + "\")");
+        }
+        CHECK(
+            GenerationEndpointForRoute(
+                declared_route.first,
+                declared_route.second)
+                .has_value());
     }
     // And no declared route is stale.
     CHECK(discovered == declared);

@@ -233,11 +233,65 @@ ryzenai_corelib_status FakeTensorGetDataType(
     return ryzenai_corelib_status_success;
 }
 
+// The shipped AIE4 kernel grid, measured against the real e5258d2 library
+// (see test_real_corelib, which asserts the two still agree). Padding is a
+// pure lookup, so the fake can reproduce it exactly -- and it must: every
+// other test in this suite sizes its buffers from these answers.
+constexpr int64_t kShippedRowGrid[] = {
+    1, 64, 128, 256, 512, 1024, 2048, 3072, 4096};
+
+// The LM head ships far fewer M: 1, then 128, and nothing above it. An
+// out-of-grid M is an ERROR rather than a larger answer, which is what
+// stops a caller allocating for a shape no kernel serves.
+constexpr int64_t kLmHeadRowGrid[] = {1, 128};
+
+bool PadToGrid(
+    int64_t* m,
+    const int64_t* grid,
+    std::size_t grid_size) {
+    for (std::size_t index = 0; index < grid_size; ++index) {
+        if (*m <= grid[index]) {
+            *m = grid[index];
+            return true;
+        }
+    }
+    return false;
+}
+
 ryzenai_corelib_status FakeMatmulPadShape(
-    int64_t*,
-    int64_t*,
-    int64_t*,
+    int64_t* m,
+    int64_t* k,
+    int64_t* n,
     uint32_t) {
+    if (k == nullptr || n == nullptr || *k <= 0 || *n <= 0) {
+        g_last_error = "matmul_bf16_pad_shape requires k and n";
+        return ryzenai_corelib_status_bad_argument;
+    }
+    // K and N are never padded for the Phi-4 shapes; MEM-5 rests on that.
+    if (m == nullptr) {
+        return ryzenai_corelib_status_success;
+    }
+    if (*m <= 0) {
+        g_last_error = "matmul_bf16_pad_shape requires positive m";
+        return ryzenai_corelib_status_bad_argument;
+    }
+    const bool is_lm_head = *n >= 200064;
+    const bool padded =
+        is_lm_head
+            ? PadToGrid(
+                  m,
+                  kLmHeadRowGrid,
+                  sizeof(kLmHeadRowGrid) / sizeof(int64_t))
+            : PadToGrid(
+                  m,
+                  kShippedRowGrid,
+                  sizeof(kShippedRowGrid) / sizeof(int64_t));
+    if (!padded) {
+        g_last_error =
+            "no valid padded M shape for AIE4 at m=" +
+            std::to_string(*m);
+        return ryzenai_corelib_status_unsupported;
+    }
     return ryzenai_corelib_status_success;
 }
 
@@ -275,10 +329,21 @@ ryzenai_corelib_status FakeMatmul(
 }
 
 ryzenai_corelib_status FakeSsmlpPadRows(
-    int64_t*,
+    int64_t* m,
     int64_t,
     int64_t,
     uint32_t) {
+    if (m == nullptr || *m <= 0) {
+        g_last_error = "ssmlp_bf16_pad_rows requires positive m";
+        return ryzenai_corelib_status_bad_argument;
+    }
+    if (!PadToGrid(
+            m,
+            kShippedRowGrid,
+            sizeof(kShippedRowGrid) / sizeof(int64_t))) {
+        g_last_error = "no valid padded row count for AIE4";
+        return ryzenai_corelib_status_unsupported;
+    }
     return ryzenai_corelib_status_success;
 }
 
@@ -318,8 +383,24 @@ ryzenai_corelib_status FakeSsmlp(
 }
 
 ryzenai_corelib_status FakeFlatMhaPadRows(
-    int64_t*,
-    const ryzenai_corelib_flat_mha_bf16_desc*) {
+    int64_t* m,
+    const ryzenai_corelib_flat_mha_bf16_desc* desc) {
+    if (m == nullptr || desc == nullptr || *m <= 0) {
+        g_last_error = "flat_mha_bf16_pad_rows requires m and a desc";
+        return ryzenai_corelib_status_bad_argument;
+    }
+    // Decode is not padded: the token kernel runs one row and pads its KV
+    // window internally.
+    if (*m == 1) {
+        return ryzenai_corelib_status_success;
+    }
+    if (!PadToGrid(
+            m,
+            kShippedRowGrid,
+            sizeof(kShippedRowGrid) / sizeof(int64_t))) {
+        g_last_error = "no valid padded row count for AIE4";
+        return ryzenai_corelib_status_unsupported;
+    }
     return ryzenai_corelib_status_success;
 }
 

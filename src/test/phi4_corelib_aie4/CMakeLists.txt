@@ -111,7 +111,33 @@ add_executable(test_generation_limit
     ${FASTFLOW_SOURCE_DIR}/server/npu_access_manager.cpp)
 target_include_directories(test_generation_limit PRIVATE
     ${FASTFLOW_SOURCE_DIR}/include)
+target_compile_definitions(test_generation_limit PRIVATE
+    FLM_TEST_SOURCE_DIR="${FASTFLOW_SOURCE_DIR}")
 add_test(NAME test_generation_limit COMMAND test_generation_limit)
+
+# Validates FastFlow against the REAL corelib rather than the fake. It is
+# a normal CTest test, and it SKIPS (passing, with a notice) only when the
+# runtime directory is unset -- a configured-but-missing DLL fails, so a
+# stale or absent runtime cannot hide behind a green suite.
+set(RYZENAI_CORELIB_RUNTIME_DIR
+    ""
+    CACHE PATH
+    "Directory holding the real ryzenai_corelib.dll and its closure")
+set(RYZENAI_CORELIB_EXTRA_DLL_DIRS
+    ""
+    CACHE STRING
+    "Semicolon-separated directories completing corelib's DLL closure")
+string(REPLACE ";" "\\;" RYZENAI_CORELIB_EXTRA_DLL_DIRS_ESCAPED
+    "${RYZENAI_CORELIB_EXTRA_DLL_DIRS}")
+add_corelib_host_test(test_real_corelib test_real_corelib.cpp)
+target_compile_definitions(test_real_corelib PRIVATE
+    FLM_REAL_CORELIB_RUNTIME_DIR="${RYZENAI_CORELIB_RUNTIME_DIR}"
+    FLM_REAL_CORELIB_EXTRA_DLL_DIRS="${RYZENAI_CORELIB_EXTRA_DLL_DIRS_ESCAPED}")
+if(RYZENAI_CORELIB_RUNTIME_DIR)
+    set_tests_properties(test_real_corelib PROPERTIES
+        ENVIRONMENT_MODIFICATION
+        "PATH=path_list_prepend:${XRT_LIB_DIR};PATH=path_list_prepend:${RYZENAI_CORELIB_RUNTIME_DIR}")
+endif()
 
 add_corelib_host_test(test_corelib_api test_corelib_api.cpp)
 add_corelib_host_test(test_phi4_manifest test_phi4_manifest.cpp)

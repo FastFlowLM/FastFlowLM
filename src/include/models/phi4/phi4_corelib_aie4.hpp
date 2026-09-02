@@ -27,6 +27,13 @@ struct Phi4DebugSnapshot {
 
 struct Phi4Aie4Metrics {
     std::uint64_t model_load_ns = 0;
+    // Design 18.6 names runtime packing and first-use kernel construction as
+    // the startup-cost risk, and the mitigation is to "distinguish
+    // load/cold/warm measurements". A single total cannot say which of the
+    // three phases dominates, so the manifest/mapping pass and the 1..4096
+    // helper interrogation are timed separately from the weight pack.
+    std::uint64_t manifest_map_ns = 0;
+    std::uint64_t shape_plan_ns = 0;
     std::uint64_t weight_pack_ns = 0;
     std::uint64_t packed_weight_bytes = 0;
     std::uint64_t mapped_source_bytes = 0;

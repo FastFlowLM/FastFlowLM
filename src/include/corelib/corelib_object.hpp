@@ -20,7 +20,7 @@ public:
           value_(value) {
         if (value_ != nullptr) {
             assert(api_ != nullptr);
-            api_->RegisterObject();
+            api_->RegisterObject(Tag::kKind);
         }
     }
 
@@ -64,10 +64,24 @@ private:
     void* value_ = nullptr;
 };
 
-struct StreamTag;
-struct TensorTag;
-struct MatMulWeightsTag;
-struct SsMlpWeightsTag;
+// Each tag carries the kind it counts as. Defined rather than forward
+// declared so `Tag::kKind` above resolves, and so adding a new corelib object
+// type is a compile error here until it is given a kind, rather than a silent
+// omission from the post-warm allocation measurement.
+struct StreamTag {
+    static constexpr CorelibObjectKind kKind = CorelibObjectKind::Stream;
+};
+struct TensorTag {
+    static constexpr CorelibObjectKind kKind = CorelibObjectKind::Tensor;
+};
+struct MatMulWeightsTag {
+    static constexpr CorelibObjectKind kKind =
+        CorelibObjectKind::MatMulWeights;
+};
+struct SsMlpWeightsTag {
+    static constexpr CorelibObjectKind kKind =
+        CorelibObjectKind::SsMlpWeights;
+};
 
 using UniqueStream = UniqueObject<StreamTag>;
 using UniqueTensor = UniqueObject<TensorTag>;

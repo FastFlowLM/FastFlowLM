@@ -420,8 +420,22 @@ void CorelibApi::Check(
         status_text == nullptr ? "corelib failure" : status_text};
 }
 
-void CorelibApi::RegisterObject() const noexcept {
+void CorelibApi::RegisterObject(CorelibObjectKind kind) const noexcept {
     live_object_count_.fetch_add(1, std::memory_order_relaxed);
+    creation_counts_[static_cast<std::size_t>(kind)].fetch_add(
+        1,
+        std::memory_order_relaxed);
+}
+
+std::uint64_t CorelibApi::creation_count(
+    CorelibObjectKind kind) const noexcept {
+    return creation_counts_[static_cast<std::size_t>(kind)].load(
+        std::memory_order_relaxed);
+}
+
+std::uint64_t CorelibApi::weight_creation_count() const noexcept {
+    return creation_count(CorelibObjectKind::MatMulWeights) +
+           creation_count(CorelibObjectKind::SsMlpWeights);
 }
 
 void CorelibApi::Release(void* value) const noexcept {

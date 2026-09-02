@@ -2,6 +2,7 @@
 
 #include <ryzenai/corelib.h>
 
+#include <array>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -91,6 +92,30 @@ struct CorelibFunctions {
     decltype(&::ryzenai_corelib_cleanup) cleanup;
 };
 
+// Which kind of corelib object a successful creation call produced.
+//
+// Task 13 Step 4 needs "no device tensor and no weight object was created
+// after warmup" to be a MEASUREMENT rather than a restatement of what the
+// code is believed to do. Counting at the RAII wrapper -- the single point
+// every corelib object passes through on its way to being owned -- makes the
+// answer independent of WHICH code path created it, so an allocation
+// introduced anywhere in the decode loop is caught. A counter maintained by
+// the engine's own tensor helper can only ever confirm that the helper was
+// not called.
+//
+// Before this existed, `Phi4Aie4Metrics::weight_create_count` was assigned
+// the constant `kLayerCount * 5 + 1`. That number is correct, and a constant
+// cannot detect a weight object being created after warmup, which is the one
+// question the field is read for.
+enum class CorelibObjectKind : std::size_t {
+    Stream = 0,
+    Tensor = 1,
+    MatMulWeights = 2,
+    SsMlpWeights = 3,
+};
+
+inline constexpr std::size_t kCorelibObjectKindCount = 4;
+
 class CorelibApi final {
 public:
     using Resolver = std::function<void*(std::string_view)>;
@@ -133,9 +158,21 @@ public:
         std::size_t count,
         std::size_t offset) const;
 
-    void RegisterObject() const noexcept;
+    void RegisterObject(CorelibObjectKind kind) const noexcept;
     void Release(void* value) const noexcept;
     std::size_t live_object_count() const noexcept;
+
+    // Cumulative successful creations of `kind` for the process lifetime.
+    // Never decremented: this answers "was anything created between these two
+    // points", which a live count cannot, because a create-and-release pair
+    // leaves the live count where it started.
+    std::uint64_t creation_count(CorelibObjectKind kind) const noexcept;
+
+    // MatMul plus SSMLP weight objects. Both kinds are "a weight object" for
+    // the purposes of design 18.7's post-warm allocation property, and a
+    // caller that summed only one of them would miss half of the model.
+    std::uint64_t weight_creation_count() const noexcept;
+
     const std::filesystem::path& library_path() const noexcept;
 
 private:
@@ -150,6 +187,10 @@ private:
     CorelibFunctions functions_;
     CorelibVersion runtime_version_;
     mutable std::atomic<std::size_t> live_object_count_{0};
+    mutable std::array<
+        std::atomic<std::uint64_t>,
+        kCorelibObjectKindCount>
+        creation_counts_{};
 };
 
 // The header's "one thread" hint for the ONNX packing entry points.

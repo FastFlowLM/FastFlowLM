@@ -586,6 +586,76 @@ void TestNullResetDoesNotRelease() {
     CHECK(api->live_object_count() == 0);
 }
 
+// Task 13 Step 4. The post-warm allocation measurement rests on one property
+// that `live_object_count()` cannot supply: a create followed by a release
+// leaves the live count exactly where it started, so a decode loop that
+// allocated and freed a device tensor per token would read as perfectly
+// stable. The cumulative creation counters are what make that visible, and
+// this is the test that they are cumulative rather than another live count.
+void TestCreationCountsAreCumulativePerKind() {
+    flm::test::ResetFakeCorelib();
+    auto api = ResolveCompleteCorelib();
+    int storage = 0;
+    void* handle = &storage;
+
+    using flm::corelib::CorelibObjectKind;
+    CHECK(api->creation_count(CorelibObjectKind::Tensor) == 0);
+    CHECK(api->weight_creation_count() == 0);
+
+    {
+        flm::corelib::UniqueStream stream(api, handle);
+        flm::corelib::UniqueTensor first(api, handle);
+        flm::corelib::UniqueMatMulWeights matmul(api, handle);
+        flm::corelib::UniqueSsMlpWeights ssmlp(api, handle);
+        CHECK(api->live_object_count() == 4);
+        CHECK(api->creation_count(CorelibObjectKind::Stream) == 1);
+        CHECK(api->creation_count(CorelibObjectKind::Tensor) == 1);
+        CHECK(api->creation_count(CorelibObjectKind::MatMulWeights) == 1);
+        CHECK(api->creation_count(CorelibObjectKind::SsMlpWeights) == 1);
+        // Both weight kinds, because both are "a weight object" for design
+        // 18.7's purposes and summing one of them would miss half the model.
+        CHECK(api->weight_creation_count() == 2);
+    }
+
+    // Everything released: live is back to zero, creations are not.
+    CHECK(api->live_object_count() == 0);
+    CHECK(api->creation_count(CorelibObjectKind::Tensor) == 1);
+    CHECK(api->weight_creation_count() == 2);
+
+    // The churn case: a create/release pair inside a measurement window.
+    const auto tensors_before =
+        api->creation_count(CorelibObjectKind::Tensor);
+    const auto live_before = api->live_object_count();
+    {
+        flm::corelib::UniqueTensor churn(api, handle);
+    }
+    CHECK(api->live_object_count() == live_before);
+    CHECK(
+        api->creation_count(CorelibObjectKind::Tensor) ==
+        tensors_before + 1);
+
+    // A null object is not a creation. Otherwise a failed create would count
+    // toward a stability window it never allocated in.
+    const auto before_null =
+        api->creation_count(CorelibObjectKind::Tensor);
+    flm::corelib::UniqueTensor null_value(api, nullptr);
+    CHECK(
+        api->creation_count(CorelibObjectKind::Tensor) == before_null);
+
+    // Moving an object does not create a second one.
+    const auto before_move =
+        api->creation_count(CorelibObjectKind::Stream);
+    {
+        flm::corelib::UniqueStream original(api, handle);
+        flm::corelib::UniqueStream moved(std::move(original));
+        CHECK(
+            api->creation_count(CorelibObjectKind::Stream) ==
+            before_move + 1);
+    }
+    CHECK(
+        api->creation_count(CorelibObjectKind::Stream) == before_move + 1);
+}
+
 void TestExplicitCorelibFileWins() {
     TempDirectory temp;
     const auto executable_dir = temp.path() / "bin";
@@ -696,6 +766,7 @@ int main() {
         TestMoveConstructionReleasesExactlyOnce();
         TestMoveAssignmentReleasesEachObjectOnce();
         TestNullResetDoesNotRelease();
+        TestCreationCountsAreCumulativePerKind();
         TestExplicitCorelibFileWins();
         TestExplicitCorelibDirectoryWins();
         TestRelativeCorelibFileOverrideIsRejected();

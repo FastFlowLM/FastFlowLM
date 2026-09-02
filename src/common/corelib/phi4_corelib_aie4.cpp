@@ -354,11 +354,19 @@ struct phi4_corelib_aie4::Impl final {
             std::chrono::steady_clock::now();
         auto execution = runtime->AcquireExecution();
 
+        const auto manifest_started =
+            std::chrono::steady_clock::now();
         package = std::make_shared<Phi4Package>(
             Phi4Package::Load(model_path, api, false));
+        metrics.manifest_map_ns =
+            ElapsedNanoseconds(manifest_started);
         metrics.mapped_source_bytes =
             MappedSourceBytes(*package);
+        const auto shape_plan_started =
+            std::chrono::steady_clock::now();
         shape_plan.emplace(Phi4ShapePlan::Build(api));
+        metrics.shape_plan_ns =
+            ElapsedNanoseconds(shape_plan_started);
         metrics.helper_transition_counts = {
             static_cast<std::uint32_t>(
                 shape_plan->Transitions(
@@ -414,14 +422,24 @@ struct phi4_corelib_aie4::Impl final {
 
         const auto weight_pack_started =
             std::chrono::steady_clock::now();
+        const std::uint64_t weight_creates_before =
+            api->weight_creation_count();
         weights.emplace(Phi4Weights::Load(api, package));
         metrics.weight_pack_ns =
             ElapsedNanoseconds(weight_pack_started);
         metrics.packed_weight_bytes =
             static_cast<std::uint64_t>(weights->packed_bytes());
+        // COUNTED, not asserted from a constant.
+        //
+        // This field used to be assigned `kLayerCount * 5 + 1` directly. That
+        // value is right, and it is also the one thing a constant can never
+        // tell you: whether a weight object was created somewhere it should
+        // not have been. Design 18.7 and design 15.4 make post-warm
+        // allocation a property to MEASURE, and Task 13's stability window
+        // reads this field to do it, so it has to come from the API's own
+        // creation counter.
         metrics.weight_create_count =
-            static_cast<std::uint64_t>(
-                constants::kLayerCount * 5 + 1);
+            api->weight_creation_count() - weight_creates_before;
 
         const auto& capacities = shape_plan->capacities();
         const std::size_t layer_elements = CheckedElements(

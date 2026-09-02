@@ -77,6 +77,15 @@ struct WeightObjectView {
     std::map<std::string, std::string> components;
 };
 
+// A contiguous [4096, 48] slice of a RoPE table, kept in the SOURCE dtype.
+// `tensor_write` performs the widening to the FP32 device tensor, which is
+// the only conversion boundary corelib `e5258d2` offers.
+struct RopeSourceView {
+    ryzenai_corelib_data_type dtype;
+    const void* data;
+    std::size_t count;
+};
+
 class Phi4Package final {
 public:
     static Phi4Package Load(
@@ -97,8 +106,7 @@ public:
         std::string_view name);
     std::span<const std::uint16_t> MaterializeBf16(
         std::string_view name);
-    std::span<const float> MaterializeRopeFp32(
-        std::string_view name);
+    RopeSourceView MaterializeRopeGather(std::string_view name);
 
 private:
     Phi4Package() = default;
@@ -116,8 +124,8 @@ private:
         fp16_buffers_;
     std::map<std::string, std::vector<std::uint16_t>, std::less<>>
         bf16_buffers_;
-    std::map<std::string, std::vector<float>, std::less<>>
-        fp32_buffers_;
+    std::map<std::string, std::vector<std::byte>, std::less<>>
+        rope_buffers_;
 
     std::map<std::string, InitializerView, std::less<>>
         initializers_;

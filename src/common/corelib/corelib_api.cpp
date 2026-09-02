@@ -76,8 +76,37 @@ Function ResolveRequired(
     return reinterpret_cast<Function>(address);
 }
 
-CorelibFunctions ResolveFunctions(const CorelibApi::Resolver& resolver) {
+// Resolves and calls the version entry point BEFORE any other symbol is
+// looked up. A runtime built from a different corelib revision renames and
+// removes entry points, so resolving the rest first would report a missing
+// symbol instead of the version skew that actually caused it.
+CorelibVersion GateVersion(
+    const CorelibApi::Resolver& resolver,
+    decltype(&::ryzenai_corelib_get_version)& out_get_version) {
+    out_get_version =
+        ResolveRequired<decltype(&::ryzenai_corelib_get_version)>(
+            resolver,
+            "ryzenai_corelib_get_version");
+
+    CorelibVersion runtime{};
+    out_get_version(&runtime.major, &runtime.minor, &runtime.patch);
+
+    const auto compiled = CompiledCorelibVersion();
+    if (!IsCorelibVersionCompatible(compiled, runtime)) {
+        throw std::runtime_error(
+            FormatCorelibVersionMismatch(compiled, runtime));
+    }
+    return runtime;
+}
+
+CorelibFunctions ResolveFunctions(
+    const CorelibApi::Resolver& resolver,
+    CorelibVersion& out_runtime_version) {
+    decltype(&::ryzenai_corelib_get_version) get_version = nullptr;
+    out_runtime_version = GateVersion(resolver, get_version);
+
     return CorelibFunctions{
+        get_version,
         ResolveRequired<
             decltype(&::ryzenai_corelib_status_to_string)>(
             resolver,
@@ -123,21 +152,17 @@ CorelibFunctions ResolveFunctions(const CorelibApi::Resolver& resolver) {
             resolver,
             "ryzenai_corelib_tensor_get_byte_size"),
         ResolveRequired<
-            decltype(&::ryzenai_corelib_convert)>(
+            decltype(&::ryzenai_corelib_tensor_get_data_type)>(
             resolver,
-            "ryzenai_corelib_convert"),
-        ResolveRequired<
-            decltype(&::ryzenai_corelib_convert_strided)>(
-            resolver,
-            "ryzenai_corelib_convert_strided"),
+            "ryzenai_corelib_tensor_get_data_type"),
         ResolveRequired<
             decltype(&::ryzenai_corelib_matmul_bf16_pad_shape)>(
             resolver,
             "ryzenai_corelib_matmul_bf16_pad_shape"),
         ResolveRequired<decltype(
-            &::ryzenai_corelib_matmul_bf16_weights_create_from_onnx_components)>(
+            &::ryzenai_corelib_matmul_bf16_weights_create_onnx)>(
             resolver,
-            "ryzenai_corelib_matmul_bf16_weights_create_from_onnx_components"),
+            "ryzenai_corelib_matmul_bf16_weights_create_onnx"),
         ResolveRequired<decltype(
             &::ryzenai_corelib_matmul_bf16_weights_get_data)>(
             resolver,
@@ -151,9 +176,9 @@ CorelibFunctions ResolveFunctions(const CorelibApi::Resolver& resolver) {
             resolver,
             "ryzenai_corelib_ssmlp_bf16_pad_rows"),
         ResolveRequired<decltype(
-            &::ryzenai_corelib_ssmlp_bf16_weights_create_from_onnx_components)>(
+            &::ryzenai_corelib_ssmlp_bf16_weights_create_onnx)>(
             resolver,
-            "ryzenai_corelib_ssmlp_bf16_weights_create_from_onnx_components"),
+            "ryzenai_corelib_ssmlp_bf16_weights_create_onnx"),
         ResolveRequired<decltype(
             &::ryzenai_corelib_ssmlp_bf16_weights_get_data)>(
             resolver,
@@ -185,6 +210,44 @@ std::string LoadFailureMessage(
 }
 
 }  // namespace
+
+bool IsCorelibVersionCompatible(
+    const CorelibVersion& compiled,
+    const CorelibVersion& runtime) noexcept {
+    if (compiled.major == 0) {
+        // Pre-1.0 corelib may change the API in any release, including a
+        // patch one, so every component is part of the contract.
+        return compiled.major == runtime.major &&
+               compiled.minor == runtime.minor &&
+               compiled.patch == runtime.patch;
+    }
+    return compiled.major == runtime.major &&
+           runtime.minor >= compiled.minor;
+}
+
+std::string FormatCorelibVersion(const CorelibVersion& value) {
+    return std::to_string(value.major) + '.' +
+           std::to_string(value.minor) + '.' +
+           std::to_string(value.patch);
+}
+
+std::string FormatCorelibVersionMismatch(
+    const CorelibVersion& compiled,
+    const CorelibVersion& runtime) {
+    return "ryzenai-corelib version mismatch: the loaded runtime reports "
+           "version " +
+           FormatCorelibVersion(runtime) +
+           " but FastFlowLM was compiled against version " +
+           FormatCorelibVersion(compiled) +
+           "; install the matching ryzenai_corelib.dll";
+}
+
+CorelibVersion CompiledCorelibVersion() noexcept {
+    return CorelibVersion{
+        static_cast<std::uint32_t>(RYZENAI_CORELIB_VERSION_MAJOR),
+        static_cast<std::uint32_t>(RYZENAI_CORELIB_VERSION_MINOR),
+        static_cast<std::uint32_t>(RYZENAI_CORELIB_VERSION_PATCH)};
+}
 
 CorelibError::CorelibError(
     ryzenai_corelib_status status_value,
@@ -237,12 +300,14 @@ std::shared_ptr<CorelibApi> CorelibApi::Load(
             return reinterpret_cast<void*>(
                 GetProcAddress(module, symbol.c_str()));
         };
-        auto functions = ResolveFunctions(resolver);
+        CorelibVersion runtime_version{};
+        auto functions = ResolveFunctions(resolver, runtime_version);
         return std::shared_ptr<CorelibApi>(
             new CorelibApi(
                 module,
                 absolute_path.lexically_normal(),
-                std::move(functions)));
+                std::move(functions),
+                runtime_version));
     } catch (...) {
         FreeLibrary(module);
         throw;
@@ -251,9 +316,14 @@ std::shared_ptr<CorelibApi> CorelibApi::Load(
 
 std::shared_ptr<CorelibApi> CorelibApi::ResolveForTest(
     Resolver resolver) {
-    auto functions = ResolveFunctions(resolver);
+    CorelibVersion runtime_version{};
+    auto functions = ResolveFunctions(resolver, runtime_version);
     return std::shared_ptr<CorelibApi>(
-        new CorelibApi(nullptr, {}, std::move(functions)));
+        new CorelibApi(
+            nullptr,
+            {},
+            std::move(functions),
+            runtime_version));
 }
 
 std::filesystem::path CorelibApi::ResolveLibraryPath(
@@ -281,10 +351,12 @@ std::filesystem::path CorelibApi::ResolveLibraryPath(
 CorelibApi::CorelibApi(
     void* module,
     std::filesystem::path library_path,
-    CorelibFunctions functions)
+    CorelibFunctions functions,
+    CorelibVersion runtime_version)
     : module_(module),
       library_path_(std::move(library_path)),
-      functions_(std::move(functions)) {}
+      functions_(std::move(functions)),
+      runtime_version_(runtime_version) {}
 
 CorelibApi::~CorelibApi() {
     if (module_ != nullptr) {
@@ -294,6 +366,42 @@ CorelibApi::~CorelibApi() {
 
 const CorelibFunctions& CorelibApi::functions() const noexcept {
     return functions_;
+}
+
+const CorelibVersion& CorelibApi::runtime_version() const noexcept {
+    return runtime_version_;
+}
+
+void CorelibApi::WriteElements(
+    ryzenai_corelib_tensor_ptr tensor,
+    ryzenai_corelib_data_type source_type,
+    const void* source,
+    std::size_t count,
+    std::size_t offset) const {
+    Check(
+        functions_.tensor_write(
+            tensor,
+            source_type,
+            source,
+            count,
+            offset),
+        "ryzenai_corelib_tensor_write");
+}
+
+void CorelibApi::ReadElements(
+    ryzenai_corelib_tensor_ptr tensor,
+    ryzenai_corelib_data_type destination_type,
+    void* destination,
+    std::size_t count,
+    std::size_t offset) const {
+    Check(
+        functions_.tensor_read(
+            tensor,
+            destination_type,
+            destination,
+            count,
+            offset),
+        "ryzenai_corelib_tensor_read");
 }
 
 void CorelibApi::Check(

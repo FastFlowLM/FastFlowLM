@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -12,6 +13,9 @@ namespace flm::test {
 namespace detail {
 
 thread_local std::string g_last_error;
+std::uint32_t g_version_major = RYZENAI_CORELIB_VERSION_MAJOR;
+std::uint32_t g_version_minor = RYZENAI_CORELIB_VERSION_MINOR;
+std::uint32_t g_version_patch = RYZENAI_CORELIB_VERSION_PATCH;
 std::unordered_map<void*, std::size_t> g_release_counts;
 std::size_t g_release_count = 0;
 void* g_last_released_object = nullptr;
@@ -20,6 +24,89 @@ ryzenai_corelib_status g_selftest_status =
 bool g_has_device_context = true;
 std::size_t g_cleanup_count = 0;
 std::vector<std::string> g_events;
+
+void FakeGetVersion(
+    std::uint32_t* major,
+    std::uint32_t* minor,
+    std::uint32_t* patch) {
+    if (major != nullptr) {
+        *major = g_version_major;
+    }
+    if (minor != nullptr) {
+        *minor = g_version_minor;
+    }
+    if (patch != nullptr) {
+        *patch = g_version_patch;
+    }
+}
+
+// A device tensor with a real dtype and element count, because that is
+// what tensor_write / tensor_read are bounded by in e5258d2. A fake that
+// accepted either unit convention would let a byte-sized count through,
+// which is precisely the regression the element rebase must not reproduce.
+struct FakeTensor {
+    ryzenai_corelib_data_type data_type;
+    std::size_t element_count;
+};
+
+std::unordered_map<void*, std::unique_ptr<FakeTensor>> g_tensors;
+
+bool IsConvertibleDataType(ryzenai_corelib_data_type value) noexcept {
+    return value == ryzenai_corelib_data_type_fp32 ||
+           value == ryzenai_corelib_data_type_fp16 ||
+           value == ryzenai_corelib_data_type_bf16;
+}
+
+std::size_t DataTypeByteSize(ryzenai_corelib_data_type value) noexcept {
+    return value == ryzenai_corelib_data_type_fp32 ? 4u : 2u;
+}
+
+FakeTensor* FindTensor(ryzenai_corelib_tensor_ptr tensor) noexcept {
+    const auto found = g_tensors.find(tensor);
+    return found == g_tensors.end() ? nullptr : found->second.get();
+}
+
+// Shared by write and read: count and offset are ELEMENTS of the tensor's
+// own dtype, so offset + count must lie inside it. A caller still passing
+// bytes overruns a BF16 tensor by exactly 2x and is rejected here rather
+// than silently moving twice the data.
+ryzenai_corelib_status CheckTensorRange(
+    ryzenai_corelib_tensor_ptr tensor,
+    ryzenai_corelib_data_type caller_type,
+    const void* host,
+    std::size_t count,
+    std::size_t offset) {
+    if (host == nullptr) {
+        g_last_error = "host buffer is null";
+        return ryzenai_corelib_status_bad_argument;
+    }
+    if (!IsConvertibleDataType(caller_type)) {
+        g_last_error =
+            "only FP32, FP16 and BF16 are accepted for the caller type";
+        return ryzenai_corelib_status_bad_argument;
+    }
+    const FakeTensor* record = FindTensor(tensor);
+    if (record == nullptr) {
+        // Tests that supply their own tensor handles opt out of the range
+        // model; they assert on the recorded arguments instead.
+        return ryzenai_corelib_status_success;
+    }
+    if (!IsConvertibleDataType(record->data_type)) {
+        g_last_error = "tensor dtype has no host float representation";
+        return ryzenai_corelib_status_bad_argument;
+    }
+    if (
+        offset > record->element_count ||
+        count > record->element_count - offset) {
+        g_last_error =
+            "offset + count (" + std::to_string(offset) + " + " +
+            std::to_string(count) + ") exceeds the tensor's " +
+            std::to_string(record->element_count) +
+            " elements; count and offset are ELEMENTS, not bytes";
+        return ryzenai_corelib_status_bad_argument;
+    }
+    return ryzenai_corelib_status_success;
+}
 
 const char* FakeStatusToString(ryzenai_corelib_status status) {
     g_last_error = "overwritten by status_to_string";
@@ -53,6 +140,7 @@ void FakeObjectRelease(ryzenai_corelib_object_ptr object) {
     ++g_release_counts[object];
     g_last_released_object = object;
     g_events.emplace_back("release");
+    g_tensors.erase(object);
 }
 
 ryzenai_corelib_status FakeCreateStream(ryzenai_corelib_stream_ptr* out) {
@@ -68,59 +156,80 @@ ryzenai_corelib_status FakeStreamSynchronize(
 }
 
 ryzenai_corelib_status FakeCreateDeviceTensor(
-    ryzenai_corelib_data_type,
-    const int64_t*,
-    std::size_t,
+    ryzenai_corelib_data_type data_type,
+    const int64_t* shape,
+    std::size_t shape_len,
     ryzenai_corelib_tensor_ptr* out) {
     if (out != nullptr) {
         *out = nullptr;
     }
+    if (out == nullptr || shape == nullptr || shape_len == 0) {
+        g_last_error = "create_device_tensor requires a shape and an out";
+        return ryzenai_corelib_status_bad_argument;
+    }
+    std::size_t elements = 1;
+    for (std::size_t index = 0; index < shape_len; ++index) {
+        if (shape[index] <= 0) {
+            g_last_error = "tensor dimensions must be positive";
+            return ryzenai_corelib_status_bad_argument;
+        }
+        elements *= static_cast<std::size_t>(shape[index]);
+    }
+    auto record = std::make_unique<FakeTensor>(
+        FakeTensor{data_type, elements});
+    void* handle = record.get();
+    g_tensors.emplace(handle, std::move(record));
+    *out = handle;
     return ryzenai_corelib_status_success;
 }
 
 ryzenai_corelib_status FakeTensorWrite(
-    ryzenai_corelib_tensor_ptr,
-    const void*,
-    std::size_t,
-    std::size_t) {
-    return ryzenai_corelib_status_success;
+    ryzenai_corelib_tensor_ptr tensor,
+    ryzenai_corelib_data_type source_type,
+    const void* source,
+    std::size_t count,
+    std::size_t offset) {
+    return CheckTensorRange(tensor, source_type, source, count, offset);
 }
 
 ryzenai_corelib_status FakeTensorRead(
-    ryzenai_corelib_tensor_ptr,
-    void*,
-    std::size_t,
-    std::size_t) {
-    return ryzenai_corelib_status_success;
+    ryzenai_corelib_tensor_ptr tensor,
+    ryzenai_corelib_data_type destination_type,
+    void* destination,
+    std::size_t count,
+    std::size_t offset) {
+    return CheckTensorRange(
+        tensor,
+        destination_type,
+        destination,
+        count,
+        offset);
 }
 
 ryzenai_corelib_status FakeTensorGetByteSize(
-    ryzenai_corelib_tensor_ptr,
+    ryzenai_corelib_tensor_ptr tensor,
     std::size_t* out) {
-    if (out != nullptr) {
-        *out = 0;
+    if (out == nullptr) {
+        return ryzenai_corelib_status_bad_argument;
     }
+    const FakeTensor* record = FindTensor(tensor);
+    *out = record == nullptr
+               ? 0
+               : record->element_count *
+                     DataTypeByteSize(record->data_type);
     return ryzenai_corelib_status_success;
 }
 
-ryzenai_corelib_status FakeConvert(
-    ryzenai_corelib_data_type,
-    const void*,
-    ryzenai_corelib_data_type,
-    void*,
-    std::size_t) {
-    return ryzenai_corelib_status_success;
-}
-
-ryzenai_corelib_status FakeConvertStrided(
-    ryzenai_corelib_data_type,
-    const void*,
-    std::size_t,
-    ryzenai_corelib_data_type,
-    void*,
-    std::size_t,
-    std::size_t,
-    std::size_t) {
+ryzenai_corelib_status FakeTensorGetDataType(
+    ryzenai_corelib_tensor_ptr tensor,
+    ryzenai_corelib_data_type* out) {
+    if (out == nullptr) {
+        return ryzenai_corelib_status_bad_argument;
+    }
+    const FakeTensor* record = FindTensor(tensor);
+    *out = record == nullptr
+               ? ryzenai_corelib_data_type_bf16
+               : record->data_type;
     return ryzenai_corelib_status_success;
 }
 
@@ -134,7 +243,8 @@ ryzenai_corelib_status FakeMatmulPadShape(
 
 ryzenai_corelib_status FakeMatmulWeightsFromOnnx(
     const ryzenai_corelib_matmul_bf16_weights_desc*,
-    const ryzenai_corelib_matmul_bf16_onnx_weights_components*,
+    const ryzenai_corelib_matmul_bf16_onnx_components*,
+    uint32_t,
     ryzenai_corelib_matmul_bf16_weights_ptr* out) {
     if (out != nullptr) {
         *out = nullptr;
@@ -174,7 +284,8 @@ ryzenai_corelib_status FakeSsmlpPadRows(
 
 ryzenai_corelib_status FakeSsmlpWeightsFromOnnx(
     const ryzenai_corelib_ssmlp_bf16_weights_desc*,
-    const ryzenai_corelib_ssmlp_bf16_onnx_weights_components*,
+    const ryzenai_corelib_ssmlp_bf16_onnx_components*,
+    uint32_t,
     ryzenai_corelib_ssmlp_bf16_weights_ptr* out) {
     if (out != nullptr) {
         *out = nullptr;
@@ -259,6 +370,13 @@ void FakeCleanup() {
 
 #if defined(FLM_FAKE_CORELIB_DLL)
 
+void ryzenai_corelib_get_version(
+    uint32_t* major,
+    uint32_t* minor,
+    uint32_t* patch) {
+    flm::test::detail::FakeGetVersion(major, minor, patch);
+}
+
 const char* ryzenai_corelib_status_to_string(
     ryzenai_corelib_status status) {
     return flm::test::detail::FakeStatusToString(status);
@@ -304,25 +422,29 @@ ryzenai_corelib_status ryzenai_corelib_create_device_tensor(
 
 ryzenai_corelib_status ryzenai_corelib_tensor_write(
     ryzenai_corelib_tensor_ptr tensor,
+    ryzenai_corelib_data_type source_type,
     const void* source,
-    std::size_t size,
+    std::size_t count,
     std::size_t offset) {
     return flm::test::detail::FakeTensorWrite(
         tensor,
+        source_type,
         source,
-        size,
+        count,
         offset);
 }
 
 ryzenai_corelib_status ryzenai_corelib_tensor_read(
     ryzenai_corelib_tensor_ptr tensor,
+    ryzenai_corelib_data_type destination_type,
     void* destination,
-    std::size_t size,
+    std::size_t count,
     std::size_t offset) {
     return flm::test::detail::FakeTensorRead(
         tensor,
+        destination_type,
         destination,
-        size,
+        count,
         offset);
 }
 
@@ -332,38 +454,10 @@ ryzenai_corelib_status ryzenai_corelib_tensor_get_byte_size(
     return flm::test::detail::FakeTensorGetByteSize(tensor, out);
 }
 
-ryzenai_corelib_status ryzenai_corelib_convert(
-    ryzenai_corelib_data_type source_type,
-    const void* source,
-    ryzenai_corelib_data_type destination_type,
-    void* destination,
-    std::size_t count) {
-    return flm::test::detail::FakeConvert(
-        source_type,
-        source,
-        destination_type,
-        destination,
-        count);
-}
-
-ryzenai_corelib_status ryzenai_corelib_convert_strided(
-    ryzenai_corelib_data_type source_type,
-    const void* source,
-    std::size_t source_stride,
-    ryzenai_corelib_data_type destination_type,
-    void* destination,
-    std::size_t destination_stride,
-    std::size_t count,
-    std::size_t row) {
-    return flm::test::detail::FakeConvertStrided(
-        source_type,
-        source,
-        source_stride,
-        destination_type,
-        destination,
-        destination_stride,
-        count,
-        row);
+ryzenai_corelib_status ryzenai_corelib_tensor_get_data_type(
+    ryzenai_corelib_tensor_ptr tensor,
+    ryzenai_corelib_data_type* out) {
+    return flm::test::detail::FakeTensorGetDataType(tensor, out);
 }
 
 ryzenai_corelib_status ryzenai_corelib_matmul_bf16_pad_shape(
@@ -378,14 +472,15 @@ ryzenai_corelib_status ryzenai_corelib_matmul_bf16_pad_shape(
         group_size);
 }
 
-ryzenai_corelib_status
-ryzenai_corelib_matmul_bf16_weights_create_from_onnx_components(
+ryzenai_corelib_status ryzenai_corelib_matmul_bf16_weights_create_onnx(
     const ryzenai_corelib_matmul_bf16_weights_desc* desc,
-    const ryzenai_corelib_matmul_bf16_onnx_weights_components* components,
+    const ryzenai_corelib_matmul_bf16_onnx_components* components,
+    uint32_t threads,
     ryzenai_corelib_matmul_bf16_weights_ptr* out) {
     return flm::test::detail::FakeMatmulWeightsFromOnnx(
         desc,
         components,
+        threads,
         out);
 }
 
@@ -425,14 +520,15 @@ ryzenai_corelib_status ryzenai_corelib_ssmlp_bf16_pad_rows(
         group_size);
 }
 
-ryzenai_corelib_status
-ryzenai_corelib_ssmlp_bf16_weights_create_from_onnx_components(
+ryzenai_corelib_status ryzenai_corelib_ssmlp_bf16_weights_create_onnx(
     const ryzenai_corelib_ssmlp_bf16_weights_desc* desc,
-    const ryzenai_corelib_ssmlp_bf16_onnx_weights_components* components,
+    const ryzenai_corelib_ssmlp_bf16_onnx_components* components,
+    uint32_t threads,
     ryzenai_corelib_ssmlp_bf16_weights_ptr* out) {
     return flm::test::detail::FakeSsmlpWeightsFromOnnx(
         desc,
         components,
+        threads,
         out);
 }
 
@@ -522,6 +618,9 @@ void* FunctionAddress(Function function) {
 std::unordered_map<std::string, void*> CompleteCorelibResolver() {
     return {
         FLM_FAKE_ENTRY(
+            ryzenai_corelib_get_version,
+            FakeGetVersion),
+        FLM_FAKE_ENTRY(
             ryzenai_corelib_status_to_string,
             FakeStatusToString),
         FLM_FAKE_ENTRY(
@@ -555,16 +654,13 @@ std::unordered_map<std::string, void*> CompleteCorelibResolver() {
             ryzenai_corelib_tensor_get_byte_size,
             FakeTensorGetByteSize),
         FLM_FAKE_ENTRY(
-            ryzenai_corelib_convert,
-            FakeConvert),
-        FLM_FAKE_ENTRY(
-            ryzenai_corelib_convert_strided,
-            FakeConvertStrided),
+            ryzenai_corelib_tensor_get_data_type,
+            FakeTensorGetDataType),
         FLM_FAKE_ENTRY(
             ryzenai_corelib_matmul_bf16_pad_shape,
             FakeMatmulPadShape),
         FLM_FAKE_ENTRY(
-            ryzenai_corelib_matmul_bf16_weights_create_from_onnx_components,
+            ryzenai_corelib_matmul_bf16_weights_create_onnx,
             FakeMatmulWeightsFromOnnx),
         FLM_FAKE_ENTRY(
             ryzenai_corelib_matmul_bf16_weights_get_data,
@@ -576,7 +672,7 @@ std::unordered_map<std::string, void*> CompleteCorelibResolver() {
             ryzenai_corelib_ssmlp_bf16_pad_rows,
             FakeSsmlpPadRows),
         FLM_FAKE_ENTRY(
-            ryzenai_corelib_ssmlp_bf16_weights_create_from_onnx_components,
+            ryzenai_corelib_ssmlp_bf16_weights_create_onnx,
             FakeSsmlpWeightsFromOnnx),
         FLM_FAKE_ENTRY(
             ryzenai_corelib_ssmlp_bf16_weights_get_data,
@@ -600,6 +696,10 @@ std::unordered_map<std::string, void*> CompleteCorelibResolver() {
 
 void ResetFakeCorelib() {
     detail::g_last_error.clear();
+    detail::g_version_major = RYZENAI_CORELIB_VERSION_MAJOR;
+    detail::g_version_minor = RYZENAI_CORELIB_VERSION_MINOR;
+    detail::g_version_patch = RYZENAI_CORELIB_VERSION_PATCH;
+    detail::g_tensors.clear();
     detail::g_release_counts.clear();
     detail::g_release_count = 0;
     detail::g_last_released_object = nullptr;
@@ -611,6 +711,15 @@ void ResetFakeCorelib() {
 
 void SetLastErrorMessage(std::string message) {
     detail::g_last_error = std::move(message);
+}
+
+void SetFakeCorelibVersion(
+    std::uint32_t major,
+    std::uint32_t minor,
+    std::uint32_t patch) noexcept {
+    detail::g_version_major = major;
+    detail::g_version_minor = minor;
+    detail::g_version_patch = patch;
 }
 
 void SetSelftestStatus(ryzenai_corelib_status status) noexcept {

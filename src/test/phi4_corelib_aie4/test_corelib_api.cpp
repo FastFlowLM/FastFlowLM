@@ -25,6 +25,7 @@ namespace {
 using flm::corelib::CorelibApi;
 
 constexpr std::array<std::string_view, 24> kRequiredSymbols{
+    "ryzenai_corelib_get_version",
     "ryzenai_corelib_status_to_string",
     "ryzenai_corelib_get_last_error_message",
     "ryzenai_corelib_selftest_dependencies",
@@ -36,14 +37,13 @@ constexpr std::array<std::string_view, 24> kRequiredSymbols{
     "ryzenai_corelib_tensor_write",
     "ryzenai_corelib_tensor_read",
     "ryzenai_corelib_tensor_get_byte_size",
-    "ryzenai_corelib_convert",
-    "ryzenai_corelib_convert_strided",
+    "ryzenai_corelib_tensor_get_data_type",
     "ryzenai_corelib_matmul_bf16_pad_shape",
-    "ryzenai_corelib_matmul_bf16_weights_create_from_onnx_components",
+    "ryzenai_corelib_matmul_bf16_weights_create_onnx",
     "ryzenai_corelib_matmul_bf16_weights_get_data",
     "ryzenai_corelib_matmul_bf16",
     "ryzenai_corelib_ssmlp_bf16_pad_rows",
-    "ryzenai_corelib_ssmlp_bf16_weights_create_from_onnx_components",
+    "ryzenai_corelib_ssmlp_bf16_weights_create_onnx",
     "ryzenai_corelib_ssmlp_bf16_weights_get_data",
     "ryzenai_corelib_ssmlp_bf16",
     "ryzenai_corelib_flat_mha_bf16_pad_rows",
@@ -198,6 +198,7 @@ void TestCompleteResolution() {
 #define CHECK_MEMBER_IDENTITY(member, symbol)                          \
     CHECK(reinterpret_cast<void*>(functions.member) ==                \
           resolver.at(#symbol))
+    CHECK_MEMBER_IDENTITY(get_version, ryzenai_corelib_get_version);
     CHECK_MEMBER_IDENTITY(
         status_to_string,
         ryzenai_corelib_status_to_string);
@@ -225,16 +226,15 @@ void TestCompleteResolution() {
     CHECK_MEMBER_IDENTITY(
         tensor_get_byte_size,
         ryzenai_corelib_tensor_get_byte_size);
-    CHECK_MEMBER_IDENTITY(convert, ryzenai_corelib_convert);
     CHECK_MEMBER_IDENTITY(
-        convert_strided,
-        ryzenai_corelib_convert_strided);
+        tensor_get_data_type,
+        ryzenai_corelib_tensor_get_data_type);
     CHECK_MEMBER_IDENTITY(
         matmul_pad_shape,
         ryzenai_corelib_matmul_bf16_pad_shape);
     CHECK_MEMBER_IDENTITY(
         matmul_weights_from_onnx,
-        ryzenai_corelib_matmul_bf16_weights_create_from_onnx_components);
+        ryzenai_corelib_matmul_bf16_weights_create_onnx);
     CHECK_MEMBER_IDENTITY(
         matmul_weights_get_data,
         ryzenai_corelib_matmul_bf16_weights_get_data);
@@ -244,7 +244,7 @@ void TestCompleteResolution() {
         ryzenai_corelib_ssmlp_bf16_pad_rows);
     CHECK_MEMBER_IDENTITY(
         ssmlp_weights_from_onnx,
-        ryzenai_corelib_ssmlp_bf16_weights_create_from_onnx_components);
+        ryzenai_corelib_ssmlp_bf16_weights_create_onnx);
     CHECK_MEMBER_IDENTITY(
         ssmlp_weights_get_data,
         ryzenai_corelib_ssmlp_bf16_weights_get_data);
@@ -255,6 +255,182 @@ void TestCompleteResolution() {
     CHECK_MEMBER_IDENTITY(flat_mha, ryzenai_corelib_flat_mha_bf16);
     CHECK_MEMBER_IDENTITY(cleanup, ryzenai_corelib_cleanup);
 #undef CHECK_MEMBER_IDENTITY
+}
+
+void TestMatchingVersionLoadsAndIsRecorded() {
+    flm::test::ResetFakeCorelib();
+    auto api = ResolveCompleteCorelib();
+    CHECK(api != nullptr);
+    const auto compiled = flm::corelib::CompiledCorelibVersion();
+    CHECK(api->runtime_version().major == compiled.major);
+    CHECK(api->runtime_version().minor == compiled.minor);
+    CHECK(api->runtime_version().patch == compiled.patch);
+}
+
+void TestMinorMismatchFailsNamingBothVersions() {
+    flm::test::ResetFakeCorelib();
+    const auto compiled = flm::corelib::CompiledCorelibVersion();
+    flm::test::SetFakeCorelibVersion(
+        compiled.major,
+        compiled.minor + 1,
+        compiled.patch);
+
+    try {
+        (void)ResolveCompleteCorelib();
+    } catch (const std::exception& error) {
+        const std::string_view message(error.what());
+        CHECK(message.find(
+                  flm::corelib::FormatCorelibVersion(compiled)) !=
+              std::string_view::npos);
+        CHECK(message.find(
+                  flm::corelib::FormatCorelibVersion(
+                      flm::corelib::CorelibVersion{
+                          compiled.major,
+                          compiled.minor + 1,
+                          compiled.patch})) != std::string_view::npos);
+        CHECK(message.find("version") != std::string_view::npos);
+        flm::test::ResetFakeCorelib();
+        return;
+    }
+    flm::test::ResetFakeCorelib();
+    throw std::runtime_error(
+        "a corelib minor-version mismatch must fail the load");
+}
+
+void TestPatchMismatchFailsWhileCorelibIsPreOneDotZero() {
+    flm::test::ResetFakeCorelib();
+    const auto compiled = flm::corelib::CompiledCorelibVersion();
+    if (compiled.major != 0) {
+        return;
+    }
+    flm::test::SetFakeCorelibVersion(
+        compiled.major,
+        compiled.minor,
+        compiled.patch + 1);
+    CheckThrowsContains(
+        [&] { (void)ResolveCompleteCorelib(); },
+        "version");
+    flm::test::ResetFakeCorelib();
+}
+
+void TestVersionIsCheckedBeforeAnyOtherSymbolIsResolved() {
+    flm::test::ResetFakeCorelib();
+    auto resolver = flm::test::CompleteCorelibResolver();
+    std::vector<std::string> requested;
+    const auto resolve = [&resolver, &requested](
+                             std::string_view name) -> void* {
+        requested.emplace_back(name);
+        const auto found = resolver.find(std::string(name));
+        return found == resolver.end() ? nullptr : found->second;
+    };
+
+    (void)CorelibApi::ResolveForTest(resolve);
+    CHECK(!requested.empty());
+    CHECK(requested.front() == "ryzenai_corelib_get_version");
+
+    // With an incompatible runtime the gate must stop there. Resolving the
+    // rest first would report a missing renamed symbol and hide the skew
+    // that actually caused it.
+    const auto compiled = flm::corelib::CompiledCorelibVersion();
+    flm::test::SetFakeCorelibVersion(
+        compiled.major + 1,
+        compiled.minor,
+        compiled.patch);
+    requested.clear();
+    CheckThrowsContains(
+        [&] { (void)CorelibApi::ResolveForTest(resolve); },
+        "version");
+    CHECK(requested.size() == 1);
+    CHECK(requested.front() == "ryzenai_corelib_get_version");
+    flm::test::ResetFakeCorelib();
+}
+
+void TestVersionCompatibilityRule() {
+    using flm::corelib::CorelibVersion;
+    using flm::corelib::IsCorelibVersionCompatible;
+
+    // Below 1.0 the header says the API may change in any release, so all
+    // three components are part of the contract.
+    const CorelibVersion pre{0, 1, 0};
+    CHECK(IsCorelibVersionCompatible(pre, CorelibVersion{0, 1, 0}));
+    CHECK(!IsCorelibVersionCompatible(pre, CorelibVersion{0, 1, 1}));
+    CHECK(!IsCorelibVersionCompatible(pre, CorelibVersion{0, 2, 0}));
+    CHECK(!IsCorelibVersionCompatible(pre, CorelibVersion{1, 1, 0}));
+
+    // From 1.0 the C ABI is additive within a major version.
+    const CorelibVersion stable{1, 3, 2};
+    CHECK(IsCorelibVersionCompatible(stable, CorelibVersion{1, 3, 2}));
+    CHECK(IsCorelibVersionCompatible(stable, CorelibVersion{1, 3, 0}));
+    CHECK(IsCorelibVersionCompatible(stable, CorelibVersion{1, 4, 0}));
+    CHECK(!IsCorelibVersionCompatible(stable, CorelibVersion{1, 2, 9}));
+    CHECK(!IsCorelibVersionCompatible(stable, CorelibVersion{2, 3, 2}));
+}
+
+// API-7: the wrapper takes elements, and there is no byte-taking overload
+// to reach for by mistake. A count in bytes is 2x too large for a BF16
+// tensor and the fake rejects it rather than moving twice the data.
+void TestElementCountsAreBoundedByTheTensorNotItsBytes() {
+    flm::test::ResetFakeCorelib();
+    auto api = ResolveCompleteCorelib();
+
+    const std::array<std::int64_t, 2> shape{4, 8};
+    ryzenai_corelib_tensor_ptr raw = nullptr;
+    api->Check(
+        api->functions().create_device_tensor(
+            ryzenai_corelib_data_type_bf16,
+            shape.data(),
+            shape.size(),
+            &raw),
+        "ryzenai_corelib_create_device_tensor");
+    flm::corelib::UniqueTensor tensor(api, raw);
+
+    std::size_t byte_size = 0;
+    api->Check(
+        api->functions().tensor_get_byte_size(tensor.get(), &byte_size),
+        "ryzenai_corelib_tensor_get_byte_size");
+    CHECK(byte_size == 32u * sizeof(std::uint16_t));
+
+    ryzenai_corelib_data_type data_type{};
+    api->Check(
+        api->functions().tensor_get_data_type(tensor.get(), &data_type),
+        "ryzenai_corelib_tensor_get_data_type");
+    CHECK(data_type == ryzenai_corelib_data_type_bf16);
+
+    std::vector<float> source(32, 0.0f);
+    api->WriteElements(
+        tensor.get(),
+        ryzenai_corelib_data_type_fp32,
+        source.data(),
+        32,
+        0);
+    api->WriteElements(
+        tensor.get(),
+        ryzenai_corelib_data_type_fp32,
+        source.data(),
+        8,
+        24);
+
+    // The old spelling: 32 BF16 elements is 64 bytes, and 64 must fail.
+    CheckThrowsContains(
+        [&] {
+            api->WriteElements(
+                tensor.get(),
+                ryzenai_corelib_data_type_fp32,
+                source.data(),
+                byte_size,
+                0);
+        },
+        "ELEMENTS");
+    CheckThrowsContains(
+        [&] {
+            api->ReadElements(
+                tensor.get(),
+                ryzenai_corelib_data_type_bf16,
+                source.data(),
+                32,
+                1);
+        },
+        "ELEMENTS");
 }
 
 void TestTypeIdenticalGetDataSymbolsCannotBeSwapped() {
@@ -507,6 +683,12 @@ static_assert(
 int main() {
     try {
         TestCompleteResolution();
+        TestMatchingVersionLoadsAndIsRecorded();
+        TestMinorMismatchFailsNamingBothVersions();
+        TestPatchMismatchFailsWhileCorelibIsPreOneDotZero();
+        TestVersionIsCheckedBeforeAnyOtherSymbolIsResolved();
+        TestVersionCompatibilityRule();
+        TestElementCountsAreBoundedByTheTensorNotItsBytes();
         TestTypeIdenticalGetDataSymbolsCannotBeSwapped();
         TestMissingSymbolFailsAtomically();
         TestErrorDetailSurvivesStatusConversion();

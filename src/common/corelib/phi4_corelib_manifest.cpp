@@ -3,6 +3,7 @@
 
 #include "../../pull/picosha2.h"
 
+#include <corelib/host_convert.hpp>
 #include <nlohmann/json.hpp>
 #include <windows.h>
 
@@ -11,6 +12,7 @@
 #include <cctype>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <fstream>
 #include <initializer_list>
 #include <limits>
@@ -1353,19 +1355,27 @@ std::span<const std::uint16_t> Phi4Package::MaterializeFp16(
     }
 
     const auto& source = Require(name);
-    const auto source_type = CorelibDType(source.dtype, name);
+    // Design Section 9.3: the ONNX-component contract specifies FP16
+    // scales, and narrowing an FP32 source would require a second host
+    // rounding converter that `API-6` does not permit. Reject rather than
+    // convert, and say what the package must contain.
+    if (source.dtype != SourceDType::Float16) {
+        Throw(
+            name,
+            "MatMulNBits scales must be FP16 in an accepted AIE4 "
+            "package; an FP32 scales array is rejected rather than "
+            "narrowed, so repackage the model with FP16 scales");
+    }
     const std::size_t count = ElementCount(source, name);
     auto [buffer, inserted] =
         fp16_buffers_.try_emplace(std::string(name), count);
     try {
-        api_->Check(
-            api_->functions().convert(
-                source_type,
-                source.data,
-                ryzenai_corelib_data_type_fp16,
-                buffer->second.data(),
-                count),
-            "ryzenai_corelib_convert");
+        // An element-wise copy, not a conversion: this exists so that a
+        // strided or non-contiguous source view still yields the
+        // contiguous model-owned buffer `WEIGHT-2` requires.
+        const auto* elements =
+            reinterpret_cast<const std::uint16_t*>(source.data);
+        std::copy_n(elements, count, buffer->second.begin());
     } catch (...) {
         if (inserted) {
             fp16_buffers_.erase(buffer);
@@ -1388,14 +1398,27 @@ std::span<const std::uint16_t> Phi4Package::MaterializeBf16(
     auto [buffer, inserted] =
         bf16_buffers_.try_emplace(std::string(name), count);
     try {
-        api_->Check(
-            api_->functions().convert(
-                source_type,
-                source.data,
-                ryzenai_corelib_data_type_bf16,
-                buffer->second.data(),
-                count),
-            "ryzenai_corelib_convert");
+        // SSMLP norms are raw BF16 blobs handed to the packer, with no
+        // tensor boundary to convert through, so this is the `API-6`
+        // FP32-to-BF16 helper. An FP16 source is first widened losslessly,
+        // which composes the two permitted conversions rather than adding
+        // a third.
+        auto* destination = buffer->second.data();
+        if (source_type == ryzenai_corelib_data_type_fp32) {
+            const auto* elements =
+                reinterpret_cast<const float*>(source.data);
+            corelib::NarrowFp32ToBf16Array(
+                elements,
+                count,
+                destination);
+        } else {
+            const auto* elements =
+                reinterpret_cast<const std::uint16_t*>(source.data);
+            for (std::size_t index = 0; index < count; ++index) {
+                destination[index] = corelib::NarrowFp32ToBf16(
+                    corelib::WidenFp16(elements[index]));
+            }
+        }
     } catch (...) {
         if (inserted) {
             bf16_buffers_.erase(buffer);
@@ -1405,13 +1428,8 @@ std::span<const std::uint16_t> Phi4Package::MaterializeBf16(
     return buffer->second;
 }
 
-std::span<const float> Phi4Package::MaterializeRopeFp32(
+RopeSourceView Phi4Package::MaterializeRopeGather(
     std::string_view name) {
-    if (const auto found = fp32_buffers_.find(name);
-        found != fp32_buffers_.end()) {
-        return found->second;
-    }
-
     const auto& source = Require(name);
     const auto source_type = CorelibDType(source.dtype, name);
     if (
@@ -1422,32 +1440,69 @@ std::span<const float> Phi4Package::MaterializeRopeFp32(
             name,
             "RoPE source must be rank 2 and at least [4096,48]");
     }
+
+    constexpr std::size_t rows =
+        static_cast<std::size_t>(constants::kMaxSequenceLength);
+    constexpr std::size_t columns =
+        static_cast<std::size_t>(kRopeColumns);
+    constexpr std::size_t count = rows * columns;
+
+    if (const auto found = rope_buffers_.find(name);
+        found != rope_buffers_.end()) {
+        return RopeSourceView{
+            source_type,
+            found->second.data(),
+            count};
+    }
+
+    const std::size_t item_size = ItemSize(source.dtype);
     const auto source_columns =
         static_cast<std::size_t>(source.shape[1]);
-    constexpr std::size_t count =
-        static_cast<std::size_t>(
-            constants::kMaxSequenceLength * kRopeColumns);
+    const std::size_t source_row_bytes = source_columns * item_size;
+    const std::size_t gathered_row_bytes = columns * item_size;
+
+    // Corelib `e5258d2` removed `convert_strided`, so the slice is
+    // FastFlow's own element-wise copy. It stays in the SOURCE dtype and
+    // lets `tensor_write` widen to FP32: the RoPE tables have a tensor to
+    // write into, so this path must not use the `API-6` widening helper.
+    //
+    // Every row is bounds-checked against the mapped extent before it is
+    // read, and only [row_start, row_start + 48) of each row is touched.
+    // The source is a read-only file mapping where a tail over-read faults
+    // rather than returning garbage, and the final row commonly sits
+    // immediately before an inaccessible page.
     auto [buffer, inserted] =
-        fp32_buffers_.try_emplace(std::string(name), count);
+        rope_buffers_.try_emplace(
+            std::string(name),
+            count * item_size);
     try {
-        api_->Check(
-            api_->functions().convert_strided(
-                source_type,
-                source.data,
-                source_columns,
-                ryzenai_corelib_data_type_fp32,
-                buffer->second.data(),
-                static_cast<std::size_t>(kRopeColumns),
-                count,
-                static_cast<std::size_t>(kRopeColumns)),
-            "ryzenai_corelib_convert_strided");
+        const auto* const base = source.data;
+        auto* destination = buffer->second.data();
+        for (std::size_t row = 0; row < rows; ++row) {
+            const std::size_t row_start = row * source_row_bytes;
+            if (
+                row_start > source.size ||
+                gathered_row_bytes > source.size - row_start) {
+                Throw(
+                    name,
+                    "RoPE gather row exceeds the mapped initializer "
+                    "extent");
+            }
+            std::memcpy(
+                destination + row * gathered_row_bytes,
+                base + row_start,
+                gathered_row_bytes);
+        }
     } catch (...) {
         if (inserted) {
-            fp32_buffers_.erase(buffer);
+            rope_buffers_.erase(buffer);
         }
         throw;
     }
-    return buffer->second;
+    return RopeSourceView{
+        source_type,
+        buffer->second.data(),
+        count};
 }
 
 }  // namespace flm::phi4

@@ -736,7 +736,8 @@ struct MhaCall {
 
 struct TensorWriteCall {
     FakeTensor* tensor;
-    std::size_t size;
+    // API-7: elements of the tensor's own dtype, never bytes.
+    std::size_t count;
     std::size_t offset;
 };
 
@@ -933,66 +934,6 @@ std::int64_t MatMulPaddedRows(
         "engine fake received an unknown matmul shape");
 }
 
-ryzenai_corelib_status RecordingConvert(
-    ryzenai_corelib_data_type source_type,
-    const void* source,
-    ryzenai_corelib_data_type destination_type,
-    void* destination,
-    std::size_t count) {
-    auto& state = State();
-    state.ObserveLoadThread();
-    if (
-        state.failure == FailurePoint::StageBadAlloc &&
-        source_type == ryzenai_corelib_data_type_fp16 &&
-        destination_type == ryzenai_corelib_data_type_fp32 &&
-        count != static_cast<std::size_t>(constants::kHiddenSize)) {
-        throw std::bad_alloc{};
-    }
-    if ((source == nullptr || destination == nullptr) && count != 0) {
-        return ryzenai_corelib_status_bad_argument;
-    }
-    for (std::size_t index = 0; index < count; ++index) {
-        WriteElement(
-            destination_type,
-            destination,
-            index,
-            ReadElement(source_type, source, index));
-    }
-    return ryzenai_corelib_status_success;
-}
-
-ryzenai_corelib_status RecordingConvertStrided(
-    ryzenai_corelib_data_type source_type,
-    const void* source,
-    std::size_t source_stride,
-    ryzenai_corelib_data_type destination_type,
-    void* destination,
-    std::size_t destination_stride,
-    std::size_t count,
-    std::size_t row) {
-    State().ObserveLoadThread();
-    if (
-        source == nullptr || destination == nullptr || row == 0 ||
-        count % row != 0 || source_stride < row ||
-        destination_stride < row) {
-        return ryzenai_corelib_status_bad_argument;
-    }
-    const std::size_t rows = count / row;
-    for (std::size_t row_index = 0; row_index < rows; ++row_index) {
-        for (std::size_t column = 0; column < row; ++column) {
-            WriteElement(
-                destination_type,
-                destination,
-                row_index * destination_stride + column,
-                ReadElement(
-                    source_type,
-                    source,
-                    row_index * source_stride + column));
-        }
-    }
-    return ryzenai_corelib_status_success;
-}
-
 ryzenai_corelib_status RecordingMatMulPadShape(
     std::int64_t* m,
     std::int64_t* k,
@@ -1085,16 +1026,38 @@ ryzenai_corelib_status RecordingTensorGetByteSize(
     return ryzenai_corelib_status_success;
 }
 
+ryzenai_corelib_status RecordingTensorGetDataType(
+    ryzenai_corelib_tensor_ptr tensor,
+    ryzenai_corelib_data_type* out) {
+    auto* value = State().Tensor(tensor);
+    if (value == nullptr || out == nullptr) {
+        return ryzenai_corelib_status_bad_argument;
+    }
+    *out = value->data_type;
+    return ryzenai_corelib_status_success;
+}
+
+// `count` and `offset` are ELEMENTS of the TENSOR's dtype. The caller may
+// hold a different dtype -- FP32 activations written into a BF16 tensor --
+// and corelib converts at this boundary, which is the only conversion
+// path e5258d2 offers.
 ryzenai_corelib_status RecordingTensorWrite(
     ryzenai_corelib_tensor_ptr tensor,
+    ryzenai_corelib_data_type source_type,
     const void* source,
-    std::size_t size,
+    std::size_t count,
     std::size_t offset) {
     auto& state = State();
     auto* value = state.Tensor(tensor);
-    if (value == nullptr) {
+    if (value == nullptr || source == nullptr) {
         return ryzenai_corelib_status_bad_argument;
     }
+    const std::size_t element_size = TypeSize(value->data_type);
+    const std::size_t tensor_elements = value->byte_size / element_size;
+    if (offset > tensor_elements || count > tensor_elements - offset) {
+        return ryzenai_corelib_status_bad_argument;
+    }
+    const std::size_t size = count * element_size;
 
     const bool is_cache =
         value->shape ==
@@ -1111,16 +1074,14 @@ ryzenai_corelib_status RecordingTensorWrite(
         }
         const auto* words =
             static_cast<const std::uint16_t*>(source);
-        const std::size_t word_count = size / sizeof(std::uint16_t);
         state.cache_publish_poison_observed =
             state.cache_publish_poison_observed ||
             std::any_of(
                 words,
-                words + word_count,
+                words + count,
                 [](std::uint16_t word) { return word == kPoison; });
-        constexpr std::size_t head_pitch_bytes =
-            4096u * 128u * sizeof(std::uint16_t);
-        const std::size_t head = offset / head_pitch_bytes;
+        constexpr std::size_t head_pitch_elements = 4096u * 128u;
+        const std::size_t head = offset / head_pitch_elements;
         state.events.push_back(
             "tensor_write_v_head_" + std::to_string(head));
     } else if (
@@ -1141,7 +1102,17 @@ ryzenai_corelib_status RecordingTensorWrite(
         value->data_type == ryzenai_corelib_data_type_bf16 &&
         value->shape ==
             std::vector<std::int64_t>{4096, 3072}) {
-        state.stage_writes.push_back({value, size, offset});
+        if (state.failure == FailurePoint::StageBadAlloc) {
+            // The staging write is the first corelib call of a pass, so
+            // this stands in for the host allocation that used to fail
+            // inside the removed converter.
+            throw std::bad_alloc{};
+        }
+        // Design 10.2: the host stays in FP32 and lets corelib narrow.
+        if (source_type != ryzenai_corelib_data_type_fp32) {
+            return ryzenai_corelib_status_bad_argument;
+        }
+        state.stage_writes.push_back({value, count, offset});
         if (state.stage_writes.size() % 2 == 1) {
             state.staged_hidden = value;
         } else {
@@ -1149,21 +1120,36 @@ ryzenai_corelib_status RecordingTensorWrite(
         }
     }
 
-    return value->Write(source, size, offset)
+    std::vector<std::byte> staged(size);
+    for (std::size_t index = 0; index < count; ++index) {
+        WriteElement(
+            value->data_type,
+            staged.data(),
+            index,
+            ReadElement(source_type, source, index));
+    }
+    return value->Write(staged.data(), size, offset * element_size)
                ? ryzenai_corelib_status_success
                : ryzenai_corelib_status_bad_argument;
 }
 
 ryzenai_corelib_status RecordingTensorRead(
     ryzenai_corelib_tensor_ptr tensor,
+    ryzenai_corelib_data_type destination_type,
     void* destination,
-    std::size_t size,
+    std::size_t count,
     std::size_t offset) {
     auto& state = State();
     auto* value = state.Tensor(tensor);
-    if (value == nullptr) {
+    if (value == nullptr || destination == nullptr) {
         return ryzenai_corelib_status_bad_argument;
     }
+    const std::size_t element_size = TypeSize(value->data_type);
+    const std::size_t tensor_elements = value->byte_size / element_size;
+    if (offset > tensor_elements || count > tensor_elements - offset) {
+        return ryzenai_corelib_status_bad_argument;
+    }
+    const std::size_t size = count * element_size;
 
     if (state.v_tensors.contains(value)) {
         if (state.failure == FailurePoint::ScatterBadAlloc) {
@@ -1175,9 +1161,8 @@ ryzenai_corelib_status RecordingTensorRead(
         state.events.emplace_back("tensor_read_v");
         const std::size_t expected =
             static_cast<std::size_t>(state.active_rows) *
-            static_cast<std::size_t>(constants::kKvDimension) *
-            sizeof(std::uint16_t);
-        if (offset != 0 || size != expected) {
+            static_cast<std::size_t>(constants::kKvDimension);
+        if (offset != 0 || count != expected) {
             state.host_read_poison_observed = true;
         }
     } else if (
@@ -1192,21 +1177,34 @@ ryzenai_corelib_status RecordingTensorRead(
 
     state.host_read_poison_observed =
         state.host_read_poison_observed ||
-        value->ContainsPoisonWords(
-            offset / sizeof(std::uint16_t),
-            size / sizeof(std::uint16_t));
-    return value->Read(destination, size, offset)
-               ? ryzenai_corelib_status_success
-               : ryzenai_corelib_status_bad_argument;
+        (element_size == sizeof(std::uint16_t) &&
+         value->ContainsPoisonWords(offset, count));
+
+    std::vector<std::byte> staged(size);
+    if (!value->Read(staged.data(), size, offset * element_size)) {
+        return ryzenai_corelib_status_bad_argument;
+    }
+    for (std::size_t index = 0; index < count; ++index) {
+        WriteElement(
+            destination_type,
+            destination,
+            index,
+            ReadElement(value->data_type, staged.data(), index));
+    }
+    return ryzenai_corelib_status_success;
 }
 
 ryzenai_corelib_status RecordingMatMulWeightsCreate(
     const ryzenai_corelib_matmul_bf16_weights_desc* desc,
-    const ryzenai_corelib_matmul_bf16_onnx_weights_components* components,
+    const ryzenai_corelib_matmul_bf16_onnx_components* components,
+    uint32_t threads,
     ryzenai_corelib_matmul_bf16_weights_ptr* out) {
     auto& state = State();
     state.ObserveLoadThread();
     if (desc == nullptr || components == nullptr || out == nullptr) {
+        return ryzenai_corelib_status_bad_argument;
+    }
+    if (threads != 0) {
         return ryzenai_corelib_status_bad_argument;
     }
     const auto ordinal = state.matmul_weight_count++;
@@ -1218,11 +1216,15 @@ ryzenai_corelib_status RecordingMatMulWeightsCreate(
 
 ryzenai_corelib_status RecordingSsMlpWeightsCreate(
     const ryzenai_corelib_ssmlp_bf16_weights_desc* desc,
-    const ryzenai_corelib_ssmlp_bf16_onnx_weights_components* components,
+    const ryzenai_corelib_ssmlp_bf16_onnx_components* components,
+    uint32_t threads,
     ryzenai_corelib_ssmlp_bf16_weights_ptr* out) {
     auto& state = State();
     state.ObserveLoadThread();
     if (desc == nullptr || components == nullptr || out == nullptr) {
+        return ryzenai_corelib_status_bad_argument;
+    }
+    if (threads != 0) {
         return ryzenai_corelib_status_bad_argument;
     }
     const auto ordinal = state.ssmlp_weight_count++;
@@ -1552,12 +1554,9 @@ std::shared_ptr<CorelibApi> ResolveRecordingCorelib(
     resolver["ryzenai_corelib_tensor_get_byte_size"] = FunctionAddress(
         static_cast<decltype(&::ryzenai_corelib_tensor_get_byte_size)>(
             &RecordingTensorGetByteSize));
-    resolver["ryzenai_corelib_convert"] = FunctionAddress(
-        static_cast<decltype(&::ryzenai_corelib_convert)>(
-            &RecordingConvert));
-    resolver["ryzenai_corelib_convert_strided"] = FunctionAddress(
-        static_cast<decltype(&::ryzenai_corelib_convert_strided)>(
-            &RecordingConvertStrided));
+    resolver["ryzenai_corelib_tensor_get_data_type"] = FunctionAddress(
+        static_cast<decltype(&::ryzenai_corelib_tensor_get_data_type)>(
+            &RecordingTensorGetDataType));
     resolver["ryzenai_corelib_matmul_bf16_pad_shape"] =
         FunctionAddress(
             static_cast<
@@ -1573,23 +1572,21 @@ std::shared_ptr<CorelibApi> ResolveRecordingCorelib(
             static_cast<
                 decltype(&::ryzenai_corelib_flat_mha_bf16_pad_rows)>(
                 &RecordingMhaPadRows));
-    resolver
-        ["ryzenai_corelib_matmul_bf16_weights_create_from_onnx_components"] =
-            FunctionAddress(
-                static_cast<decltype(
-                    &::ryzenai_corelib_matmul_bf16_weights_create_from_onnx_components)>(
-                    &RecordingMatMulWeightsCreate));
+    resolver["ryzenai_corelib_matmul_bf16_weights_create_onnx"] =
+        FunctionAddress(
+            static_cast<decltype(
+                &::ryzenai_corelib_matmul_bf16_weights_create_onnx)>(
+                &RecordingMatMulWeightsCreate));
     resolver["ryzenai_corelib_matmul_bf16_weights_get_data"] =
         FunctionAddress(
             static_cast<decltype(
                 &::ryzenai_corelib_matmul_bf16_weights_get_data)>(
                 &RecordingMatMulWeightsGetData));
-    resolver
-        ["ryzenai_corelib_ssmlp_bf16_weights_create_from_onnx_components"] =
-            FunctionAddress(
-                static_cast<decltype(
-                    &::ryzenai_corelib_ssmlp_bf16_weights_create_from_onnx_components)>(
-                    &RecordingSsMlpWeightsCreate));
+    resolver["ryzenai_corelib_ssmlp_bf16_weights_create_onnx"] =
+        FunctionAddress(
+            static_cast<decltype(
+                &::ryzenai_corelib_ssmlp_bf16_weights_create_onnx)>(
+                &RecordingSsMlpWeightsCreate));
     resolver["ryzenai_corelib_ssmlp_bf16_weights_get_data"] =
         FunctionAddress(
             static_cast<decltype(
@@ -1849,14 +1846,13 @@ void TestOrderBuffersTailsStateAndMetrics(
     CheckLayerOrder(fixture.state.events);
     CheckDistinctAndPingPong(fixture.state);
     CHECK(fixture.state.stage_writes.size() == 2);
-    const std::size_t padded_hidden_bytes =
+    const std::size_t padded_hidden_elements =
         static_cast<std::size_t>(PaddedRows(3)) *
-        static_cast<std::size_t>(constants::kHiddenSize) *
-        sizeof(std::uint16_t);
-    CHECK(fixture.state.stage_writes[0].size ==
-          padded_hidden_bytes);
-    CHECK(fixture.state.stage_writes[1].size ==
-          padded_hidden_bytes);
+        static_cast<std::size_t>(constants::kHiddenSize);
+    CHECK(fixture.state.stage_writes[0].count ==
+          padded_hidden_elements);
+    CHECK(fixture.state.stage_writes[1].count ==
+          padded_hidden_elements);
     CHECK(!fixture.state.input_poison_observed);
     CHECK(!fixture.state.host_read_poison_observed);
     CHECK(!fixture.state.cache_publish_poison_observed);
@@ -2052,9 +2048,8 @@ void TestOrderBuffersTailsStateAndMetrics(
         }));
     CHECK(fixture.state.stage_writes.size() == 2);
     CHECK(
-        fixture.state.stage_writes[0].size ==
-        static_cast<std::size_t>(constants::kHiddenSize) *
-            sizeof(std::uint16_t));
+        fixture.state.stage_writes[0].count ==
+        static_cast<std::size_t>(constants::kHiddenSize));
 
     fixture.engine->clear_context();
     fixture.state.ResetExecutionRecords();
@@ -2152,13 +2147,11 @@ void TestDivergentPaddingGrids(const SyntheticPackage& package) {
             1);
         CHECK(fixture.state.stage_writes.size() == 2);
         CHECK(
-            fixture.state.stage_writes[0].size ==
-            4u * static_cast<std::size_t>(constants::kHiddenSize) *
-                sizeof(std::uint16_t));
+            fixture.state.stage_writes[0].count ==
+            4u * static_cast<std::size_t>(constants::kHiddenSize));
         CHECK(
-            fixture.state.stage_writes[1].size ==
-            8u * static_cast<std::size_t>(constants::kHiddenSize) *
-                sizeof(std::uint16_t));
+            fixture.state.stage_writes[1].count ==
+            8u * static_cast<std::size_t>(constants::kHiddenSize));
         const auto& metrics = fixture.engine->metrics();
         CHECK(metrics.padding_write_calls == 97);
         CHECK(metrics.attention_extent_queries == 1);
@@ -2207,13 +2200,11 @@ void TestDivergentPaddingGrids(const SyntheticPackage& package) {
             1);
         CHECK(fixture.state.stage_writes.size() == 2);
         CHECK(
-            fixture.state.stage_writes[0].size ==
-            8u * static_cast<std::size_t>(constants::kHiddenSize) *
-                sizeof(std::uint16_t));
+            fixture.state.stage_writes[0].count ==
+            8u * static_cast<std::size_t>(constants::kHiddenSize));
         CHECK(
-            fixture.state.stage_writes[1].size ==
-            4u * static_cast<std::size_t>(constants::kHiddenSize) *
-                sizeof(std::uint16_t));
+            fixture.state.stage_writes[1].count ==
+            4u * static_cast<std::size_t>(constants::kHiddenSize));
         const auto& metrics = fixture.engine->metrics();
         CHECK(metrics.padding_write_calls == 64);
         CHECK(metrics.attention_extent_queries == 1);

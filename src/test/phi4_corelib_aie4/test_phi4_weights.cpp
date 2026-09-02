@@ -48,7 +48,6 @@ constexpr std::uint64_t kDataBytes =
     200064ull * 3072ull * sizeof(std::uint16_t);
 constexpr std::size_t kMatMulPackedBytes = 17;
 constexpr std::size_t kSsMlpPackedBytes = 29;
-constexpr std::uint16_t kBf16One = 0x3f80u;
 constexpr std::uint16_t kBf16Epsilon = 0x3728u;
 
 enum class FailurePoint {
@@ -65,27 +64,17 @@ struct FakeWeightHandle {
 
 struct MatMulCreateRecord {
     ryzenai_corelib_matmul_bf16_weights_desc desc{};
-    ryzenai_corelib_matmul_bf16_onnx_weights_components components{};
+    ryzenai_corelib_matmul_bf16_onnx_components components{};
+    std::uint32_t threads = 0;
     void* object = nullptr;
     std::thread::id thread;
 };
 
 struct SsMlpCreateRecord {
     ryzenai_corelib_ssmlp_bf16_weights_desc desc{};
-    ryzenai_corelib_ssmlp_bf16_onnx_weights_components components{};
+    ryzenai_corelib_ssmlp_bf16_onnx_components components{};
+    std::uint32_t threads = 0;
     void* object = nullptr;
-    std::thread::id thread;
-};
-
-struct ConvertRecord {
-    ryzenai_corelib_data_type source_type =
-        ryzenai_corelib_data_type_fp32;
-    ryzenai_corelib_data_type destination_type =
-        ryzenai_corelib_data_type_fp32;
-    const void* source = nullptr;
-    void* destination = nullptr;
-    std::size_t count = 0;
-    float first_source_value = 0.0f;
     std::thread::id thread;
 };
 
@@ -100,7 +89,6 @@ struct RecordingState {
     std::size_t ssmlp_get_attempts = 0;
     std::vector<MatMulCreateRecord> matmul_creates;
     std::vector<SsMlpCreateRecord> ssmlp_creates;
-    std::vector<ConvertRecord> converts;
     std::vector<void*> creation_order;
     std::vector<void*> release_order;
     std::vector<bool> package_alive_at_release;
@@ -129,55 +117,10 @@ bool ShouldFail(
            ordinal == State().failure_ordinal;
 }
 
-ryzenai_corelib_status RecordingConvert(
-    ryzenai_corelib_data_type source_type,
-    const void* source,
-    ryzenai_corelib_data_type destination_type,
-    void* destination,
-    std::size_t count) {
-    if (source == nullptr || destination == nullptr || count == 0) {
-        return ryzenai_corelib_status_bad_argument;
-    }
-
-    ConvertRecord record{
-        source_type,
-        destination_type,
-        source,
-        destination,
-        count,
-        0.0f,
-        std::this_thread::get_id()};
-    if (source_type == ryzenai_corelib_data_type_fp32) {
-        record.first_source_value =
-            *static_cast<const float*>(source);
-    }
-
-    auto& state = State();
-    {
-        std::lock_guard lock(state.mutex);
-        state.converts.push_back(record);
-    }
-
-    auto* output = static_cast<std::uint16_t*>(destination);
-    if (
-        destination_type == ryzenai_corelib_data_type_bf16 &&
-        source_type == ryzenai_corelib_data_type_fp32 &&
-        count == 1 &&
-        std::abs(record.first_source_value - 1.0e-5f) < 1.0e-10f) {
-        output[0] = kBf16Epsilon;
-    } else if (
-        destination_type == ryzenai_corelib_data_type_fp16 ||
-        destination_type == ryzenai_corelib_data_type_bf16) {
-        output[0] = kBf16One;
-    } else {
-        return ryzenai_corelib_status_bad_argument;
-    }
-    return ryzenai_corelib_status_success;
-}
-
 ryzenai_corelib_status RecordingMatMulCreate(
     const ryzenai_corelib_matmul_bf16_weights_desc* desc,
-    const ryzenai_corelib_matmul_bf16_onnx_weights_components* components,
+    const ryzenai_corelib_matmul_bf16_onnx_components* components,
+    uint32_t threads,
     ryzenai_corelib_matmul_bf16_weights_ptr* out) {
     if (desc == nullptr || components == nullptr || out == nullptr) {
         return ryzenai_corelib_status_bad_argument;
@@ -200,7 +143,11 @@ ryzenai_corelib_status RecordingMatMulCreate(
     auto* handle = new FakeWeightHandle{state.current_package};
     *out = handle;
     state.matmul_creates.push_back(
-        {*desc, *components, handle, std::this_thread::get_id()});
+        {*desc,
+         *components,
+         threads,
+         handle,
+         std::this_thread::get_id()});
     state.creation_order.push_back(handle);
     return ryzenai_corelib_status_success;
 }
@@ -238,7 +185,8 @@ ryzenai_corelib_status RecordingMatMulGetData(
 
 ryzenai_corelib_status RecordingSsMlpCreate(
     const ryzenai_corelib_ssmlp_bf16_weights_desc* desc,
-    const ryzenai_corelib_ssmlp_bf16_onnx_weights_components* components,
+    const ryzenai_corelib_ssmlp_bf16_onnx_components* components,
+    uint32_t threads,
     ryzenai_corelib_ssmlp_bf16_weights_ptr* out) {
     if (desc == nullptr || components == nullptr || out == nullptr) {
         return ryzenai_corelib_status_bad_argument;
@@ -261,7 +209,11 @@ ryzenai_corelib_status RecordingSsMlpCreate(
     auto* handle = new FakeWeightHandle{state.current_package};
     *out = handle;
     state.ssmlp_creates.push_back(
-        {*desc, *components, handle, std::this_thread::get_id()});
+        {*desc,
+         *components,
+         threads,
+         handle,
+         std::this_thread::get_id()});
     state.creation_order.push_back(handle);
     return ryzenai_corelib_status_success;
 }
@@ -322,26 +274,21 @@ std::shared_ptr<CorelibApi> ResolveRecordingCorelib(
     resolver["ryzenai_corelib_object_release"] = FunctionAddress(
         static_cast<decltype(&::ryzenai_corelib_object_release)>(
             &RecordingRelease));
-    resolver["ryzenai_corelib_convert"] = FunctionAddress(
-        static_cast<decltype(&::ryzenai_corelib_convert)>(
-            &RecordingConvert));
-    resolver
-        ["ryzenai_corelib_matmul_bf16_weights_create_from_onnx_components"] =
-            FunctionAddress(
-                static_cast<decltype(
-                    &::ryzenai_corelib_matmul_bf16_weights_create_from_onnx_components)>(
-                    &RecordingMatMulCreate));
+    resolver["ryzenai_corelib_matmul_bf16_weights_create_onnx"] =
+        FunctionAddress(
+            static_cast<decltype(
+                &::ryzenai_corelib_matmul_bf16_weights_create_onnx)>(
+                &RecordingMatMulCreate));
     resolver["ryzenai_corelib_matmul_bf16_weights_get_data"] =
         FunctionAddress(
             static_cast<decltype(
                 &::ryzenai_corelib_matmul_bf16_weights_get_data)>(
                 &RecordingMatMulGetData));
-    resolver
-        ["ryzenai_corelib_ssmlp_bf16_weights_create_from_onnx_components"] =
-            FunctionAddress(
-                static_cast<decltype(
-                    &::ryzenai_corelib_ssmlp_bf16_weights_create_from_onnx_components)>(
-                    &RecordingSsMlpCreate));
+    resolver["ryzenai_corelib_ssmlp_bf16_weights_create_onnx"] =
+        FunctionAddress(
+            static_cast<decltype(
+                &::ryzenai_corelib_ssmlp_bf16_weights_create_onnx)>(
+                &RecordingSsMlpCreate));
     resolver["ryzenai_corelib_ssmlp_bf16_weights_get_data"] =
         FunctionAddress(
             static_cast<decltype(
@@ -467,8 +414,9 @@ void AddInitializer(
 
 class ManifestBuilder final {
 public:
-    explicit ManifestBuilder(std::uint64_t model_size)
-        : manifest_{
+    ManifestBuilder(std::uint64_t model_size, bool fp32_q_proj_scales)
+        : fp32_q_proj_scales_(fp32_q_proj_scales),
+          manifest_{
               {"schema_version", 1},
               {"execution_backend", "corelib_aie4"},
               {"model",
@@ -528,7 +476,8 @@ public:
         AddInitializer(
             manifest_["initializers"],
             scales,
-            name == "model.layers.0.attn.q_proj.MatMulNBits"
+            (fp32_q_proj_scales_ &&
+             name == "model.layers.0.attn.q_proj.MatMulNBits")
                 ? "float32"
                 : "float16",
             {n, k / 128},
@@ -692,13 +641,14 @@ private:
         return result;
     }
 
+    bool fp32_q_proj_scales_ = false;
     json manifest_;
     std::uint64_t next_offset_ = 4096;
 };
 
 class SyntheticPackage final {
 public:
-    SyntheticPackage() {
+    explicit SyntheticPackage(bool fp32_q_proj_scales = false) {
         const auto model_path = temp_.path() / "model.onnx";
         {
             std::ofstream model(model_path, std::ios::binary);
@@ -706,7 +656,8 @@ public:
         }
         CreateSparseFile(temp_.path() / kDataFile, kDataBytes);
         ManifestBuilder builder(
-            std::filesystem::file_size(model_path));
+            std::filesystem::file_size(model_path),
+            fp32_q_proj_scales);
         std::ofstream manifest(
             temp_.path() / kManifestName,
             std::ios::binary);
@@ -758,9 +709,13 @@ void CheckMatMulComponents(
     CHECK(
         *static_cast<const std::byte*>(actual.components.qzeros) ==
         std::byte{0});
+    // The synthetic data file is sparse, so a faithful element-wise copy
+    // reproduces its zeros. The old expectation was an artifact of the
+    // recording converter writing a constant.
     CHECK(
         *static_cast<const std::uint16_t*>(actual.components.scales) ==
-        kBf16One);
+        0x0000u);
+    CHECK(actual.threads == 0u);
 }
 
 void CheckSsMlpComponents(
@@ -771,7 +726,9 @@ void CheckSsMlpComponents(
     CHECK(actual.desc.k == 3072);
     CHECK(actual.desc.n == 8192);
     CHECK(actual.desc.group_size == 128);
+    CHECK(actual.threads == 0u);
     CHECK(actual.components.epsilon != nullptr);
+    // The API-6 host round-to-nearest-even helper, on 1e-5f.
     CHECK(
         *static_cast<const std::uint16_t*>(
             actual.components.epsilon) == kBf16Epsilon);
@@ -785,7 +742,7 @@ void CheckSsMlpComponents(
         CHECK(actual_pointer != package.Require(name).data);
         CHECK(
             *static_cast<const std::uint16_t*>(actual_pointer) ==
-            kBf16One);
+            0x0000u);
     };
     const auto check_projection = [&](
                                       const void* qweight,
@@ -917,26 +874,19 @@ void TestExactConstructionAndLifetime(
                     "model.layers.32.final_norm_layernorm.weight")
                 .data());
 
-        CHECK(state.converts.size() == 290);
-        CHECK(std::count_if(
-                  state.converts.begin(),
-                  state.converts.end(),
-                  [](const ConvertRecord& call) {
-                      return call.destination_type ==
-                             ryzenai_corelib_data_type_fp16;
-                  }) == 225);
-        CHECK(std::count_if(
-                  state.converts.begin(),
-                  state.converts.end(),
-                  [](const ConvertRecord& call) {
-                      return call.destination_type ==
-                             ryzenai_corelib_data_type_bf16;
-                  }) == 65);
+        // Every packing call takes the header's "one thread" hint: design
+        // Section 19 defers concurrent packing to the caller.
         CHECK(std::all_of(
-            state.converts.begin(),
-            state.converts.end(),
-            [load_thread](const ConvertRecord& call) {
-                return call.thread == load_thread;
+            state.matmul_creates.begin(),
+            state.matmul_creates.end(),
+            [](const MatMulCreateRecord& call) {
+                return call.threads == 0u;
+            }));
+        CHECK(std::all_of(
+            state.ssmlp_creates.begin(),
+            state.ssmlp_creates.end(),
+            [](const SsMlpCreateRecord& call) {
+                return call.threads == 0u;
             }));
         CHECK(std::all_of(
             state.matmul_creates.begin(),
@@ -984,7 +934,6 @@ void TestExactConstructionAndLifetime(
             *retained);
         retained.reset();
         CHECK(!package_lifetime.expired());
-        CHECK(state.converts.size() == 290);
         (void)moved;
         CHECK(creation_order.size() == 161);
     }
@@ -1076,7 +1025,6 @@ void CheckLoadFailure(
     state.ssmlp_get_attempts = 0;
     state.matmul_creates.clear();
     state.ssmlp_creates.clear();
-    state.converts.clear();
     state.creation_order.clear();
     state.release_order.clear();
     state.package_alive_at_release.clear();
@@ -1164,7 +1112,7 @@ void TestActionableFailures(const SyntheticPackage& fixture) {
         70,
         86,
         "model.layers.17.attn.k_proj.MatMulNBits",
-        "ryzenai_corelib_matmul_bf16_weights_create_from_onnx_components",
+        "ryzenai_corelib_matmul_bf16_weights_create_onnx",
         "intentional Task 6 MatMul create failure");
     CheckLoadFailure(
         state,
@@ -1184,7 +1132,7 @@ void TestActionableFailures(const SyntheticPackage& fixture) {
         24,
         119,
         "model.layers.23.ssmlp",
-        "ryzenai_corelib_ssmlp_bf16_weights_create_from_onnx_components",
+        "ryzenai_corelib_ssmlp_bf16_weights_create_onnx",
         "intentional Task 6 SSMLP create failure");
     CheckLoadFailure(
         state,
@@ -1241,6 +1189,38 @@ void TestNonCorelibObjectFailureRemainsDistinct(
         "expected packed-byte validation failure");
 }
 
+// Design Section 9.3: scales must be FP16 in an accepted package. An FP32
+// scales array is rejected at load with an actionable error rather than
+// narrowed, because narrowing needs a host FP32-to-FP16 converter that
+// API-6 does not permit. Admitting FP32 scales is a spec change.
+void TestFp32ScalesAreRejectedWithAnActionableError() {
+    SyntheticPackage fp32_scales(true);
+    RecordingState state;
+    auto api = ResolveRecordingCorelib(state);
+    auto package = fp32_scales.Load(api);
+    state.current_package = package;
+
+    try {
+        (void)Phi4Weights::Load(api, package);
+    } catch (const std::exception& error) {
+        const std::string_view message(error.what());
+        CHECK(
+            message.find("model.layers.0.attn.q_proj.MatMulNBits") !=
+            std::string_view::npos);
+        CHECK(message.find("FP16") != std::string_view::npos);
+        CHECK(message.find("rejected") != std::string_view::npos);
+        CHECK(message.find("repackage") != std::string_view::npos);
+        // The first object fails, so nothing is left behind.
+        CHECK(api->live_object_count() == 0);
+        package.reset();
+        g_recording = nullptr;
+        return;
+    }
+    g_recording = nullptr;
+    throw std::runtime_error(
+        "an FP32 scales array must fail the Phi-4 weight load");
+}
+
 static_assert(!std::is_copy_constructible_v<Phi4Weights>);
 static_assert(!std::is_copy_assignable_v<Phi4Weights>);
 static_assert(std::is_nothrow_move_constructible_v<Phi4Weights>);
@@ -1255,6 +1235,7 @@ int main() {
         TestMoveAssignmentReleasesBeforeOwners(fixture);
         TestActionableFailures(fixture);
         TestNonCorelibObjectFailureRemainsDistinct(fixture);
+        TestFp32ScalesAreRejectedWithAnActionableError();
         std::cout << "test_phi4_weights: PASS\n";
         return 0;
     } catch (const std::exception& error) {

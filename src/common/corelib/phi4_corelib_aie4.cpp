@@ -1,6 +1,7 @@
 #include <models/phi4/phi4_corelib_aie4.hpp>
 
 #include <corelib/corelib_object.hpp>
+#include <corelib/host_convert.hpp>
 #include <models/phi4/phi4_corelib_constants.hpp>
 #include <models/phi4/phi4_corelib_host.hpp>
 #include <models/phi4/phi4_corelib_manifest.hpp>
@@ -40,14 +41,10 @@ constexpr std::string_view kCreateTensorCall =
     "ryzenai_corelib_create_device_tensor";
 constexpr std::string_view kTensorByteSizeCall =
     "ryzenai_corelib_tensor_get_byte_size";
-constexpr std::string_view kTensorWriteCall =
-    "ryzenai_corelib_tensor_write";
-constexpr std::string_view kTensorReadCall =
-    "ryzenai_corelib_tensor_read";
 constexpr std::string_view kSynchronizeCall =
     "ryzenai_corelib_stream_synchronize";
-constexpr std::string_view kConvertCall =
-    "ryzenai_corelib_convert";
+constexpr std::string_view kTensorDataTypeCall =
+    "ryzenai_corelib_tensor_get_data_type";
 
 static_assert(sizeof(bf16) == sizeof(std::uint16_t));
 
@@ -171,23 +168,6 @@ std::size_t CheckedElements(
             std::string(context) + " extent overflows size_t");
     }
     return static_cast<std::size_t>(row_count * column_count);
-}
-
-std::size_t CheckedBytes(
-    std::int64_t rows,
-    std::int64_t width,
-    std::size_t element_size,
-    std::string_view context) {
-    const std::size_t elements =
-        CheckedElements(rows, width, context);
-    if (
-        element_size != 0 &&
-        elements >
-            std::numeric_limits<std::size_t>::max() / element_size) {
-        throw std::overflow_error(
-            std::string(context) + " byte size overflows size_t");
-    }
-    return elements * element_size;
 }
 
 std::size_t TensorByteCount(
@@ -407,22 +387,30 @@ struct phi4_corelib_aie4::Impl final {
                 embedding_view.data),
             embedding_view.size / sizeof(std::uint16_t));
 
+        // The layer-0 norm feeds the host RMSNorm directly and never
+        // reaches a tensor, so widening it is the `API-6` FP16-to-FP32
+        // helper; an FP32 source is a plain copy.
         const auto& norm_view = package->Require(kInputNormName);
         input_norm.resize(
             static_cast<std::size_t>(constants::kHiddenSize));
-        api->Check(
-            api->functions().convert(
-                SourceDataType(norm_view.dtype, kInputNormName),
-                norm_view.data,
-                ryzenai_corelib_data_type_fp32,
-                input_norm.data(),
-                input_norm.size()),
-            kConvertCall);
+        if (
+            SourceDataType(norm_view.dtype, kInputNormName) ==
+            ryzenai_corelib_data_type_fp32) {
+            std::copy_n(
+                reinterpret_cast<const float*>(norm_view.data),
+                input_norm.size(),
+                input_norm.begin());
+        } else {
+            corelib::WidenFp16Array(
+                reinterpret_cast<const std::uint16_t*>(norm_view.data),
+                input_norm.size(),
+                input_norm.data());
+        }
 
         const auto cos_host =
-            package->MaterializeRopeFp32(kCosName);
+            package->MaterializeRopeGather(kCosName);
         const auto sin_host =
-            package->MaterializeRopeFp32(kSinName);
+            package->MaterializeRopeGather(kSinName);
 
         const auto weight_pack_started =
             std::chrono::steady_clock::now();
@@ -442,7 +430,7 @@ struct phi4_corelib_aie4::Impl final {
             "Phi-4 host layer staging");
         embedding_fp32.resize(layer_elements);
         normalized_fp32.resize(layer_elements);
-        bf16_staging.resize(layer_elements);
+        fp32_staging.resize(layer_elements);
         const std::size_t lm_head_elements = CheckedElements(
             capacities.lm_head_rows,
             constants::kHiddenSize,
@@ -528,25 +516,31 @@ struct phi4_corelib_aie4::Impl final {
                 true);
         }
 
-        const std::size_t rope_bytes = CheckedBytes(
+        // One write per table, in the source dtype, with `count` in FP32
+        // elements of the destination tensor. tensor_write is the only
+        // conversion boundary corelib now offers.
+        const std::size_t rope_elements = CheckedElements(
             constants::kMaxSequenceLength,
             constants::kRopeDimension / 2,
-            sizeof(float),
             "Phi-4 RoPE upload");
-        api->Check(
-            api->functions().tensor_write(
-                cos_tensor.get(),
-                cos_host.data(),
-                rope_bytes,
-                0),
-            kTensorWriteCall);
-        api->Check(
-            api->functions().tensor_write(
-                sin_tensor.get(),
-                sin_host.data(),
-                rope_bytes,
-                0),
-            kTensorWriteCall);
+        if (
+            cos_host.count != rope_elements ||
+            sin_host.count != rope_elements) {
+            throw std::logic_error(
+                "Phi-4 RoPE gather produced the wrong element count");
+        }
+        api->WriteElements(
+            cos_tensor.get(),
+            cos_host.dtype,
+            cos_host.data,
+            rope_elements,
+            0);
+        api->WriteElements(
+            sin_tensor.get(),
+            sin_host.dtype,
+            sin_host.data,
+            rope_elements,
+            0);
 
         current_hidden = &hidden_tensors[0];
         next_hidden = &hidden_tensors[1];
@@ -641,6 +635,21 @@ struct phi4_corelib_aie4::Impl final {
             throw std::runtime_error(
                 "corelib device tensor byte size does not match "
                 "the requested Phi-4 shape");
+        }
+
+        // Every subsequent write and read counts in elements of THIS
+        // dtype, so confirm the tensor holds what was asked for rather
+        // than inferring it from the byte size, which FP16 and BF16 share.
+        ryzenai_corelib_data_type actual_type{};
+        api->Check(
+            api->functions().tensor_get_data_type(
+                result.get(),
+                &actual_type),
+            kTensorDataTypeCall);
+        if (actual_type != data_type) {
+            throw std::runtime_error(
+                "corelib device tensor dtype does not match the "
+                "requested Phi-4 dtype");
         }
         ++metrics.device_tensor_create_count;
         if (is_kv) {
@@ -750,19 +759,12 @@ struct phi4_corelib_aie4::Impl final {
             throw std::out_of_range(
                 "Phi-4 padding write has a negative row offset");
         }
+        // Offsets and counts are BF16 elements of the destination tensor,
+        // not bytes; the staging buffer is BF16 too, so this is a copy.
         const std::size_t offset =
             first_row == 0
                 ? 0
-                : CheckedBytes(
-                      first_row,
-                      width,
-                      sizeof(std::uint16_t),
-                      context);
-        const std::size_t bytes = CheckedBytes(
-            row_count,
-            width,
-            sizeof(std::uint16_t),
-            context);
+                : CheckedElements(first_row, width, context);
         const std::size_t words = CheckedElements(
             row_count,
             width,
@@ -771,15 +773,14 @@ struct phi4_corelib_aie4::Impl final {
             throw std::out_of_range(
                 "Phi-4 padding write exceeds host staging capacity");
         }
-        api->Check(
-            api->functions().tensor_write(
-                tensor.get(),
-                padding_zero_staging.data(),
-                bytes,
-                offset),
-            kTensorWriteCall);
+        api->WriteElements(
+            tensor.get(),
+            ryzenai_corelib_data_type_bf16,
+            padding_zero_staging.data(),
+            words,
+            offset);
         ++metrics.padding_write_calls;
-        metrics.padding_bytes += bytes;
+        metrics.padding_bytes += words * sizeof(std::uint16_t);
     }
 
     void BridgePadding(
@@ -819,7 +820,6 @@ struct phi4_corelib_aie4::Impl final {
         const auto normalized_output =
             std::span<float>(normalized_fp32).first(live_elements);
         GatherEmbedding(
-            *api,
             embedding,
             token_ids,
             embedding_output);
@@ -831,48 +831,46 @@ struct phi4_corelib_aie4::Impl final {
             static_cast<float>(constants::kRmsEpsilon),
             normalized_output);
 
+        // Design Section 10.2: the host stays in FP32 and writes FP32 into
+        // the BF16 tensors. Corelib narrows inside tensor_write, so there
+        // is one BF16 rounding implementation on this path, not two that
+        // have to agree. `count` is in BF16 elements of the destination.
         const std::int64_t hidden_rows =
             extents.ProjectionInput();
-        StageBf16(
-            *api,
+        StageFp32(
             normalized_output,
             rows,
             hidden_rows,
             constants::kHiddenSize,
-            bf16_staging);
-        const std::size_t hidden_bytes = CheckedBytes(
+            fp32_staging);
+        const std::size_t hidden_elements = CheckedElements(
             hidden_rows,
             constants::kHiddenSize,
-            sizeof(std::uint16_t),
             "Phi-4 hidden staging");
-        api->Check(
-            api->functions().tensor_write(
-                current_hidden->get(),
-                bf16_staging.data(),
-                hidden_bytes,
-                0),
-            kTensorWriteCall);
+        api->WriteElements(
+            current_hidden->get(),
+            ryzenai_corelib_data_type_fp32,
+            fp32_staging.data(),
+            hidden_elements,
+            0);
 
         const std::int64_t residual_rows = extents.ssmlp;
-        StageBf16(
-            *api,
+        StageFp32(
             embedding_output,
             rows,
             residual_rows,
             constants::kHiddenSize,
-            bf16_staging);
-        const std::size_t residual_bytes = CheckedBytes(
+            fp32_staging);
+        const std::size_t residual_elements = CheckedElements(
             residual_rows,
             constants::kHiddenSize,
-            sizeof(std::uint16_t),
             "Phi-4 residual staging");
-        api->Check(
-            api->functions().tensor_write(
-                current_residual->get(),
-                bf16_staging.data(),
-                residual_bytes,
-                0),
-            kTensorWriteCall);
+        api->WriteElements(
+            current_residual->get(),
+            ryzenai_corelib_data_type_fp32,
+            fp32_staging.data(),
+            residual_elements,
+            0);
     }
 
     ryzenai_corelib_status SubmitMatMul(
@@ -944,51 +942,50 @@ struct phi4_corelib_aie4::Impl final {
     void PrepareLastHidden(
         std::int64_t rows,
         std::int64_t lm_head_rows) {
-        const std::size_t row_bytes = CheckedBytes(
+        // Design Section 10.5: both tensors are BF16 and so is the caller
+        // dtype, so this is a straight copy with no FP32 round trip.
+        const std::size_t row_elements = CheckedElements(
             1,
             constants::kHiddenSize,
-            sizeof(std::uint16_t),
             "Phi-4 last hidden");
         const std::size_t source_offset =
-            static_cast<std::size_t>(rows - 1) * row_bytes;
+            static_cast<std::size_t>(rows - 1) * row_elements;
         WriteZeroRows(
             lm_input_tensor,
             0,
             lm_head_rows,
             constants::kHiddenSize,
             "Phi-4 LM-head input initialization");
-        api->Check(
-            api->functions().tensor_read(
-                current_hidden->get(),
-                last_hidden_staging.data(),
-                row_bytes,
-                source_offset),
-            kTensorReadCall);
-        api->Check(
-            api->functions().tensor_write(
-                lm_input_tensor.get(),
-                last_hidden_staging.data(),
-                row_bytes,
-                0),
-            kTensorWriteCall);
+        api->ReadElements(
+            current_hidden->get(),
+            ryzenai_corelib_data_type_bf16,
+            last_hidden_staging.data(),
+            row_elements,
+            source_offset);
+        api->WriteElements(
+            lm_input_tensor.get(),
+            ryzenai_corelib_data_type_bf16,
+            last_hidden_staging.data(),
+            row_elements,
+            0);
     }
 
     void ReadLogits(buffer<bf16>& output) {
-        constexpr std::size_t logits_bytes =
-            static_cast<std::size_t>(constants::kVocabularySize) *
-            sizeof(std::uint16_t);
-        if (output.size() !=
-            static_cast<std::size_t>(constants::kVocabularySize)) {
+        constexpr std::size_t logits_elements =
+            static_cast<std::size_t>(constants::kVocabularySize);
+        if (output.size() != logits_elements) {
             throw std::logic_error(
                 "Phi-4 logits buffer has the wrong size");
         }
-        api->Check(
-            api->functions().tensor_read(
-                lm_output_tensor.get(),
-                output.data(),
-                logits_bytes,
-                0),
-            kTensorReadCall);
+        // Straight into the returned buffer<bf16>: the return type is
+        // already BF16, so widening and narrowing again would be a round
+        // trip for nothing.
+        api->ReadElements(
+            lm_output_tensor.get(),
+            ryzenai_corelib_data_type_bf16,
+            output.data(),
+            logits_elements,
+            0);
     }
 
     buffer<bf16> RunRows(std::span<const int> token_ids) {
@@ -1195,8 +1192,7 @@ struct phi4_corelib_aie4::Impl final {
         std::vector<std::uint16_t> result(
             static_cast<std::size_t>(constants::kKvHeadCount) *
             live_rows * head_width);
-        const std::size_t bytes_per_head =
-            live_rows * head_width * sizeof(std::uint16_t);
+        const std::size_t elements_per_head = live_rows * head_width;
         for (std::size_t head = 0;
              head <
              static_cast<std::size_t>(constants::kKvHeadCount);
@@ -1205,14 +1201,13 @@ struct phi4_corelib_aie4::Impl final {
                 head *
                 static_cast<std::size_t>(
                     constants::kMaxSequenceLength) *
-                head_width * sizeof(std::uint16_t);
-            api->Check(
-                api->functions().tensor_read(
-                    cache.get(),
-                    result.data() + head * live_rows * head_width,
-                    bytes_per_head,
-                    source_offset),
-                kTensorReadCall);
+                head_width;
+            api->ReadElements(
+                cache.get(),
+                ryzenai_corelib_data_type_bf16,
+                result.data() + head * elements_per_head,
+                elements_per_head,
+                source_offset);
         }
         return result;
     }
@@ -1231,21 +1226,18 @@ struct phi4_corelib_aie4::Impl final {
             static_cast<std::size_t>(constants::kHiddenSize));
         snapshot.logits.resize(
             static_cast<std::size_t>(constants::kVocabularySize));
-        api->Check(
-            api->functions().tensor_read(
-                lm_input_tensor.get(),
-                snapshot.last_hidden.data(),
-                snapshot.last_hidden.size() *
-                    sizeof(std::uint16_t),
-                0),
-            kTensorReadCall);
-        api->Check(
-            api->functions().tensor_read(
-                lm_output_tensor.get(),
-                snapshot.logits.data(),
-                snapshot.logits.size() * sizeof(std::uint16_t),
-                0),
-            kTensorReadCall);
+        api->ReadElements(
+            lm_input_tensor.get(),
+            ryzenai_corelib_data_type_bf16,
+            snapshot.last_hidden.data(),
+            snapshot.last_hidden.size(),
+            0);
+        api->ReadElements(
+            lm_output_tensor.get(),
+            ryzenai_corelib_data_type_bf16,
+            snapshot.logits.data(),
+            snapshot.logits.size(),
+            0);
         return snapshot;
     }
 #endif
@@ -1260,7 +1252,7 @@ struct phi4_corelib_aie4::Impl final {
     std::vector<float> input_norm;
     std::vector<float> embedding_fp32;
     std::vector<float> normalized_fp32;
-    std::vector<std::uint16_t> bf16_staging;
+    std::vector<float> fp32_staging;
     std::vector<std::uint16_t> padding_zero_staging;
     std::vector<std::uint16_t> v_staging;
     std::vector<std::uint16_t> last_hidden_staging;

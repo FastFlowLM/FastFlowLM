@@ -1,6 +1,8 @@
 #include <models/phi4/phi4_corelib_host.hpp>
 #include <models/phi4/phi4_corelib_constants.hpp>
 
+#include <corelib/host_convert.hpp>
+
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -14,13 +16,6 @@
 
 namespace flm::phi4 {
 namespace {
-
-constexpr std::string_view kConvertCall =
-    "ryzenai_corelib_convert";
-constexpr std::string_view kTensorReadCall =
-    "ryzenai_corelib_tensor_read";
-constexpr std::string_view kTensorWriteCall =
-    "ryzenai_corelib_tensor_write";
 
 std::size_t CheckedExtent(
     std::int64_t rows,
@@ -44,7 +39,6 @@ std::size_t CheckedExtent(
 }  // namespace
 
 void GatherEmbedding(
-    const corelib::CorelibApi& api,
     std::span<const std::uint16_t> embedding_fp16,
     std::span<const int> token_ids,
     std::span<float> output) {
@@ -69,33 +63,31 @@ void GatherEmbedding(
         return;
     }
 
+    // Validate every token before touching the mapping, so an out-of-range
+    // ID fails instead of reading a row that is not there.
     const std::size_t vocabulary_rows =
         embedding_fp16.size() / width;
-    thread_local std::vector<std::uint16_t> staging;
-    staging.resize(output_count);
-    for (std::size_t row = 0; row < token_ids.size(); ++row) {
-        const int token_id = token_ids[row];
+    for (const int token_id : token_ids) {
         if (token_id < 0 ||
             static_cast<std::size_t>(token_id) >= vocabulary_rows) {
             throw std::out_of_range(
                 "Phi-4 embedding token ID is outside the mapped table");
         }
-        const std::size_t source_offset =
-            static_cast<std::size_t>(token_id) * width;
-        std::copy_n(
-            embedding_fp16.begin() + source_offset,
-            width,
-            staging.begin() + row * width);
     }
 
-    api.Check(
-        api.functions().convert(
-            ryzenai_corelib_data_type_fp16,
-            staging.data(),
-            ryzenai_corelib_data_type_fp32,
-            output.data(),
-            output_count),
-        kConvertCall);
+    // The gathered rows never reach a tensor before the host RMSNorm
+    // consumes them, so this is the `API-6` FP16-to-FP32 widening. It is
+    // scalar and per-element on purpose: the embedding table is a
+    // read-only file mapping, and a vectorized widening over-reads its
+    // source by up to 14 bytes, which faults on a page boundary.
+    for (std::size_t row = 0; row < token_ids.size(); ++row) {
+        const std::size_t source_offset =
+            static_cast<std::size_t>(token_ids[row]) * width;
+        corelib::WidenFp16Array(
+            embedding_fp16.data() + source_offset,
+            width,
+            output.data() + row * width);
+    }
 }
 
 void RmsNorm(
@@ -144,41 +136,34 @@ void RmsNorm(
     }
 }
 
-void StageBf16(
-    const corelib::CorelibApi& api,
+void StageFp32(
     std::span<const float> input,
     std::int64_t live_rows,
     std::int64_t padded_rows,
     std::int64_t width,
-    std::span<std::uint16_t> output) {
+    std::span<float> output) {
     if (padded_rows < live_rows) {
         throw std::invalid_argument(
-            "Phi-4 BF16 staging padded rows are smaller than live rows");
+            "Phi-4 FP32 staging padded rows are smaller than live rows");
     }
     const std::size_t live_count =
-        CheckedExtent(live_rows, width, "Phi-4 BF16 staging");
+        CheckedExtent(live_rows, width, "Phi-4 FP32 staging");
     const std::size_t padded_count =
-        CheckedExtent(padded_rows, width, "Phi-4 BF16 staging");
+        CheckedExtent(padded_rows, width, "Phi-4 FP32 staging");
     if (input.size() != live_count || output.size() < padded_count) {
         throw std::invalid_argument(
-            "Phi-4 BF16 staging shape mismatch");
+            "Phi-4 FP32 staging shape mismatch");
     }
 
-    thread_local std::vector<float> staging;
-    staging.resize(padded_count);
-    std::copy(input.begin(), input.end(), staging.begin());
+    // Design Section 10.2: the host stays in FP32 and never produces BF16
+    // activations. Corelib narrows FP32 to BF16 inside `tensor_write`, so
+    // there is exactly one BF16 rounding implementation on this path and
+    // FastFlow does not have to match it.
+    std::copy(input.begin(), input.end(), output.begin());
     std::fill(
-        staging.begin() + live_count,
-        staging.end(),
+        output.begin() + live_count,
+        output.begin() + padded_count,
         0.0f);
-    api.Check(
-        api.functions().convert(
-            ryzenai_corelib_data_type_fp32,
-            staging.data(),
-            ryzenai_corelib_data_type_bf16,
-            output.data(),
-            padded_count),
-        kConvertCall);
 }
 
 void ScatterV(
@@ -213,22 +198,20 @@ void ScatterV(
     staging.resize(source_count + head_staging_count);
 
     const auto started = std::chrono::steady_clock::now();
-    const std::size_t source_bytes =
-        source_count * sizeof(std::uint16_t);
-    api.Check(
-        api.functions().tensor_read(
-            source,
-            staging.data(),
-            source_bytes,
-            0),
-        kTensorReadCall);
+    // `count` and `offset` are BF16 ELEMENTS of the cache's own dtype, not
+    // bytes (`API-7`). Both tensors are BF16 and so is the host staging
+    // buffer, so every transfer here is a straight copy.
+    api.ReadElements(
+        source,
+        ryzenai_corelib_data_type_bf16,
+        staging.data(),
+        source_count,
+        0);
     ++metrics.read_calls;
-    metrics.bytes += source_bytes;
+    metrics.bytes += source_count * sizeof(std::uint16_t);
 
     std::uint16_t* const head_staging =
         staging.data() + source_count;
-    const std::size_t head_bytes =
-        head_staging_count * sizeof(std::uint16_t);
     for (std::size_t head = 0; head < head_count; ++head) {
         for (std::size_t row = 0; row < live_rows; ++row) {
             const std::size_t source_offset =
@@ -243,16 +226,15 @@ void ScatterV(
                   static_cast<std::size_t>(
                       constants::kMaxSequenceLength)) +
              static_cast<std::size_t>(position)) *
-            head_width * sizeof(std::uint16_t);
-        api.Check(
-            api.functions().tensor_write(
-                value_cache,
-                head_staging,
-                head_bytes,
-                cache_offset),
-            kTensorWriteCall);
+            head_width;
+        api.WriteElements(
+            value_cache,
+            ryzenai_corelib_data_type_bf16,
+            head_staging,
+            head_staging_count,
+            cache_offset);
         ++metrics.write_calls;
-        metrics.bytes += head_bytes;
+        metrics.bytes += head_staging_count * sizeof(std::uint16_t);
     }
     const auto elapsed =
         std::chrono::duration_cast<std::chrono::nanoseconds>(

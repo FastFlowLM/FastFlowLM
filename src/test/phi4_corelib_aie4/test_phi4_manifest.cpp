@@ -60,194 +60,6 @@ constexpr std::string_view kFp16Scale =
 constexpr std::string_view kFp32Norm =
     "model.layers.0.post_attention_layernorm.weight";
 
-struct ConvertRecord {
-    ryzenai_corelib_data_type source_type =
-        ryzenai_corelib_data_type_fp32;
-    const void* source = nullptr;
-    std::size_t src_stride = 0;
-    ryzenai_corelib_data_type destination_type =
-        ryzenai_corelib_data_type_fp32;
-    void* destination = nullptr;
-    std::size_t dst_stride = 0;
-    std::size_t count = 0;
-    std::size_t row = 0;
-};
-
-ConvertRecord g_last_convert;
-std::size_t g_convert_calls = 0;
-
-float HalfToFloat(std::uint16_t value) {
-    const bool negative = (value & 0x8000u) != 0;
-    const unsigned exponent = (value >> 10) & 0x1fu;
-    const unsigned mantissa = value & 0x03ffu;
-    float result = 0.0f;
-    if (exponent == 0) {
-        result = std::ldexp(static_cast<float>(mantissa), -24);
-    } else if (exponent == 31) {
-        result = mantissa == 0
-                     ? std::numeric_limits<float>::infinity()
-                     : std::numeric_limits<float>::quiet_NaN();
-    } else {
-        result = std::ldexp(
-            1.0f + static_cast<float>(mantissa) / 1024.0f,
-            static_cast<int>(exponent) - 15);
-    }
-    return negative ? -result : result;
-}
-
-std::uint16_t FloatToHalf(float value) {
-    const std::uint32_t bits = std::bit_cast<std::uint32_t>(value);
-    const std::uint16_t sign =
-        static_cast<std::uint16_t>((bits >> 16) & 0x8000u);
-    const std::uint32_t source_exponent = (bits >> 23) & 0xffu;
-    const std::uint32_t source_mantissa = bits & 0x007fffffu;
-
-    if (source_exponent == 0xffu) {
-        return static_cast<std::uint16_t>(
-            sign | (source_mantissa == 0 ? 0x7c00u : 0x7e00u));
-    }
-
-    const int exponent = static_cast<int>(source_exponent) - 127 + 15;
-    if (exponent >= 31) {
-        return static_cast<std::uint16_t>(sign | 0x7c00u);
-    }
-    if (exponent <= 0) {
-        if (exponent < -10) {
-            return sign;
-        }
-        const std::uint32_t mantissa = source_mantissa | 0x00800000u;
-        const unsigned shift = static_cast<unsigned>(14 - exponent);
-        const std::uint32_t halfway = 1u << (shift - 1);
-        const std::uint32_t rounded =
-            (mantissa + halfway - 1u + ((mantissa >> shift) & 1u)) >>
-            shift;
-        return static_cast<std::uint16_t>(sign | rounded);
-    }
-
-    const std::uint32_t rounded =
-        source_mantissa + 0x00000fffu +
-        ((source_mantissa >> 13) & 1u);
-    if ((rounded & 0x00800000u) != 0) {
-        if (exponent + 1 >= 31) {
-            return static_cast<std::uint16_t>(sign | 0x7c00u);
-        }
-        return static_cast<std::uint16_t>(
-            sign | (static_cast<unsigned>(exponent + 1) << 10));
-    }
-    return static_cast<std::uint16_t>(
-        sign | (static_cast<unsigned>(exponent) << 10) |
-        (rounded >> 13));
-}
-
-std::uint16_t FloatToBf16(float value) {
-    std::uint32_t bits = std::bit_cast<std::uint32_t>(value);
-    bits += 0x7fffu + ((bits >> 16) & 1u);
-    return static_cast<std::uint16_t>(bits >> 16);
-}
-
-float ReadElement(
-    ryzenai_corelib_data_type type,
-    const void* source,
-    std::size_t index) {
-    if (type == ryzenai_corelib_data_type_fp16) {
-        return HalfToFloat(
-            static_cast<const std::uint16_t*>(source)[index]);
-    }
-    if (type == ryzenai_corelib_data_type_fp32) {
-        return static_cast<const float*>(source)[index];
-    }
-    throw std::runtime_error("test converter received unsupported source type");
-}
-
-void WriteElement(
-    ryzenai_corelib_data_type type,
-    void* destination,
-    std::size_t index,
-    float value) {
-    if (type == ryzenai_corelib_data_type_fp16) {
-        static_cast<std::uint16_t*>(destination)[index] =
-            FloatToHalf(value);
-        return;
-    }
-    if (type == ryzenai_corelib_data_type_bf16) {
-        static_cast<std::uint16_t*>(destination)[index] =
-            FloatToBf16(value);
-        return;
-    }
-    if (type == ryzenai_corelib_data_type_fp32) {
-        static_cast<float*>(destination)[index] = value;
-        return;
-    }
-    throw std::runtime_error(
-        "test converter received unsupported destination type");
-}
-
-ryzenai_corelib_status RecordingConvert(
-    ryzenai_corelib_data_type source_type,
-    const void* source,
-    ryzenai_corelib_data_type destination_type,
-    void* destination,
-    std::size_t count) {
-    g_last_convert = {
-        source_type,
-        source,
-        0,
-        destination_type,
-        destination,
-        0,
-        count,
-        0};
-    ++g_convert_calls;
-    for (std::size_t index = 0; index < count; ++index) {
-        WriteElement(
-            destination_type,
-            destination,
-            index,
-            ReadElement(source_type, source, index));
-    }
-    return ryzenai_corelib_status_success;
-}
-
-ryzenai_corelib_status RecordingConvertStrided(
-    ryzenai_corelib_data_type source_type,
-    const void* source,
-    std::size_t source_stride,
-    ryzenai_corelib_data_type destination_type,
-    void* destination,
-    std::size_t destination_stride,
-    std::size_t count,
-    std::size_t row) {
-    g_last_convert = {
-        source_type,
-        source,
-        source_stride,
-        destination_type,
-        destination,
-        destination_stride,
-        count,
-        row};
-    ++g_convert_calls;
-    if (
-        row == 0 || count % row != 0 || source_stride < row ||
-        destination_stride < row) {
-        return ryzenai_corelib_status_bad_argument;
-    }
-    const std::size_t rows = count / row;
-    for (std::size_t source_row = 0; source_row < rows; ++source_row) {
-        for (std::size_t column = 0; column < row; ++column) {
-            WriteElement(
-                destination_type,
-                destination,
-                source_row * destination_stride + column,
-                ReadElement(
-                    source_type,
-                    source,
-                    source_row * source_stride + column));
-        }
-    }
-    return ryzenai_corelib_status_success;
-}
-
 template <class Function>
 void* FunctionAddress(Function function) {
     return reinterpret_cast<void*>(function);
@@ -255,12 +67,6 @@ void* FunctionAddress(Function function) {
 
 std::shared_ptr<CorelibApi> ResolveRecordingCorelib() {
     auto resolver = flm::test::CompleteCorelibResolver();
-    resolver["ryzenai_corelib_convert"] = FunctionAddress(
-        static_cast<decltype(&::ryzenai_corelib_convert)>(
-            &RecordingConvert));
-    resolver["ryzenai_corelib_convert_strided"] = FunctionAddress(
-        static_cast<decltype(&::ryzenai_corelib_convert_strided)>(
-            &RecordingConvertStrided));
     return CorelibApi::ResolveForTest(
         [resolver = std::move(resolver)](std::string_view name) mutable
             -> void* {
@@ -1164,50 +970,48 @@ void TestOwnedScaleAndNormConversions(
     fixture.Write(fixture.manifest());
     auto package = Phi4Package::Load(fixture.path(), api, false);
 
-    g_convert_calls = 0;
+    // FP16 scales are an element-wise copy into a contiguous model-owned
+    // buffer, not a conversion. WEIGHT-2 still holds.
     const auto fp16 = package.MaterializeFp16(kFp16Scale);
-    CHECK(g_convert_calls == 1);
-    CHECK(g_last_convert.source_type ==
-          ryzenai_corelib_data_type_fp16);
-    CHECK(g_last_convert.destination_type ==
-          ryzenai_corelib_data_type_fp16);
-    CHECK(g_last_convert.count == 1024u * 24u);
     CHECK(fp16.size() == 1024u * 24u);
     CHECK(fp16[0] == 0x3c00u);
     CHECK(fp16[1] == 0xc000u);
     CHECK(
         reinterpret_cast<const void*>(fp16.data()) !=
-        g_last_convert.source);
+        reinterpret_cast<const void*>(
+            package.Require(kFp16Scale).data));
     const auto* fp16_address = fp16.data();
 
     const auto same_fp16 = package.MaterializeFp16(kFp16Scale);
-    CHECK(g_convert_calls == 1);
     CHECK(same_fp16.data() == fp16_address);
 
-    const auto converted = package.MaterializeFp16(kFp32Scale);
-    CHECK(g_convert_calls == 2);
-    CHECK(g_last_convert.source_type ==
-          ryzenai_corelib_data_type_fp32);
-    CHECK(g_last_convert.destination_type ==
-          ryzenai_corelib_data_type_fp16);
-    CHECK(g_last_convert.count == 3072u * 24u);
-    CHECK(converted[0] == 0x3c00u);
-    CHECK(converted[1] == 0xc000u);
+    // Design Section 9.3: an FP32 scales array is REJECTED, not narrowed.
+    // Narrowing it would need a host FP32-to-FP16 converter, which API-6
+    // does not permit, so admitting one is a spec change.
+    CheckThrowsContains(
+        [&] { (void)package.MaterializeFp16(kFp32Scale); },
+        "FP16");
+    CheckThrowsContains(
+        [&] { (void)package.MaterializeFp16(kFp32Scale); },
+        "rejected");
     CHECK(fp16.data() == fp16_address);
 
+    // Norms are raw BF16 packer blobs, so they keep the API-6 host
+    // round-to-nearest-even helper.
     const auto bf16 = package.MaterializeBf16(kFp32Norm);
-    CHECK(g_convert_calls == 3);
-    CHECK(g_last_convert.source_type ==
-          ryzenai_corelib_data_type_fp32);
-    CHECK(g_last_convert.destination_type ==
-          ryzenai_corelib_data_type_bf16);
-    CHECK(g_last_convert.count == 3072);
+    CHECK(bf16.size() == 3072u);
     CHECK(bf16[0] == 0x3f80u);
     CHECK(bf16[1] == 0xc000u);
 
     CheckThrowsContains(
         [&] {
             (void)package.MaterializeFp16(
+                "model.layers.0.attn.q_proj.MatMulNBits.qweight");
+        },
+        "FP16");
+    CheckThrowsContains(
+        [&] {
+            (void)package.MaterializeBf16(
                 "model.layers.0.attn.q_proj.MatMulNBits.qweight");
         },
         "floating");
@@ -1254,7 +1058,11 @@ private:
     DWORD old_protection_ = 0;
 };
 
-void TestRopeUsesExactStridedContractAtGuardPage(
+// Corelib e5258d2 removed convert_strided, so this slice is now
+// FastFlow's own code -- which makes the guard page more important, not
+// less. The last source row sits immediately before an inaccessible page,
+// and the gather must take its 48 columns without touching the tail.
+void TestRopeGatherStaysInSourceDtypeAtGuardPage(
     const SyntheticPackage& fixture,
     const std::shared_ptr<CorelibApi>& api) {
     fixture.Write(fixture.manifest());
@@ -1268,26 +1076,22 @@ void TestRopeUsesExactStridedContractAtGuardPage(
         const_cast<std::byte*>(source.data + source.size);
     NoAccessGuard guard(one_past);
 
-    g_convert_calls = 0;
-    const auto rope = package.MaterializeRopeFp32("cos_cache");
-    CHECK(g_convert_calls == 1);
-    CHECK(g_last_convert.source_type ==
-          ryzenai_corelib_data_type_fp16);
-    CHECK(g_last_convert.destination_type ==
-          ryzenai_corelib_data_type_fp32);
-    CHECK(g_last_convert.row == 48);
-    CHECK(g_last_convert.src_stride == kRopeColumns);
-    CHECK(g_last_convert.dst_stride == 48);
-    CHECK(g_last_convert.count == 4096u * 48u);
-    CHECK(rope.size() == 4096u * 48u);
-    CHECK(rope[0] == 1.0f);
-    CHECK(rope[48] == 2.0f);
-    CHECK(rope.back() == 3.0f);
+    const auto rope = package.MaterializeRopeGather("cos_cache");
+    // The gather preserves the SOURCE dtype: tensor_write does the
+    // widening to the FP32 device tensor, and this path performs no
+    // conversion of its own.
+    CHECK(rope.dtype == ryzenai_corelib_data_type_fp16);
+    CHECK(rope.count == 4096u * 48u);
+    const auto* elements =
+        static_cast<const std::uint16_t*>(rope.data);
+    CHECK(elements[0] == 0x3c00u);
+    CHECK(elements[48] == 0x4000u);
+    CHECK(elements[4096u * 48u - 1u] == 0x4200u);
 
-    const auto* address = rope.data();
-    const auto again = package.MaterializeRopeFp32("cos_cache");
-    CHECK(g_convert_calls == 1);
-    CHECK(again.data() == address);
+    const auto again = package.MaterializeRopeGather("cos_cache");
+    CHECK(again.data == rope.data);
+    CHECK(again.dtype == rope.dtype);
+    CHECK(again.count == rope.count);
 }
 
 void TestFp32RopeSource(
@@ -1296,16 +1100,10 @@ void TestFp32RopeSource(
     fixture.Write(fixture.manifest());
     auto package = Phi4Package::Load(fixture.path(), api, false);
 
-    g_convert_calls = 0;
-    const auto rope = package.MaterializeRopeFp32("sin_cache");
-    CHECK(g_convert_calls == 1);
-    CHECK(g_last_convert.source_type ==
-          ryzenai_corelib_data_type_fp32);
-    CHECK(g_last_convert.src_stride == 48);
-    CHECK(g_last_convert.dst_stride == 48);
-    CHECK(g_last_convert.row == 48);
-    CHECK(g_last_convert.count == 196608);
-    CHECK(rope[0] == 4.0f);
+    const auto rope = package.MaterializeRopeGather("sin_cache");
+    CHECK(rope.dtype == ryzenai_corelib_data_type_fp32);
+    CHECK(rope.count == 196608u);
+    CHECK(static_cast<const float*>(rope.data)[0] == 4.0f);
 }
 
 static_assert(!std::is_copy_constructible_v<MappedFile>);
@@ -1328,7 +1126,7 @@ int main() {
         TestExactSourceValidation(fixture, api);
         TestComponentDiagnosticsIdentifyWeightObjects(fixture, api);
         TestOwnedScaleAndNormConversions(fixture, api);
-        TestRopeUsesExactStridedContractAtGuardPage(fixture, api);
+        TestRopeGatherStaysInSourceDtypeAtGuardPage(fixture, api);
         TestFp32RopeSource(fixture, api);
         std::cout << "test_phi4_manifest: PASS\n";
         return 0;

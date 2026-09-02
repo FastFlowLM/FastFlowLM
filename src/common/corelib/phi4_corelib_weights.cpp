@@ -1,5 +1,7 @@
 #include <models/phi4/phi4_corelib_weights.hpp>
 
+#include <corelib/host_convert.hpp>
+
 #include <limits>
 #include <stdexcept>
 #include <string>
@@ -9,14 +11,12 @@
 namespace flm::phi4 {
 namespace {
 
-constexpr std::string_view kConvertCall =
-    "ryzenai_corelib_convert";
 constexpr std::string_view kMatMulCreateCall =
-    "ryzenai_corelib_matmul_bf16_weights_create_from_onnx_components";
+    "ryzenai_corelib_matmul_bf16_weights_create_onnx";
 constexpr std::string_view kMatMulGetDataCall =
     "ryzenai_corelib_matmul_bf16_weights_get_data";
 constexpr std::string_view kSsMlpCreateCall =
-    "ryzenai_corelib_ssmlp_bf16_weights_create_from_onnx_components";
+    "ryzenai_corelib_ssmlp_bf16_weights_create_onnx";
 constexpr std::string_view kSsMlpGetDataCall =
     "ryzenai_corelib_ssmlp_bf16_weights_get_data";
 
@@ -83,7 +83,7 @@ corelib::UniqueMatMulWeights CreateMatMul(
             object.n,
             constants::kGroupSize,
             false};
-        const ryzenai_corelib_matmul_bf16_onnx_weights_components
+        const ryzenai_corelib_matmul_bf16_onnx_components
             components{
                 qweight.data,
                 scales.data(),
@@ -94,6 +94,7 @@ corelib::UniqueMatMulWeights CreateMatMul(
             api->functions().matmul_weights_from_onnx(
                 &descriptor,
                 &components,
+                corelib::kPackingThreads,
                 &raw);
         corelib::UniqueMatMulWeights weights(api, raw);
         api->Check(status, kMatMulCreateCall);
@@ -172,7 +173,7 @@ corelib::UniqueSsMlpWeights CreateSsMlp(
             object.k,
             object.n,
             constants::kGroupSize};
-        const ryzenai_corelib_ssmlp_bf16_onnx_weights_components
+        const ryzenai_corelib_ssmlp_bf16_onnx_components
             components{
                 epsilon,
                 norm0.data(),
@@ -192,6 +193,7 @@ corelib::UniqueSsMlpWeights CreateSsMlp(
             api->functions().ssmlp_weights_from_onnx(
                 &descriptor,
                 &components,
+                corelib::kPackingThreads,
                 &raw);
         corelib::UniqueSsMlpWeights weights(api, raw);
         api->Check(status, kSsMlpCreateCall);
@@ -234,23 +236,11 @@ Phi4Weights Phi4Weights::Load(
     Phi4Weights result;
     result.package_ = std::move(package);
 
-    auto epsilon = std::make_shared<std::uint16_t>();
-    const float epsilon_fp32 =
-        static_cast<float>(constants::kRmsEpsilon);
-    try {
-        api->Check(
-            api->functions().convert(
-                ryzenai_corelib_data_type_fp32,
-                &epsilon_fp32,
-                ryzenai_corelib_data_type_bf16,
-                epsilon.get(),
-                1),
-            kConvertCall);
-    } catch (const std::exception& error) {
-        throw std::runtime_error(
-            "failed to materialize Phi-4 RMS epsilon: " +
-            std::string(error.what()));
-    }
+    // The packer takes epsilon as a raw BF16 blob, not as a tensor, so
+    // this is one of the two host conversions design `API-6` permits.
+    auto epsilon = std::make_shared<std::uint16_t>(
+        corelib::NarrowFp32ToBf16(
+            static_cast<float>(constants::kRmsEpsilon)));
     result.epsilon_bf16_ = std::move(epsilon);
 
     const auto& objects = result.package_->weight_objects();

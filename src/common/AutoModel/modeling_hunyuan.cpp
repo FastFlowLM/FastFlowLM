@@ -35,9 +35,10 @@ void Hunyuan::load_model(std::string model_path, json model_info, int default_co
 
     // Defaults published with the checkpoint (general.sampling.* in the GGUF).
     sampler_config config;
-    config.top_k = 1;
-    config.top_p = 0.8;
-    config.temperature = 0.0;
+    config.top_k = 20;
+    config.top_p = 0.6;
+    config.temperature = 0.7;
+    config.rep_penalty = 1.05;
 
     this->set_sampler(config);
     for (size_t i = 0; i < PROFILER_TYPE_NUM; i++) {

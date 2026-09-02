@@ -222,9 +222,34 @@ def step_logits(document: dict, index: int) -> list[int]:
 
 
 def lm_head_input(document: dict, index: int):
+    """The LM-head input row recorded at step `index`, or None.
+
+    Runs made before the per-step capture existed carry the same row in
+    `final_snapshot.last_hidden` -- it is the same `lm_input_tensor` read at
+    the same moment -- but ONLY for the last step, because the snapshot is
+    taken once at the end. The fallback is therefore restricted to that step
+    rather than applied wherever the field is missing, which would silently
+    answer a different question at every other index.
+    """
     if index == 0:
-        return document["continuation"].get("lm_head_input_bf16")
-    return document["decode"][index - 1].get("lm_head_input_bf16")
+        row = document["continuation"].get("lm_head_input_bf16")
+    else:
+        row = document["decode"][index - 1].get("lm_head_input_bf16")
+    if row is not None:
+        return row
+    if index == len(step_labels(document)) - 1:
+        return document.get("final_snapshot", {}).get("last_hidden")
+    return None
+
+
+def lm_head_input_source(document: dict, index: int) -> str:
+    if index == 0:
+        recorded = document["continuation"].get("lm_head_input_bf16")
+    else:
+        recorded = document["decode"][index - 1].get("lm_head_input_bf16")
+    if recorded is not None:
+        return "per_step_capture"
+    return "final_snapshot_fallback"
 
 
 def first_diverging_step(documents: list[dict]):
@@ -582,6 +607,7 @@ def main(argv: list[str] | None = None) -> int:
             else "no logit divergence; the last step was analysed"
         ),
         "lm_head_inputs_identical": inputs_identical,
+        "lm_head_input_source": lm_head_input_source(documents[0], index),
         "prefix_ids": documents[0].get("prefix_ids"),
         "suffix_ids": documents[0].get("suffix_ids"),
 

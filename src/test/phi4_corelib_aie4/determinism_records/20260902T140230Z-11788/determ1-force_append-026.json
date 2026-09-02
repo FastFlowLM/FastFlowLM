@@ -1,0 +1,39 @@
+{
+  "route": "append",
+  "corelib_sha256": "a523b23837c9bea3b06f8f8ae74e1e8292092eb73aaa93791022c448b865ecdb",
+  "harness_sha256": "b50a74833afa6eae9620248028cca288f4f2edcb51b2ba7e56362eb7575701f6",
+  "a": "C:\\Users\\chiz\\work\\FastFlowLM\\src\\build\\phi4-hardware\\artifacts\\20260902T140230Z-11788\\determ-a-force_append-026.json",
+  "b": "C:\\Users\\chiz\\work\\FastFlowLM\\src\\build\\phi4-hardware\\artifacts\\20260902T140230Z-11788\\determ-b-force_append-026.json",
+  "logits_bit_exact_steps": 7,
+  "logits_total_steps": 17,
+  "observed_max_abs_diff": 49.21484375,
+  "determ2_bound_ulps": 2,
+  "determ2_bound_kind": "relative_bf16_ulp",
+  "first_divergence": "decode[6]",
+  "localisation": {
+    "measured": true,
+    "step": "decode[6]",
+    "lm_head_input_elements": 3072,
+    "lm_head_input_differing_elements": 2754,
+    "source": "model_body",
+    "reason": "the two runs fed the LM head DIFFERENT rows, so the divergence entered before the LM head; DETERM-1's localisation to the 3072 x 200064 dispatch does not hold for this event"
+  },
+  "failures": [
+    "decode[6]: 74097/200064 logits differ by more than 2 BF16 ULP between two runs of the same binary. Worst at index 21996: 1.8671875 vs 1.3203125, difference 0.546875, allowed 0.015625. Do NOT widen the bound -- see _DETERM2_SEALED in this file; measure what changed.",
+    "decode[7]: 14476/200064 logits differ by more than 2 BF16 ULP between two runs of the same binary. Worst at index 778: 18.375 vs 18, difference 0.375, allowed 0.25. Do NOT widen the bound -- see _DETERM2_SEALED in this file; measure what changed.",
+    "decode[8]: 11687/200064 logits differ by more than 2 BF16 ULP between two runs of the same binary. Worst at index 77976: 32.5 vs 31.875, difference 0.625, allowed 0.5. Do NOT widen the bound -- see _DETERM2_SEALED in this file; measure what changed.",
+    "decode[9]: 17400/200064 logits differ by more than 2 BF16 ULP between two runs of the same binary. Worst at index 1148: 35.5 vs 34.75, difference 0.75, allowed 0.5. Do NOT widen the bound -- see _DETERM2_SEALED in this file; measure what changed.",
+    "decode[10]: 37707/200064 logits differ by more than 2 BF16 ULP between two runs of the same binary. Worst at index 638: 15.875 vs 16.375, difference 0.5, allowed 0.25. Do NOT widen the bound -- see _DETERM2_SEALED in this file; measure what changed.",
+    "decode[11]: 10376/200064 logits differ by more than 2 BF16 ULP between two runs of the same binary. Worst at index 5937: 26.875 vs 26.5, difference 0.375, allowed 0.25. Do NOT widen the bound -- see _DETERM2_SEALED in this file; measure what changed.",
+    "decode[12]: 6578/200064 logits differ by more than 2 BF16 ULP between two runs of the same binary. Worst at index 26923: 24.75 vs 24.25, difference 0.5, allowed 0.25. Do NOT widen the bound -- see _DETERM2_SEALED in this file; measure what changed.",
+    "decode[13]: 189574/200064 logits differ by more than 2 BF16 ULP between two runs of the same binary. Worst at index 1102: 9.8125 vs 24.375, difference 14.5625, allowed 0.25. Do NOT widen the bound -- see _DETERM2_SEALED in this file; measure what changed.",
+    "decode[14]: 190043/200064 logits differ by more than 2 BF16 ULP between two runs of the same binary. Worst at index 47880: 29.625 vs 54, difference 24.375, allowed 0.5. Do NOT widen the bound -- see _DETERM2_SEALED in this file; measure what changed.",
+    "decode[15]: 196835/200064 logits differ by more than 2 BF16 ULP between two runs of the same binary. Worst at index 16296: -0.96484375 vs 48.25, difference 49.2148, allowed 0.5. Do NOT widen the bound -- see _DETERM2_SEALED in this file; measure what changed.",
+    "emitted token sequences differ:\n      [1715, 6712, 644, 1561, 326, 19766, 79040, 9831, 1701, 64501, 472, 290, 7334, 42373, 1617, 39529, 437]\n      [1715, 6712, 644, 1561, 326, 19766, 79040, 9831, 1701, 64501, 472, 290, 7334, 18015, 316, 34257, 4194]",
+    "snapshot last_hidden: 3067/3072 elements differ between two runs of the same binary",
+    "snapshot layer0_k: 3039/35840 elements differ between two runs of the same binary",
+    "snapshot layer0_v: 3071/35840 elements differ between two runs of the same binary",
+    "snapshot layer31_k: 7280/35840 elements differ between two runs of the same binary",
+    "snapshot layer31_v: 8329/35840 elements differ between two runs of the same binary"
+  ]
+}

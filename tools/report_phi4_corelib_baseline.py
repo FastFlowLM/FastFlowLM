@@ -317,6 +317,16 @@ def determinism_baseline(records: list[dict]) -> dict:
     routes: dict[str, dict] = {}
     # I-7. Which files this baseline was actually built from, so a pooled glob
     # is auditable rather than trusted.
+    # A record that cannot be shown to come from the same FastFlow binary is
+    # dropped here, before anything is counted, rather than quietly averaged
+    # in with the rest.
+    excluded = [
+        record for record in records if not record.get("harness_sha256")
+    ]
+    excluded_sources = sorted(
+        str(record.get("_source", "<unknown>")) for record in excluded
+    )
+    records = [record for record in records if record.get("harness_sha256")]
     sources = sorted(
         str(record.get("_source", "<unknown>")) for record in records
     )
@@ -344,7 +354,6 @@ def determinism_baseline(records: list[dict]) -> dict:
         hashes = {
             record.get(field) for record in records if record.get(field)
         }
-        missing = [record for record in records if not record.get(field)]
         if len(hashes) > 1:
             blocking.append(
                 f"the records do not all share one {label} "
@@ -352,12 +361,21 @@ def determinism_baseline(records: list[dict]) -> dict:
                 f"one binary and cannot be pooled into a baseline: "
                 + ", ".join(sorted(value[:16] for value in hashes))
             )
-        if missing and records:
-            blocking.append(
-                f"{len(missing)} record(s) carry no {label}, so they cannot "
-                f"be shown to describe the same binary as the rest. Re-run "
-                f"them against a current harness rather than pooling them."
-            )
+    if excluded:
+        # EXCLUDED, NOT BLOCKED, and counted.
+        #
+        # A record predating the harness-hash field cannot be shown to belong
+        # to the pool, so it must not be counted. But refusing to produce any
+        # baseline while such a record exists anywhere under the glob would
+        # make the committed DETERM-4 evidence permanently unusable, which is
+        # the opposite of why it is committed. It is dropped, the count and
+        # the reason are stated, and `sources` lists exactly what WAS used.
+        problems.append(
+            f"{len(excluded)} record(s) carry no FastFlow harness SHA-256 "
+            f"and were EXCLUDED from the pooled figures: they cannot be shown "
+            f"to describe the same binary as the rest. They remain committed "
+            f"as evidence and are listed under `excluded_sources`."
+        )
     if not records:
         blocking.append("no DETERM-1 records were supplied")
 
@@ -515,6 +533,7 @@ def determinism_baseline(records: list[dict]) -> dict:
         and gate_failures == 0
         and all(entry["is_baseline"] for entry in routes.values()),
         "sources": sources,
+        "excluded_sources": excluded_sources,
         "blocking_problems": blocking,
         "problems": blocking + problems,
     }

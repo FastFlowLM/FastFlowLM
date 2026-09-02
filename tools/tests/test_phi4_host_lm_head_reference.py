@@ -31,6 +31,7 @@ from tools.phi4_host_lm_head_reference import (
     dequantise_rows,
     first_diverging_step,
     lm_head_input,
+    lm_head_input_source,
     step_labels,
     step_logits,
     widen_bf16,
@@ -205,10 +206,34 @@ class StepSelectionTests(unittest.TestCase):
     def test_a_single_document_has_no_diverging_step(self):
         self.assertIsNone(first_diverging_step([_document([[1]])]))
 
-    def test_a_missing_input_reads_as_absent_rather_than_empty(self):
+    def test_a_missing_input_at_the_last_step_falls_back_to_the_snapshot(self):
+        # Runs predating the per-step capture carry the same row in
+        # final_snapshot.last_hidden -- the same tensor read at the same
+        # moment -- but only for the LAST step, because the snapshot is taken
+        # once at the end.
         document = _document([[1], [2]])
         del document["decode"][0]["lm_head_input_bf16"]
+        document["final_snapshot"] = {"last_hidden": [7, 7, 7, 7]}
+        self.assertEqual(lm_head_input(document, 1), [7, 7, 7, 7])
+        self.assertEqual(
+            lm_head_input_source(document, 1), "final_snapshot_fallback"
+        )
+
+    def test_the_fallback_does_not_apply_to_an_earlier_step(self):
+        # Applying it anywhere the field is missing would answer a different
+        # question at every index but the last.
+        document = _document([[1], [2], [3]])
+        del document["decode"][0]["lm_head_input_bf16"]
+        document["final_snapshot"] = {"last_hidden": [7, 7, 7, 7]}
         self.assertIsNone(lm_head_input(document, 1))
+
+    def test_a_recorded_input_is_preferred_over_the_snapshot(self):
+        document = _document([[1], [2]], [[1, 1, 1, 1], [5, 5, 5, 5]])
+        document["final_snapshot"] = {"last_hidden": [9, 9, 9, 9]}
+        self.assertEqual(lm_head_input(document, 1), [5, 5, 5, 5])
+        self.assertEqual(
+            lm_head_input_source(document, 1), "per_step_capture"
+        )
 
 
 def _run(label, mean_signed_ulp=0.0, mean_abs_ulp=0.25):

@@ -778,22 +778,34 @@ class BinaryIdentityTests(unittest.TestCase):
             baseline["blocking_problems"],
         )
 
-    def test_a_record_with_no_harness_hash_blocks_the_baseline(self):
+    def test_a_record_with_no_harness_hash_is_excluded_and_counted(self):
         # A record predating the field cannot be shown to belong to the pool,
         # and silently including it is how a glob over a build tree turns into
-        # a baseline nobody can reproduce.
-        stale = _determ("append", 17, 17, 0.0)
+        # a baseline nobody can reproduce. It is dropped, not blocked:
+        # refusing to produce a baseline at all while such a record exists
+        # anywhere under the glob would make the committed DETERM-4 evidence
+        # permanently unusable.
+        stale = _determ("append", 0, 17, 48.0)
+        stale["_source"] = "old/determ1-force_append-010.json"
         del stale["harness_sha256"]
-        records = [stale] + _determ_runs("append", 32) + _determ_runs(
+        records = [stale] + _determ_runs("append", 33) + _determ_runs(
             "reprefill", 33
         )
         baseline = determinism_baseline(records)
+        self.assertEqual(baseline["blocking_problems"], [])
         self.assertTrue(
             any(
-                "harness" in problem.lower()
-                for problem in baseline["blocking_problems"]
+                "EXCLUDED" in problem for problem in baseline["problems"]
             ),
-            baseline["blocking_problems"],
+            baseline["problems"],
+        )
+        # And it really is excluded: 33 append runs counted, not 34, and the
+        # divergent one is not dragged into the rate.
+        self.assertEqual(baseline["routes"]["append"]["runs"], 33)
+        self.assertEqual(baseline["routes"]["append"]["run_bit_identity_rate"], 1.0)
+        self.assertEqual(
+            baseline["excluded_sources"],
+            ["old/determ1-force_append-010.json"],
         )
 
     def test_the_sources_are_recorded(self):

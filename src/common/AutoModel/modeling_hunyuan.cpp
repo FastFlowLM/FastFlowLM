@@ -6,12 +6,16 @@
 /// \note AutoModel wrapper for the `hunyuan-dense` engine (Hy-MT2-1.8B).
 
 #include "AutoModel/modeling_hunyuan.hpp"
+#include "models/hunyuan/hunyuan_npu.hpp"
 
 /************              hunyuan-dense family            **************/
 Hunyuan::Hunyuan(flm_rt::device* npu_device_inst) : AutoModel(npu_device_inst, "Hunyuan") {
     // the translator emits one short line per turn and the caller already has it
     // from the stream / return value, so the raw dump would only double the log
     this->log_raw_output = false;
+    // every turn either rewinds to the pinned prefix or clears, so the kv state
+    // the trailing eos forward exists to preserve is discarded either way
+    this->forward_on_eos = false;
 }
 
 void Hunyuan::load_model(std::string model_path, json model_info, int default_context_length, bool enable_preemption) {
@@ -31,9 +35,9 @@ void Hunyuan::load_model(std::string model_path, json model_info, int default_co
 
     // Defaults published with the checkpoint (general.sampling.* in the GGUF).
     sampler_config config;
-    config.top_k = 20;
+    config.top_k = 1;
     config.top_p = 0.8;
-    config.temperature = 0.7;
+    config.temperature = 0.0;
 
     this->set_sampler(config);
     for (size_t i = 0; i < PROFILER_TYPE_NUM; i++) {
@@ -83,26 +87,99 @@ bool Hunyuan::insert(chat_meta_info_t& meta_info, lm_uniform_input_t& input, std
         input.audio_payload_types.clear();
     }
 
+    nlohmann::ordered_json messages = nlohmann::ordered_json::array();
     if (!input.messages.empty()) { // already a formated messages, usually from REST API
         for (auto& message : input.messages) {
             message.erase("images");
             message.erase("audios");
         }
-        templated_text = this->apply_chat_template(input.messages, input.tools);
+        messages = input.messages;
     }
-    else if (!input.prompt.empty()) { // a pure text, usually from the cli
-        nlohmann::ordered_json messages;
-
+    else { // a pure text, usually from the cli
         messages.push_back({ {"role", "user"}, {"content", input.prompt} });
-        templated_text = this->apply_chat_template(messages);
     }
+
+    // The template renders a system turn only at messages[0], and that is where
+    // set_system_prompt() primed the pinned prefix, so it goes in front. A caller
+    // that brought its own system turn keeps it: overriding it here would leave
+    // the prompt no longer matching what is pinned.
+    if (!this->system_prompt.empty() && messages[0].value("role", "") != "system") {
+        messages.insert(messages.begin(), nlohmann::ordered_json{
+            {"role", "system"}, {"content", this->system_prompt} });
+    }
+    templated_text = this->apply_chat_template(messages, input.tools);
 
     std::vector<int> tokens = this->tokenizer->encode(templated_text);
 
     this->profiler_list[TKOEN_ENCODE_TIME].stop(tokens.size());
 
     // hardware
+    if (meta_info.restore_allowed && this->system_tokens > 0) {
+        // rewind to the pinned system turn instead of clearing: _shared_insert
+        // then prefix-matches against checkpoint_his and prefills only the tail.
+        // The token history has to move back with the cache or that match fails.
+        hunyuan_npu* engine = dynamic_cast<hunyuan_npu*>(this->lm_engine.get());
+        this->total_tokens = engine->restore();
+        this->token_history = this->checkpoint_his;
+        // the turns are independent translations, so nothing carries over
+        this->sampler->reset_penalties();
+        this->last_token = -1;
+    }
     return this->_shared_insert(meta_info, tokens, is_cancelled, nullptr);
+}
+
+int Hunyuan::set_system_prompt(const std::string& system_text) {
+    this->system_prompt = system_text;
+    this->clear_context();
+    this->system_tokens = 0;
+    if (system_text.empty()) {
+        return 0;  // no system turn to pin, every prompt prefills in full
+    }
+
+    // The system turn is not the whole of what the prompts share: the user-turn
+    // marker that opens after it is constant too. Template two prompts that
+    // differ only in the first character of the user text and take their longest
+    // common token prefix, so the reusable span is exact, merges across the
+    // role boundary included.
+    auto templated = [&](const std::string& user_text) {
+        nlohmann::ordered_json messages = nlohmann::ordered_json::array();
+        messages.push_back({ {"role", "system"}, {"content", system_text} });
+        messages.push_back({ {"role", "user"}, {"content", user_text} });
+        return this->apply_chat_template(messages);
+    };
+    std::vector<int> probe_a = this->tokenizer->encode(templated("A"));
+    std::vector<int> probe_b = this->tokenizer->encode(templated("\xe4\xbd\xa0"));  // U+4F60, a cjk probe
+
+    size_t shared = 0;
+    while (shared < probe_a.size() && shared < probe_b.size() && probe_a[shared] == probe_b[shared]) {
+        shared++;
+    }
+    if (shared == 0) {
+        header_print("WARNING", "Could not isolate a reusable system prefix, falling back to full prefill");
+        return 0;
+    }
+
+    std::vector<int> tokens(probe_a.begin(), probe_a.begin() + shared);
+    chat_meta_info_t meta_info;
+    meta_info.restore_allowed = false;
+    if (!this->_shared_insert(meta_info, tokens, [] { return false; }, nullptr)) {
+        this->clear_context();
+        return 0;
+    }
+
+    // pin it: restore() comes back here, and checkpoint_his is what
+    // _shared_insert prefix-matches the next prompt against
+    this->checkpoint_his = this->token_history;
+    hunyuan_npu* engine = dynamic_cast<hunyuan_npu*>(this->lm_engine.get());
+    engine->checkpoint();
+    this->system_tokens = static_cast<int>(shared);
+
+    // the system turn costs nothing per turn from here on, so it should not sit
+    // in the per-turn prefill statistics either
+    for (size_t i = 0; i < PROFILER_TYPE_NUM; i++) {
+        this->profiler_list[i].reset();
+    }
+    return this->system_tokens;
 }
 
 std::string Hunyuan::generate(chat_meta_info_t& meta_info, int length_limit, std::ostream& os, std::function<bool()> is_cancelled) {

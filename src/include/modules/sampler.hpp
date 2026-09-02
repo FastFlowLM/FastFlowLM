@@ -94,6 +94,16 @@ public:
     void sampler_penalty_apply();
     void sampler_penalty_apply_sparse();
     
+    /// \brief argmax shortcut taken when top_k == 1
+    /// \param x the raw logits
+    /// \return the winning token id
+    /// \note softmax, top-p, min-p and temperature are all order preserving, so
+    ///       with k == 1 the winner is just the argmax of the (penalised) logits.
+    ///       Going through the general path would allocate and partial_sort a
+    ///       vocab-sized array of triples and run three full-vocab softmaxes for
+    ///       a result that never depends on any of it.
+    int sample_greedy(buffer<bf16>& x);
+
     void sampler_topk_apply(int k);
     void sampler_topp_apply(float p);
     void sampler_minp_apply(float p);

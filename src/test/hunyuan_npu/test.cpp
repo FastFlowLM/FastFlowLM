@@ -5,9 +5,10 @@
 /// \note The model is a translator, so every turn is independent: the context is
 ///       cleared before each prompt and the history never accumulates. Each
 ///       prompt is the fixed translation instruction followed by the source text.
-///       The harness walks the whole danmaku corpus in bench_samples.hpp, throws
-///       away the first few turns as warm-up, and reports the distribution of the
-///       end-to-end latency over the rest.
+///       The harness first burns a few turns as a separate warm-up pass whose
+///       timings are thrown away, then walks the whole danmaku corpus in
+///       bench_samples.hpp as measured turns -- the warm-up samples included, so
+///       every line of the corpus contributes to the reported distribution.
 
 #include <algorithm>
 #include <chrono>
@@ -29,14 +30,18 @@
 
 flm_rt::device npu_device_global;
 
-/// \brief the fixed translator instruction every prompt starts with
-static const std::string kTranslatePrefix =
+/// \brief the fixed translator instruction, installed as the system prompt
+/// \note the model prepends this to every prompt itself, so the user turn below
+///       carries the source text alone.
+static const std::string kSystemPrompt =
     "将以下文本翻译为英语，注意只需要输出翻译后的结果，不要额外解释。"
-    "输出必须全部使用英语，不要输出源语言或原文：";
+    "输出必须全部使用英语，不要输出源语言或原文";
 
-/// \brief turns discarded before the timings are collected
+/// \brief turns run before the measured pass, with their timings discarded
 /// \note the first calls pay for the lazy xclbin / weight paging, so they sit an
 ///       order of magnitude above steady state and would swamp every statistic.
+///       They are drawn from the head of the corpus but do not consume it: the
+///       measured pass starts over at sample 0.
 static const int kDefaultWarmup = 3;
 
 /// \brief one measured translation turn
@@ -48,7 +53,18 @@ struct turn_result_t {
     double total_ms = 0.0;    ///< end to end, clear_context through last token
     int prompt_tokens = 0;    ///< tokens after the chat template, instruction included
     int gen_tokens = 0;       ///< tokens the model emitted
+    // engine-side breakdown, to tell npu time from harness overhead
+    double npu_prefill_ms = 0.0;  ///< the prefill call itself
+    double npu_decode_ms = 0.0;   ///< the forward calls
+    double sampling_ms = 0.0;     ///< logit post-processing
+    double encode_ms = 0.0;       ///< chat template + tokenizer encode
+    double detok_ms = 0.0;        ///< per-token tokenizer decode
 };
+
+/// \brief a profiler slot that accumulates across turns, so the turn is the delta
+static double slot_delta(double after, double before) {
+    return after - before;
+}
 
 /// \brief milliseconds between two steady-clock stamps
 static double ms_since(const std::chrono::steady_clock::time_point& t0) {
@@ -84,7 +100,7 @@ static std::string csv_quote(const std::string& s) {
     return out;
 }
 
-/// \brief clear the context and run one standalone translation turn
+/// \brief run one standalone translation turn
 /// \param chat the loaded engine
 /// \param text source text appended to the translator instruction
 /// \param length_limit max tokens to generate
@@ -92,18 +108,22 @@ static std::string csv_quote(const std::string& s) {
 /// \note prefill and decode are driven separately so the two phases can be timed
 ///       apart; the generated text is captured into a buffer instead of being
 ///       streamed, keeping console I/O out of the measurement.
+/// \note the context is rewound to the pinned system turn rather than cleared,
+///       so the turn stays independent but only the source text is prefilled.
 static turn_result_t run_turn(std::unique_ptr<AutoModel>& chat, const std::string& text,
-                              int length_limit) {
+                              int length_limit, bool pinned) {
     turn_result_t r;
     r.source = text;
 
-    chat->clear_context();
+    if (!pinned) {
+        chat->clear_context();  // nothing pinned: every turn prefills the lot
+    }
 
     nlohmann::ordered_json messages = nlohmann::ordered_json::array();
-    messages.push_back({ {"role", "user"}, {"content", kTranslatePrefix + text} });
+    messages.push_back({ {"role", "user"}, {"content", text} });
 
     chat_meta_info_t meta_info;
-    meta_info.restore_allowed = false;
+    meta_info.restore_allowed = pinned;  // rewind to the pinned system turn
 
     lm_uniform_input_t input;
     input.messages = messages;
@@ -128,6 +148,28 @@ static turn_result_t run_turn(std::unique_ptr<AutoModel>& chat, const std::strin
     r.gen_tokens = chat->get_current_context_length() - r.prompt_tokens;
     r.translation = trim(out.empty() ? sink.str() : out);
     return r;
+}
+
+/// \brief fill the engine-side breakdown of a turn from the profiler deltas
+static void record_breakdown(std::unique_ptr<AutoModel>& chat, turn_result_t& r,
+                             double prev[5]) {
+    double now[5] = {
+        chat->get_profiler_ms(AutoModel::SLOT_PREFILL),
+        chat->get_profiler_ms(AutoModel::SLOT_DECODING),
+        chat->get_profiler_ms(AutoModel::SLOT_SAMPLING),
+        chat->get_profiler_ms(AutoModel::SLOT_ENCODE),
+        chat->get_profiler_ms(AutoModel::SLOT_DECODE),
+    };
+    // _shared_generate resets the two decode slots on entry, so they already
+    // hold this turn alone; the rest run since the last clear and need a delta
+    r.npu_prefill_ms = slot_delta(now[0], prev[0]);
+    r.npu_decode_ms = now[1];
+    r.sampling_ms = slot_delta(now[2], prev[2]);
+    r.encode_ms = slot_delta(now[3], prev[3]);
+    r.detok_ms = now[4];
+    for (int i = 0; i < 5; i++) {
+        prev[i] = now[i];
+    }
 }
 
 /// \brief the distribution of one metric over the measured turns
@@ -217,8 +259,9 @@ int main(int argc, char* argv[]) {
     desc.add_options()("model,m", arg_utils::po::value<std::string>()->default_value("hunyuan:1.8b"), "Model tag");
     desc.add_options()("Preemption,p", arg_utils::po::value<bool>()->default_value(false), "Preemption");
     desc.add_options()("Length,l", arg_utils::po::value<int>()->default_value(512), "Max generated tokens");
-    desc.add_options()("warmup,w", arg_utils::po::value<int>()->default_value(kDefaultWarmup), "Warm-up turns excluded from the statistics");
+    desc.add_options()("warmup,w", arg_utils::po::value<int>()->default_value(kDefaultWarmup), "Discarded warm-up turns run before the measured pass");
     desc.add_options()("count,n", arg_utils::po::value<int>()->default_value(0), "Turns to run, 0 = the whole corpus");
+    desc.add_options()("pin", arg_utils::po::value<bool>()->default_value(true), "Pin the constant instruction in the KV cache at init");
     desc.add_options()("csv,c", arg_utils::po::value<std::string>()->default_value("bench.csv"), "Per-turn CSV to write, empty to skip");
     arg_utils::po::store(arg_utils::po::parse_command_line(argc, argv, desc), vm);
 
@@ -227,6 +270,7 @@ int main(int argc, char* argv[]) {
     int length_limit = vm["Length"].as<int>();
     int warmup = vm["warmup"].as<int>();
     int count = vm["count"].as<int>();
+    bool pin_prefix = vm["pin"].as<bool>();
     std::string csv_path = vm["csv"].as<std::string>();
     std::cout << "Model: " << tag << std::endl;
 
@@ -236,11 +280,6 @@ int main(int argc, char* argv[]) {
     }
     if (warmup < 0) {
         warmup = 0;
-    }
-    if (static_cast<size_t>(warmup) >= total_turns) {
-        std::cout << "Warm-up (" << warmup << ") covers every one of the " << total_turns
-                  << " turns, nothing left to measure" << std::endl;
-        return 1;
     }
 
     std::string exe_dir = utils::get_executable_directory();
@@ -269,23 +308,54 @@ int main(int argc, char* argv[]) {
 
     chat->set_topk(1);   // greedy: deterministic output for testing
 
-    // the instruction itself is constant, so report only its cost in tokens
-    std::string prefix = kTranslatePrefix;
-    std::cout << "Constant instruction: " << chat->prepare_benchmark(prefix).first
-              << " tokens" << std::endl;
-    std::cout << "Corpus: " << total_turns << " turns (" << warmup << " warm-up, "
-              << (total_turns - warmup) << " measured), length limit " << length_limit
+    // The instruction never changes, so it goes in as the system prompt and its
+    // prefill is pinned once here. Every turn below rewinds to that point, which
+    // keeps the turns independent while keeping the instruction out of the
+    // per-turn prefill. This is also what pays the cold-start cost: the first
+    // real prompt would otherwise absorb the lazy kernel / weight paging in its
+    // own ttft. Without --pin the system prompt is still installed, so both arms
+    // of the A/B send the identical prompt; only the pinning differs.
+    Hunyuan* hunyuan = static_cast<Hunyuan*>(chat.get());
+    std::chrono::steady_clock::time_point t_prime = std::chrono::steady_clock::now();
+    int prefix_tokens = hunyuan->set_system_prompt(kSystemPrompt);
+    double prime_ms = ms_since(t_prime);
+    if (!pin_prefix) {
+        chat->clear_context();  // keep the system turn, drop the pin
+    }
+    std::string system_text = kSystemPrompt;  // prepare_benchmark wants a mutable ref
+    std::cout << "System prompt: " << chat->prepare_benchmark(system_text).first
+              << " tokens, " << (pin_prefix ? prefix_tokens : 0)
+              << " pinned in the KV cache in "
+              << std::fixed << std::setprecision(1) << prime_ms << " ms" << std::endl;
+    std::cout << "Corpus: " << total_turns << " measured turns, preceded by " << warmup
+              << " discarded warm-up turns, length limit " << length_limit
               << std::endl << std::endl;
+
+    double prev_slots[5] = {0.0, 0.0, 0.0, 0.0, 0.0};
+
+    // Warm-up pass. The samples come from the head of the corpus and wrap if more
+    // warm-up turns were asked for than there are samples; nothing here is kept,
+    // and the measured pass below re-runs the whole corpus from sample 0.
+    for (int i = 0; i < warmup; i++) {
+        const std::string& text = kBenchSamples[static_cast<size_t>(i) % kBenchSamples.size()];
+        turn_result_t r = run_turn(chat, text, length_limit, pin_prefix);
+        record_breakdown(chat, r, prev_slots);  // keeps the profiler baseline current
+        std::cout << "[warm-up " << std::setw(2) << (i + 1) << "/" << warmup << "]"
+                  << " " << std::fixed << std::setprecision(1) << std::setw(8) << r.total_ms
+                  << " ms  " << std::setw(3) << r.gen_tokens << " tok" << std::endl;
+    }
+    if (warmup > 0) {
+        std::cout << std::endl;
+    }
 
     std::vector<turn_result_t> results;
     results.reserve(total_turns);
     for (size_t i = 0; i < total_turns; i++) {
-        bool is_warmup = i < static_cast<size_t>(warmup);
-        turn_result_t r = run_turn(chat, kBenchSamples[i], length_limit);
+        turn_result_t r = run_turn(chat, kBenchSamples[i], length_limit, pin_prefix);
+        record_breakdown(chat, r, prev_slots);
         results.push_back(r);
 
         std::cout << "[" << std::setw(3) << (i + 1) << "/" << total_turns << "]"
-                  << (is_warmup ? " (warm-up)" : "          ")
                   << " " << std::fixed << std::setprecision(1) << std::setw(8) << r.total_ms
                   << " ms  " << std::setw(3) << r.gen_tokens << " tok  "
                   << r.source << "  ->  "
@@ -293,10 +363,11 @@ int main(int argc, char* argv[]) {
     }
     std::cout << std::endl;
 
-    // the warm-up turns stay out of every sample below
+    // every recorded turn is a measured one: the warm-up pass kept nothing
     std::vector<double> total_ms, prefill_ms, decode_ms, decode_tps, e2e_tps, gen_tokens;
+    std::vector<double> npu_prefill_ms, npu_decode_ms, sampling_ms, encode_ms, detok_ms, overhead_ms;
     size_t empty_outputs = 0;
-    for (size_t i = static_cast<size_t>(warmup); i < results.size(); i++) {
+    for (size_t i = 0; i < results.size(); i++) {
         const turn_result_t& r = results[i];
         if (r.translation.empty()) {
             empty_outputs++;
@@ -304,6 +375,14 @@ int main(int argc, char* argv[]) {
         total_ms.push_back(r.total_ms);
         prefill_ms.push_back(r.prefill_ms);
         decode_ms.push_back(r.decode_ms);
+        npu_prefill_ms.push_back(r.npu_prefill_ms);
+        npu_decode_ms.push_back(r.npu_decode_ms);
+        sampling_ms.push_back(r.sampling_ms);
+        encode_ms.push_back(r.encode_ms);
+        detok_ms.push_back(r.detok_ms);
+        // whatever the turn cost that no engine profiler claims
+        overhead_ms.push_back(r.total_ms - r.npu_prefill_ms - r.npu_decode_ms
+                              - r.sampling_ms - r.encode_ms - r.detok_ms);
         gen_tokens.push_back(static_cast<double>(r.gen_tokens));
         if (r.gen_tokens > 0 && r.decode_ms > 0.0) {
             decode_tps.push_back(r.gen_tokens * 1000.0 / r.decode_ms);
@@ -315,7 +394,7 @@ int main(int argc, char* argv[]) {
 
     stats_t total_stats = summarize(total_ms);
     std::cout << "=== Statistics over " << total_stats.n << " measured turns ("
-              << warmup << " warm-up turns discarded) ===" << std::endl;
+              << warmup << " warm-up turns run and discarded first) ===" << std::endl;
     std::cout << "  " << std::left << std::setw(22) << "metric" << std::right
               << std::setw(10) << "mean" << std::setw(10) << "stddev" << std::setw(9) << "cv%"
               << std::setw(10) << "min" << std::setw(10) << "p50" << std::setw(10) << "p90"
@@ -327,14 +406,24 @@ int main(int argc, char* argv[]) {
     print_stats_row("generated", summarize(gen_tokens), "tok");
     print_stats_row("decode speed", summarize(decode_tps), "tok/s");
     print_stats_row("e2e speed", summarize(e2e_tps), "tok/s");
+    std::cout << std::endl << "  -- where a turn goes --" << std::endl;
+    print_stats_row("npu prefill", summarize(npu_prefill_ms), "ms");
+    print_stats_row("npu decode", summarize(npu_decode_ms), "ms");
+    print_stats_row("sampling", summarize(sampling_ms), "ms");
+    print_stats_row("encode+template", summarize(encode_ms), "ms");
+    print_stats_row("detokenize", summarize(detok_ms), "ms");
+    print_stats_row("unaccounted", summarize(overhead_ms), "ms");
 
     double wall_ms = 0.0;
     double tokens = 0.0;
-    for (size_t i = static_cast<size_t>(warmup); i < results.size(); i++) {
+    for (size_t i = 0; i < results.size(); i++) {
         wall_ms += results[i].total_ms;
         tokens += results[i].gen_tokens;
     }
     std::cout << std::endl
+              << "  First-prompt prefill:  " << std::fixed << std::setprecision(2)
+              << results.front().prefill_ms << " ms (first measured turn; with"
+              << " --warmup 0 this also carries the cold-start cost)" << std::endl
               << "  Measured wall clock:   " << std::fixed << std::setprecision(2)
               << (wall_ms / 1000.0) << " s" << std::endl
               << "  Tokens generated:      " << static_cast<long long>(tokens) << std::endl
@@ -350,10 +439,10 @@ int main(int argc, char* argv[]) {
             // Excel decodes a BOM-less CSV in the system ANSI codepage and mangles
             // the Chinese columns, so the UTF-8 BOM is written up front
             csv << "\xEF\xBB\xBF";
-            csv << "index,warmup,prompt_tokens,gen_tokens,prefill_ms,decode_ms,e2e_ms,e2e_tok_per_s,source,translation\n";
+            csv << "index,prompt_tokens,gen_tokens,prefill_ms,decode_ms,e2e_ms,e2e_tok_per_s,source,translation\n";
             for (size_t i = 0; i < results.size(); i++) {
                 const turn_result_t& r = results[i];
-                csv << i << "," << (i < static_cast<size_t>(warmup) ? 1 : 0) << ","
+                csv << i << ","
                     << r.prompt_tokens << "," << r.gen_tokens << ","
                     << std::fixed << std::setprecision(3)
                     << r.prefill_ms << "," << r.decode_ms << "," << r.total_ms << ","

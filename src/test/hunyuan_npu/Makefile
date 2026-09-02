@@ -15,6 +15,8 @@
 #   COUNT=0         - turns to run, 0 = the whole corpus in bench_samples.hpp
 #   LENGTH=512      - max generated tokens per turn
 #   CSV=bench.csv   - per-turn CSV written next to the executable, empty to skip
+#   PIN=1           - 1 pins the constant instruction in the KV cache at init,
+#                     0 re-prefills it every turn (the A/B reference)
 #
 # =============================================================================
 -include ../common.mk
@@ -23,8 +25,9 @@ WARMUP ?= 3
 COUNT  ?= 0
 LENGTH ?= 512
 CSV    ?= bench.csv
+PIN    ?= 1
 
-BENCH_ARGS := --warmup $(WARMUP) --count $(COUNT) --Length $(LENGTH)
+BENCH_ARGS := --warmup $(WARMUP) --count $(COUNT) --Length $(LENGTH) --pin $(PIN)
 ifneq ($(CSV),)
 BENCH_ARGS += --csv $(CSV)
 endif

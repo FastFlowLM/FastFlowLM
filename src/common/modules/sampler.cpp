@@ -232,7 +232,12 @@ void Sampler::sampler_topk_apply(int k) {
         pairs.begin() + k,
         pairs.end(),
         [](const logits_t& a, const logits_t& b) {
-            return a.logits > b.logits;
+            // bf16 logits tie exactly often enough to matter over a 100k+ vocab,
+            // and partial_sort is not stable, so a bare `>` leaves the winner of a
+            // tie down to the sort's internals. Lowest id wins instead: the order
+            // is then reproducible and matches sample_greedy()'s argmax.
+            if (a.logits != b.logits) { return a.logits > b.logits; }
+            return a.token_id < b.token_id;
         }
     );
 
@@ -347,8 +352,101 @@ void Sampler::ring_buffer_update_sparse(int sampled_index) {
 /// \brief Sample the token
 /// \param x the input buffer
 /// \return the sampled token
+int Sampler::sample_greedy(buffer<bf16>& x) {
+    const bool penalties_active =
+        (this->repeat_last_n != 0) &&
+        (this->rep_penalty != 1.0f || this->freq_penalty != 0.0f || this->pre_penalty != 0.0f);
+
+    float best = -std::numeric_limits<float>::infinity();
+    int best_id = 0;
+
+    if (penalties_active) {
+        // penalties reorder the logits, so they have to land before the argmax.
+        // that needs the fp32 copy, but nothing past it does.
+        #if USEAVX2
+        const int simd_width = 8;
+        int i = 0;
+        for (; i <= in_features - simd_width; i += simd_width) {
+            __m128i bf16_vals_x = _mm_loadu_si128((__m128i*)&x[i]);
+            __m256 fp32_vals_x = bf16o_fp32(bf16_vals_x);
+            _mm256_storeu_ps(&this->logits[i], fp32_vals_x);
+        }
+        for (; i < in_features; i++) {
+            this->logits[i] = x[i];
+        }
+        #else
+        for (int i = 0; i < in_features; i++) {
+            this->logits[i] = x[i];
+        }
+        #endif
+        sampler_penalty_apply_sparse();
+        for (int i = 0; i < in_features; i++) {
+            if (this->logits[i] > best) {
+                best = this->logits[i];
+                best_id = i;
+            }
+        }
+    }
+    else {
+        // Nothing rewrites the logits, so scan them where they lie: no
+        // vocab-sized fp32 buffer is written at all. The logits come back in
+        // device-mapped memory where element-at-a-time reads are punishing, so
+        // the scan pulls 8 at a time and keeps the running argmax in lanes.
+        #if USEAVX2
+        const int simd_width = 8;
+        int i = 0;
+        __m256 vmax = _mm256_set1_ps(-std::numeric_limits<float>::infinity());
+        __m256i vidx = _mm256_set1_epi32(0);
+        __m256i vcur = _mm256_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7);
+        const __m256i vstep = _mm256_set1_epi32(simd_width);
+        for (; i <= in_features - simd_width; i += simd_width) {
+            __m256 v = bf16o_fp32(_mm_loadu_si128((__m128i*)&x[i]));
+            __m256 gt = _mm256_cmp_ps(v, vmax, _CMP_GT_OQ);
+            vmax = _mm256_blendv_ps(vmax, v, gt);
+            vidx = _mm256_castps_si256(_mm256_blendv_ps(_mm256_castsi256_ps(vidx),
+                                                        _mm256_castsi256_ps(vcur), gt));
+            vcur = _mm256_add_epi32(vcur, vstep);
+        }
+        alignas(32) float lane_max[simd_width];
+        alignas(32) int lane_idx[simd_width];
+        _mm256_store_ps(lane_max, vmax);
+        _mm256_store_si256((__m256i*)lane_idx, vidx);
+        for (int j = 0; j < simd_width; j++) {
+            // strictly greater keeps the lowest index on a tie, in both loops
+            if (lane_max[j] > best) {
+                best = lane_max[j];
+                best_id = lane_idx[j];
+            }
+        }
+        for (; i < in_features; i++) {
+            float v = x[i];
+            if (v > best) {
+                best = v;
+                best_id = i;
+            }
+        }
+        #else
+        for (int i = 0; i < in_features; i++) {
+            float v = x[i];
+            if (v > best) {
+                best = v;
+                best_id = i;
+            }
+        }
+        #endif
+    }
+
+    // callers that inspect the surviving candidates still get a consistent view
+    this->top_k_logits.assign(1, logits_t{ best, best_id, 1.0f });
+    ring_buffer_update_sparse(best_id);
+    return best_id;
+}
+
 int Sampler::sample(buffer<bf16>& x) {
     // PRNG is seeded once at construction, no per-call seeding needed
+    if (this->top_k == 1) {
+        return sample_greedy(x);
+    }
 
     // COPY FROM `x` → `this->logits[]`
     #if USEAVX2

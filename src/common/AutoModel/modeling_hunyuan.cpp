@@ -68,7 +68,6 @@ chat_template_type_t Hunyuan::get_chat_template_type() {
 
 bool Hunyuan::insert(chat_meta_info_t& meta_info, lm_uniform_input_t& input, std::function<bool()> is_cancelled) {
     // preprocess
-    this->profiler_list[TKOEN_ENCODE_TIME].start();
     std::string templated_text;
     if (input.messages.empty() && input.prompt.empty()) {
         header_print("WARNING", "No messages or prompt provided");
@@ -107,6 +106,27 @@ bool Hunyuan::insert(chat_meta_info_t& meta_info, lm_uniform_input_t& input, std
         messages.insert(messages.begin(), nlohmann::ordered_json{
             {"role", "system"}, {"content", this->system_prompt} });
     }
+
+    // Pin whatever system turn this prompt carries. A REST caller sends its own
+    // system message and never calls set_system_prompt(), so without this the pin
+    // would only ever exist for in-process users and every request would prefill
+    // the instruction again. Re-pinning costs one prefill of the prefix and only
+    // happens when the system text actually changes, so a stream of requests
+    // sharing an instruction pays it once.
+    if (this->pin_enabled) {
+        std::string sys;
+        if (!messages.empty() && messages[0].value("role", "") == "system") {
+            const auto& content = messages[0]["content"];
+            if (content.is_string()) {
+                sys = content.get<std::string>();
+            }
+        }
+        if (sys != this->pinned_system_text) {
+            this->_pin_system_prefix(sys);
+        }
+    }
+
+    this->profiler_list[TKOEN_ENCODE_TIME].start();
     templated_text = this->apply_chat_template(messages, input.tools);
 
     std::vector<int> tokens = this->tokenizer->encode(templated_text);
@@ -114,24 +134,61 @@ bool Hunyuan::insert(chat_meta_info_t& meta_info, lm_uniform_input_t& input, std
     this->profiler_list[TKOEN_ENCODE_TIME].stop(tokens.size());
 
     // hardware
-    if (meta_info.restore_allowed && this->system_tokens > 0) {
-        // rewind to the pinned system turn instead of clearing: _shared_insert
-        // then prefix-matches against checkpoint_his and prefills only the tail.
-        // The token history has to move back with the cache or that match fails.
-        hunyuan_npu* engine = dynamic_cast<hunyuan_npu*>(this->lm_engine.get());
-        this->total_tokens = engine->restore();
-        this->token_history = this->checkpoint_his;
-        // the turns are independent translations, so nothing carries over
-        this->sampler->reset_penalties();
-        this->last_token = -1;
+    if (this->system_tokens > 0) {
+        // What is live in the cache is only worth keeping if it is a prefix of
+        // this prompt -- otherwise _shared_insert clears and prefills the lot.
+        size_t common = 0;
+        while (common < this->token_history.size() && common < tokens.size()
+               && this->token_history[common] == tokens[common]) {
+            common++;
+        }
+        // an empty or cleared history matches trivially but is worth nothing:
+        // it has to reach at least as far as the pin to beat rewinding to it
+        const bool history_usable = (common == this->token_history.size())
+            && this->token_history.size() >= this->system_his.size();
+        const bool pin_matches = tokens.size() >= this->system_his.size()
+            && std::equal(this->system_his.begin(), this->system_his.end(), tokens.begin());
+        // A longer usable history beats the pin; a mismatch means the pin is the
+        // most that survives, so rewind to it rather than let the clear happen.
+        // meta_info.restore_allowed is not consulted: the caller says with it that
+        // it kept the cache, and rewinding to the pin is safe either way.
+        if (!history_usable && pin_matches) {
+            // rewind to the pinned system turn instead of clearing: _shared_insert
+            // then prefix-matches against the history and prefills only the tail.
+            // The token history has to move back with the cache or that match fails.
+            hunyuan_npu* engine = dynamic_cast<hunyuan_npu*>(this->lm_engine.get());
+            this->total_tokens = engine->restore();
+            this->token_history = this->system_his;
+            this->checkpoint_his = this->system_his;
+            // the turns are independent translations, so nothing carries over
+            this->sampler->reset_penalties();
+            this->last_token = -1;
+        }
     }
     return this->_shared_insert(meta_info, tokens, is_cancelled, nullptr);
 }
 
 int Hunyuan::set_system_prompt(const std::string& system_text) {
     this->system_prompt = system_text;
+    if (!this->pin_enabled) {
+        this->clear_context();
+        return 0;
+    }
+    return this->_pin_system_prefix(system_text);
+}
+
+void Hunyuan::set_prefix_pinning(bool enabled) {
+    this->pin_enabled = enabled;
+    if (!enabled) {
+        this->_pin_system_prefix("");  // drop the pin, keep the system prompt
+    }
+}
+
+int Hunyuan::_pin_system_prefix(const std::string& system_text) {
     this->clear_context();
     this->system_tokens = 0;
+    this->system_his.clear();
+    this->pinned_system_text = system_text;
     if (system_text.empty()) {
         return 0;  // no system turn to pin, every prompt prefills in full
     }
@@ -156,7 +213,8 @@ int Hunyuan::set_system_prompt(const std::string& system_text) {
     }
     if (shared == 0) {
         header_print("WARNING", "Could not isolate a reusable system prefix, falling back to full prefill");
-        return 0;
+        return 0;  // pinned_system_text stays set: the probe is deterministic,
+                   // so retrying it on the next request would only waste a prefill
     }
 
     std::vector<int> tokens(probe_a.begin(), probe_a.begin() + shared);
@@ -164,11 +222,12 @@ int Hunyuan::set_system_prompt(const std::string& system_text) {
     meta_info.restore_allowed = false;
     if (!this->_shared_insert(meta_info, tokens, [] { return false; }, nullptr)) {
         this->clear_context();
-        return 0;
+        return 0;  // ditto: unpinned, and not retried
     }
 
-    // pin it: restore() comes back here, and checkpoint_his is what
-    // _shared_insert prefix-matches the next prompt against
+    // pin it: restore() comes back here, and this history is what the next
+    // prompt is prefix-matched against
+    this->system_his = this->token_history;
     this->checkpoint_his = this->token_history;
     hunyuan_npu* engine = dynamic_cast<hunyuan_npu*>(this->lm_engine.get());
     engine->checkpoint();

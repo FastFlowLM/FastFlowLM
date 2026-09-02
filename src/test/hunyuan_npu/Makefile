@@ -26,6 +26,8 @@ COUNT  ?= 0
 LENGTH ?= 512
 CSV    ?= bench.csv
 PIN    ?= 1
+REPEAT  ?= 5
+PWARMUP ?= 2
 
 BENCH_ARGS := --warmup $(WARMUP) --count $(COUNT) --Length $(LENGTH) --pin $(PIN)
 ifneq ($(CSV),)
@@ -33,6 +35,7 @@ BENCH_ARGS += --csv $(CSV)
 endif
 
 SOURCES += test.cpp
+SOURCES += bench_prefill.cpp
 SOURCES += ../../common/AutoModel/automodel.cpp
 SOURCES += ../../common/AutoModel/modeling_hunyuan.cpp
 SOURCES += ../../common/tokenizer/tokenizer.cpp
@@ -47,11 +50,15 @@ ifeq ($(WSL), 0)
 LDFLAGS += -lhunyuan_npu
 
 CPP_SOURCES := $(filter %.cpp,$(SOURCES))
-OBJECTS := $(addprefix $(BUILD_DIR)/,$(notdir $(CPP_SOURCES:.cpp=.o)))
+ALL_OBJS := $(addprefix $(BUILD_DIR)/,$(notdir $(CPP_SOURCES:.cpp=.o)))
+# test.cpp and bench_prefill.cpp each carry a main(), so they link into separate
+# executables over the same shared objects
+SHARED_OBJS := $(filter-out $(BUILD_DIR)/test.o $(BUILD_DIR)/bench_prefill.o,$(ALL_OBJS))
+OBJECTS := $(ALL_OBJS)
 DEPS := $(OBJECTS:.o=.d)
 VPATH := $(sort $(dir $(CPP_SOURCES)))
 
-all: $(BUILD_DIR)/test_hunyuan
+all: $(BUILD_DIR)/test_hunyuan $(BUILD_DIR)/bench_prefill
 
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
@@ -59,7 +66,10 @@ $(BUILD_DIR):
 $(BUILD_DIR)/%.o: %.cpp | $(BUILD_DIR)
 	$(CXX) $(CXX_FLAGS) -c $< -o $@
 
-$(BUILD_DIR)/test_hunyuan: $(OBJECTS)
+$(BUILD_DIR)/test_hunyuan: $(BUILD_DIR)/test.o $(SHARED_OBJS)
+	$(CXX) $(CXX_FLAGS) -o $@ $^ $(LDFLAGS) $(DEPENDENCY_LDFLAGS)
+
+$(BUILD_DIR)/bench_prefill: $(BUILD_DIR)/bench_prefill.o $(SHARED_OBJS)
 	$(CXX) $(CXX_FLAGS) -o $@ $^ $(LDFLAGS) $(DEPENDENCY_LDFLAGS)
 
 clean:
@@ -69,8 +79,13 @@ test: $(BUILD_DIR)/test_hunyuan
 	cp ../../model_list.json $(BUILD_DIR)/model_list.json
 	cd $(BUILD_DIR) && ./test_hunyuan --model hunyuan:1.8b $(BENCH_ARGS)
 
+# prompt-length sweep over the mm prefill path (see bench_prefill.cpp)
+prefill: $(BUILD_DIR)/bench_prefill
+	cp ../../model_list.json $(BUILD_DIR)/model_list.json
+	cd $(BUILD_DIR) && ./bench_prefill --model hunyuan:1.8b --repeat $(REPEAT) --warmup $(PWARMUP)
+
 -include $(DEPS)
-.PHONY: all clean test
+.PHONY: all clean test prefill
 
 else
 

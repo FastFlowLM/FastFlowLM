@@ -62,8 +62,13 @@ struct turn_result_t {
 };
 
 /// \brief a profiler slot that accumulates across turns, so the turn is the delta
+/// \note profiler::stop() only ever adds to the slot; nothing but reset() clears
+///       it. AutoModel::clear_context() does reset every slot, so on the --pin
+///       false arm (which clears at the top of each turn) the slot restarts from
+///       zero and the raw difference would go negative -- take the slot as-is
+///       whenever it went backwards.
 static double slot_delta(double after, double before) {
-    return after - before;
+    return after >= before ? after - before : after;
 }
 
 /// \brief milliseconds between two steady-clock stamps
@@ -316,12 +321,10 @@ int main(int argc, char* argv[]) {
     // own ttft. Without --pin the system prompt is still installed, so both arms
     // of the A/B send the identical prompt; only the pinning differs.
     Hunyuan* hunyuan = static_cast<Hunyuan*>(chat.get());
+    hunyuan->set_prefix_pinning(pin_prefix);  // off: the system turn prefills per turn
     std::chrono::steady_clock::time_point t_prime = std::chrono::steady_clock::now();
     int prefix_tokens = hunyuan->set_system_prompt(kSystemPrompt);
     double prime_ms = ms_since(t_prime);
-    if (!pin_prefix) {
-        chat->clear_context();  // keep the system turn, drop the pin
-    }
     std::string system_text = kSystemPrompt;  // prepare_benchmark wants a mutable ref
     std::cout << "System prompt: " << chat->prepare_benchmark(system_text).first
               << " tokens, " << (pin_prefix ? prefix_tokens : 0)
@@ -456,6 +459,11 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    std::cout << std::endl << chat->show_profile() << std::endl;
+    // show_profile() is deliberately not printed here: its slots do not share a
+    // window. PREFILL_TIME / TOTAL_TIME accumulate from the last clear_context()
+    // -- which, pinned, is the start of the whole run -- while DECODING_TIME is
+    // reset at the top of every _shared_generate and so holds the last turn only,
+    // and "Total tokens" is just the current context length. The table above is
+    // the per-turn truth.
     return 0;
 }

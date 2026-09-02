@@ -278,6 +278,81 @@ def validate(document: dict[str, object]) -> list[str]:
         if isinstance(body, dict) and not body.get("points"):
             problems.append(f"{section}.points is absent or empty")
 
+    problems.extend(_continuation_problems(document.get("continuation")))
+    return problems
+
+
+def _continuation_problems(continuation: object) -> list[str]:
+    """N-3. The interleaving claim has to be attested by the data.
+
+    The rendered document states, in prose, that the samples are interleaved
+    and that each point beat its own drift. Neither was required of the
+    record, so re-rendering an older baseline would publish the claim over
+    non-interleaved data -- the same defect `counts_are_measured` was added to
+    close, in the section that decides the crossover Task 14 consumes.
+
+    So the flag is required AND CHECKED. Each point carries the start offset
+    of every measured sample, and interleaving is verified by pairing the two
+    routes at each (history, suffix) and requiring their sample starts to
+    strictly alternate. A boolean can be wrong; the timeline cannot.
+    """
+    problems: list[str] = []
+    if not isinstance(continuation, dict):
+        return problems
+    points = continuation.get("points")
+    if not isinstance(points, list) or not points:
+        return problems
+
+    if continuation.get("samples_interleaved") is not True:
+        problems.append(
+            "continuation.samples_interleaved is not true: the rendered "
+            "document states the append and re-prefill samples are "
+            "interleaved, and the decision rule that sets the crossover "
+            "bracket is only defensible if they are."
+        )
+
+    by_point: dict[tuple, dict[str, dict]] = {}
+    for point in points:
+        if not isinstance(point, dict):
+            continue
+        for field in ("drift_ns", "sample_starts_ns"):
+            if field not in point:
+                problems.append(
+                    f"continuation point "
+                    f"{point.get('history_rows')}/{point.get('suffix')}"
+                    f"/{point.get('route')} has no {field}: the drift term is "
+                    f"half the decision rule, and without the sample starts "
+                    f"the interleaving cannot be checked"
+                )
+        key = (point.get("history_rows"), point.get("suffix"))
+        route = str(point.get("route"))
+        by_point.setdefault(key, {})[route] = point
+
+    for key, routes in sorted(
+        by_point.items(), key=lambda item: (str(item[0][0]), str(item[0][1]))
+    ):
+        append = routes.get("append", {}).get("sample_starts_ns")
+        reprefill = routes.get("reprefill", {}).get("sample_starts_ns")
+        if not isinstance(append, list) or not isinstance(reprefill, list):
+            continue
+        if len(append) != len(reprefill):
+            problems.append(
+                f"continuation point {key[0]}/{key[1]}: the routes have "
+                f"{len(append)} and {len(reprefill)} samples, so they cannot "
+                f"have been interleaved"
+            )
+            continue
+        merged = [(value, "a") for value in append]
+        merged += [(value, "r") for value in reprefill]
+        merged.sort()
+        order = "".join(tag for _, tag in merged)
+        if order != "ar" * len(append):
+            problems.append(
+                f"continuation point {key[0]}/{key[1]}: the sample start "
+                f"times do not alternate between the routes (observed "
+                f"{order!r}), so the samples were NOT interleaved and the "
+                f"decision rule's paired-in-time assumption does not hold"
+            )
     return problems
 
 
@@ -408,9 +483,10 @@ def determinism_baseline(records: list[dict]) -> dict:
                 "localisation": {
                     "measured_runs": 0,
                     "by_source": {},
-                    "lm_head_input_differing_elements": [],
+                    "elements_by_source": {},
+                    "steps_by_source": {},
                     "lm_head_input_elements": HIDDEN_SIZE,
-                    "steps": [],
+                    "instruments": {},
                 },
                 "is_baseline": False,
             }
@@ -453,9 +529,21 @@ def determinism_baseline(records: list[dict]) -> dict:
         # divergence is upstream of it. That was in the task report, the
         # records README and the design spec, and in none of the places a
         # reader of the benchmarks would look.
+        # PER SOURCE, never pooled.
+        #
+        # The first version pooled the differing-element counts and the steps
+        # across every source and then stated "in every measured event the two
+        # runs fed the LM head different rows". An `lm_head` event has
+        # differing == 0 by construction -- it is the DETERM-1-supporting case
+        # -- so as soon as one appeared the document would list a zero among
+        # the differing counts and assert a conclusion the same window
+        # contradicts. A generator that states a false finding in the section
+        # carrying the headline claim is the worst thing in this tree, so the
+        # counts are kept apart at the point they are collected.
         localisations: dict[str, int] = {}
-        localisation_elements: list[int] = []
-        localisation_steps: list[str] = []
+        by_source_elements: dict[str, list[int]] = {}
+        by_source_steps: dict[str, list[str]] = {}
+        instruments: dict[str, int] = {}
         for entry in entries:
             record = entry.get("localisation") or {}
             if not record.get("measured"):
@@ -463,11 +551,20 @@ def determinism_baseline(records: list[dict]) -> dict:
             source = str(record.get("source", "unknown"))
             localisations[source] = localisations.get(source, 0) + 1
             if record.get("lm_head_input_differing_elements") is not None:
-                localisation_elements.append(
+                by_source_elements.setdefault(source, []).append(
                     int(record["lm_head_input_differing_elements"])
                 )
             if record.get("step"):
-                localisation_steps.append(str(record["step"]))
+                by_source_steps.setdefault(source, []).append(
+                    str(record["step"])
+                )
+            # Only a per-step capture can measure a localisation at all, so a
+            # measured record implies the instrument even when it predates the
+            # field that names it.
+            instrument = str(
+                record.get("measured_by", "per_step_lm_head_input_capture")
+            )
+            instruments[instrument] = instruments.get(instrument, 0) + 1
 
         routes[route] = {
             "runs": runs,
@@ -497,11 +594,16 @@ def determinism_baseline(records: list[dict]) -> dict:
             "localisation": {
                 "measured_runs": sum(localisations.values()),
                 "by_source": dict(sorted(localisations.items())),
-                "lm_head_input_differing_elements": sorted(
-                    localisation_elements
-                ),
+                "elements_by_source": {
+                    source: sorted(values)
+                    for source, values in sorted(by_source_elements.items())
+                },
+                "steps_by_source": {
+                    source: sorted(values)
+                    for source, values in sorted(by_source_steps.items())
+                },
                 "lm_head_input_elements": HIDDEN_SIZE,
-                "steps": sorted(localisation_steps),
+                "instruments": dict(sorted(instruments.items())),
             },
             "is_baseline": runs >= MIN_DETERMINISM_RUNS_PER_ROUTE,
         }
@@ -954,16 +1056,23 @@ def render_markdown(document: dict) -> str:
         ):
             add("")
         by_source: dict[str, int] = {}
-        elements: list[int] = []
-        steps: list[str] = []
+        elements_by_source: dict[str, list[int]] = {}
+        steps_by_source: dict[str, list[str]] = {}
+        instruments: dict[str, int] = {}
+        width = HIDDEN_SIZE
         for entry in determinism.get("routes", {}).values():
             record = entry.get("localisation") or {}
             for source, count in (record.get("by_source") or {}).items():
                 by_source[source] = by_source.get(source, 0) + count
-            elements.extend(
-                record.get("lm_head_input_differing_elements") or []
-            )
-            steps.extend(record.get("steps") or [])
+            for source, values in (
+                record.get("elements_by_source") or {}
+            ).items():
+                elements_by_source.setdefault(source, []).extend(values)
+            for source, values in (record.get("steps_by_source") or {}).items():
+                steps_by_source.setdefault(source, []).extend(values)
+            for name, count in (record.get("instruments") or {}).items():
+                instruments[name] = instruments.get(name, 0) + count
+            width = record.get("lm_head_input_elements", width)
         if by_source:
             add("#### Where the divergence enters — measured")
             add("")
@@ -978,26 +1087,66 @@ def render_markdown(document: dict) -> str:
                 + "."
             )
             add("")
-            if by_source.get("model_body"):
-                width = (
-                    determinism.get("routes", {})
-                    .get("append", {})
-                    .get("localisation", {})
-                    .get("lm_head_input_elements", HIDDEN_SIZE)
-                )
+            # N-2. THE INSTRUMENT, in the section that carries the claim.
+            #
+            # This paragraph asserts "an observation and not an inference" and
+            # said nothing about the instrument. The caveat existed only in a
+            # task report, and a reader of this document is exactly who needs
+            # it. Conditional on the data: only a per-step capture can measure
+            # a localisation at all.
+            if instruments:
                 add(
-                    f"In every measured event the two runs fed the LM head "
-                    f"**different rows** — "
-                    + ", ".join(f"{value:,}" for value in sorted(elements))
+                    "> **The instrument perturbs what it measures.** These "
+                    f"{sum(instruments.values())} localisation(s) were "
+                    "measured by capturing the LM-head input after every "
+                    "model step, which adds a host tensor read and a stream "
+                    "acquisition between steps — changing the timing of "
+                    "exactly the window a race would occupy. The phenomenon "
+                    "survives the instrumentation: it still reproduces at a "
+                    "rate consistent with the uninstrumented campaigns. What "
+                    "this data cannot rule out is that the capture shifts the "
+                    "rate, or which step is reached first."
+                )
+                add("")
+            if by_source.get("model_body"):
+                count = by_source["model_body"]
+                values = sorted(elements_by_source.get("model_body", []))
+                steps = sorted(set(steps_by_source.get("model_body", [])))
+                add(
+                    f"In the **{count}** `model_body` event(s) the two runs "
+                    f"fed the LM head **different rows** — "
+                    + ", ".join(f"{value:,}" for value in values)
                     + f" of {width:,} elements differing, at "
-                    + ", ".join(f"`{step}`" for step in sorted(set(steps)))
-                    + ". **The divergence therefore enters the model body, "
-                    "not the LM-head dispatch.** Each run's LM head was "
+                    + ", ".join(f"`{step}`" for step in steps)
+                    + ". **In those events the divergence enters the model "
+                    "body, not the LM-head dispatch.** Each run's LM head was "
                     "separately measured to be correctly rounded against its "
                     "own input, so it is faithfully transforming inputs that "
                     "already differ."
                 )
                 add("")
+            if by_source.get("lm_head"):
+                count = by_source["lm_head"]
+                steps = sorted(set(steps_by_source.get("lm_head", [])))
+                add(
+                    f"In the **{count}** `lm_head` event(s) the two runs fed "
+                    f"the LM head an **identical** row and it produced "
+                    f"different logits"
+                    + (
+                        ", at " + ", ".join(f"`{step}`" for step in steps)
+                        if steps
+                        else ""
+                    )
+                    + ". That is the case `DETERM-1` describes, and it is a "
+                    "different mechanism from the one above. **Both are "
+                    "present in this window**, so neither explanation covers "
+                    "it alone."
+                    if by_source.get("model_body")
+                    else ". That is the case `DETERM-1` describes: the "
+                    "divergence is inside the LM-head dispatch."
+                )
+                add("")
+            if by_source.get("model_body"):
                 add(
                     "**The layer at which it enters is not known.** Layer 0's "
                     "K and V have been bit-identical in the events where the "

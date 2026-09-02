@@ -1049,6 +1049,21 @@ def self_consistency(args) -> int:
                 "lm_head_input_elements": len(a_row),
                 "lm_head_input_differing_elements": differing,
                 "source": "lm_head" if differing == 0 else "model_body",
+                # THE INSTRUMENT, recorded with the result.
+                #
+                # Capturing the LM-head input after every step adds a host
+                # tensor read and a stream acquisition between model steps,
+                # which changes the timing of exactly the window a race would
+                # live in. That is a caveat on every localisation measured
+                # this way, and a reader of a downstream document should not
+                # have to find it in a task report. It travels with the
+                # record so the document can state it from the data.
+                "measured_by": "per_step_lm_head_input_capture",
+                "instrumentation_effect": (
+                    "the capture adds a host tensor read and a stream "
+                    "acquisition between every model step, which perturbs "
+                    "the timing of the window a race would occupy"
+                ),
                 "reason": (
                     "the two runs fed the LM head an identical row and it "
                     "produced different logits"

@@ -830,9 +830,16 @@ if (-not $ModelDir) {
                         #     DETERM-2 gate above, because then it is already
                         #     counted. When the gate PASSED, no other check
                         #     in this suite would notice, so it fails too.
+                        $lm = $null
                         if (Test-Path $lmHeadJson) {
-                            $lm = Get-Content $lmHeadJson -Raw |
-                                ConvertFrom-Json
+                            try {
+                                $lm = Get-Content $lmHeadJson -Raw |
+                                    ConvertFrom-Json
+                            } catch {
+                                $lm = $null
+                            }
+                        }
+                        if ($lm) {
                             $lmHeadRuns++
                             Write-Output ("  Step 9b verdict [$tag]: " +
                                 "$($lm.verdict)")
@@ -844,7 +851,28 @@ if (-not $ModelDir) {
                                 'common_bias',
                                 'one_run_further',
                                 'gross_disagreement')
-                            if ($beyondRounding -contains $lm.verdict) {
+                            # FAIL CLOSED ON A VERDICT NOBODY RECOGNISES.
+                            #
+                            # `-contains` against a null or misspelled verdict
+                            # is false, so an unparseable record would have
+                            # been downgraded to a note DESPITE the non-zero
+                            # exit -- the tenth instance of this project's
+                            # recurring pattern, reintroduced inside the fix
+                            # for the ninth. The tool exited non-zero; the
+                            # only safe reading of a verdict we cannot
+                            # classify is that it is one of the bad ones.
+                            $known = @(
+                                'benign_accumulation_order',
+                                'benign_no_divergence_in_sample',
+                                'model_body_divergence') + $beyondRounding
+                            if (-not ($known -contains $lm.verdict)) {
+                                Write-Output ("  STEP 9b RETURNED AN " +
+                                    "UNRECOGNISED VERDICT ($tag): " +
+                                    "'$($lm.verdict)'")
+                                $failures += ("Step 9b [$tag]: unrecognised " +
+                                    "verdict '$($lm.verdict)' with a " +
+                                    "non-zero exit; failing closed")
+                            } elseif ($beyondRounding -contains $lm.verdict) {
                                 Write-Output ("  STEP 9b REPORTS SOMETHING " +
                                     "BEYOND ROUNDING ($tag): " +
                                     "$($lm.verdict)")
@@ -863,9 +891,13 @@ if (-not $ModelDir) {
                                     "would have reported it")
                             }
                         } else {
-                            Write-Output ("STEP 9b FAILED TO PRODUCE A " +
+                            # Missing OR unparseable. Both mean the same
+                            # thing: the tool exited non-zero and left
+                            # nothing that can be classified.
+                            Write-Output ("STEP 9b PRODUCED NO READABLE " +
                                 "RECORD ($tag): $($_.Exception.Message)")
-                            $failures += "Step 9b produced no record for $tag"
+                            $failures += ("Step 9b produced no readable " +
+                                "record for $tag")
                         }
                     }
                     if (Test-Path $lmHeadJson) {

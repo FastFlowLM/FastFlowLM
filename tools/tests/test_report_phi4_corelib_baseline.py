@@ -115,15 +115,28 @@ def _baseline(**overrides) -> dict:
         },
         "prefill": {"points": [{"rows": 1, "ns": 100, "tokens_per_second": 10.0}]},
         "continuation": {
+            "samples_interleaved": True,
             "points": [
                 {
                     "history_rows": 512,
                     "suffix": 1,
                     "route": "append",
                     "samples_ns": [1, 2, 3, 4, 5],
+                    "sample_starts_ns": [0, 200, 400, 600, 800],
+                    "drift_ns": 4,
                     "p50_ns": 3,
                     "p95_ns": 5,
-                }
+                },
+                {
+                    "history_rows": 512,
+                    "suffix": 1,
+                    "route": "reprefill",
+                    "samples_ns": [9, 9, 9, 9, 9],
+                    "sample_starts_ns": [100, 300, 500, 700, 900],
+                    "drift_ns": 0,
+                    "p50_ns": 9,
+                    "p95_ns": 9,
+                },
             ],
             "crossover": {
                 "512": {
@@ -897,6 +910,15 @@ class VScatterProvenanceTests(unittest.TestCase):
 
 
 def _determ_with_localisation(route, step, differing):
+    """A record whose localisation was measured.
+
+    `differing == 0` is the `lm_head` case -- the two runs fed the LM head an
+    identical row and it produced different logits, which is what `DETERM-1`
+    describes. Anything else is `model_body`. The source is DERIVED here, not
+    hardcoded, because a fixture that could only produce one of them is how
+    the pooled-sentence defect survived: every test agreed with the generator
+    about which case existed.
+    """
     record = _determ(route, 9, 17, 49.25)
     record["failures"] = [f"{step}: logits differ by more than 2 BF16 ULP"]
     record["first_divergence"] = step
@@ -905,8 +927,9 @@ def _determ_with_localisation(route, step, differing):
         "step": step,
         "lm_head_input_elements": 3072,
         "lm_head_input_differing_elements": differing,
-        "source": "model_body",
-        "reason": "the two runs fed the LM head DIFFERENT rows",
+        "source": "lm_head" if differing == 0 else "model_body",
+        "measured_by": "per_step_lm_head_input_capture",
+        "reason": "measured at the first diverging step",
     }
     return record
 
@@ -938,9 +961,12 @@ class LocalisationPublicationTests(unittest.TestCase):
         self.assertEqual(entry["measured_runs"], 2)
         self.assertEqual(entry["by_source"], {"model_body": 2})
         self.assertEqual(
-            entry["lm_head_input_differing_elements"], [2571, 2754]
+            entry["elements_by_source"], {"model_body": [2571, 2754]}
         )
-        self.assertEqual(entry["steps"], ["decode[6]", "decode[8]"])
+        self.assertEqual(
+            entry["steps_by_source"],
+            {"model_body": ["decode[6]", "decode[8]"]},
+        )
 
     def test_an_unmeasured_localisation_is_not_counted(self):
         # Records predating the per-step capture carry no localisation. They
@@ -958,7 +984,25 @@ class LocalisationPublicationTests(unittest.TestCase):
         self.assertIn("model_body", text)
         self.assertIn("2,571", text)
         self.assertIn("2,754", text)
-        self.assertIn("divergence therefore enters the model body", text)
+        self.assertIn("the divergence enters the model body", text)
+
+    def test_the_instrumentation_caveat_is_in_the_document(self):
+        # N-2. The section asserts "an observation and not an inference" and
+        # said nothing about the instrument that adds a host read and a stream
+        # acquisition between every step. A reader of this document is exactly
+        # who needs that.
+        text = render_markdown(self._document())
+        self.assertIn("instrument perturbs what it measures", text)
+        self.assertIn("host tensor read", text)
+
+    def test_no_caveat_when_nothing_was_measured(self):
+        document = _baseline()
+        document["determinism"] = determinism_baseline(
+            _determ_runs("append", 41) + _determ_runs("reprefill", 41)
+        )
+        self.assertNotIn(
+            "instrument perturbs", render_markdown(document)
+        )
 
     def test_the_document_says_the_layer_is_unknown(self):
         text = render_markdown(self._document())
@@ -988,6 +1032,177 @@ class DecisionRuleReconciliationTests(unittest.TestCase):
         text = render_markdown(_baseline())
         self.assertIn("interleaved within each point", text)
         self.assertIn("drift between a route's first and last", text)
+
+
+class MixedLocalisationWindowTests(unittest.TestCase):
+    """N-1. The generator stated a FALSE finding the moment an `lm_head` event
+    appeared.
+
+    It gated the detail paragraph on the presence of a `model_body` event and
+    then pooled the differing-element counts and steps across ALL sources,
+    asserting "in every measured event the two runs fed the LM head different
+    rows". An `lm_head` event has `differing == 0` by construction -- it is
+    precisely the `DETERM-1`-supporting case -- so the document would list a
+    zero among the differing counts and then assert a conclusion the same
+    window contradicts.
+    """
+
+    def _mixed(self):
+        records = _determ_runs("append", 39) + [
+            _determ_with_localisation("append", "decode[8]", 2571),
+            _determ_with_localisation("append", "decode[3]", 0),
+        ]
+        records += _determ_runs("reprefill", 41)
+        document = _baseline()
+        document["determinism"] = determinism_baseline(records)
+        return document
+
+    def test_the_two_sources_are_counted_apart(self):
+        entry = self._mixed()["determinism"]["routes"]["append"][
+            "localisation"
+        ]
+        self.assertEqual(entry["by_source"], {"lm_head": 1, "model_body": 1})
+        self.assertEqual(
+            entry["elements_by_source"], {"lm_head": [0], "model_body": [2571]}
+        )
+        self.assertEqual(
+            entry["steps_by_source"],
+            {"lm_head": ["decode[3]"], "model_body": ["decode[8]"]},
+        )
+
+    def test_the_zero_is_never_listed_among_the_differing_counts(self):
+        text = self._render()
+        # The sentence naming the differing counts must contain 2,571 and
+        # must NOT have picked up the lm_head event's zero.
+        line = next(
+            line for line in text.splitlines() if "different rows" in line
+        )
+        self.assertIn("2,571", line)
+        self.assertNotIn("0, 2,571", line)
+        self.assertNotIn("2,571, 0", line)
+
+    def _render(self):
+        return render_markdown(self._mixed())
+
+    def test_the_model_body_claim_is_scoped_to_its_own_events(self):
+        text = self._render()
+        self.assertIn("In the **1** `model_body` event(s)", text)
+        self.assertIn("In those events the divergence enters", text)
+        # And never the unscoped universal that was false.
+        self.assertNotIn("In every measured event", text)
+
+    def test_the_lm_head_events_are_reported_and_not_absorbed(self):
+        text = self._render()
+        self.assertIn("`lm_head` event(s)", text)
+        self.assertIn("identical", text)
+        self.assertIn("Both are", text)
+        self.assertIn("neither explanation covers", text)
+
+    def test_a_pure_lm_head_window_supports_determ1_instead(self):
+        records = _determ_runs("append", 40) + [
+            _determ_with_localisation("append", "decode[3]", 0)
+        ]
+        records += _determ_runs("reprefill", 41)
+        document = _baseline()
+        document["determinism"] = determinism_baseline(records)
+        text = render_markdown(document)
+        self.assertIn("divergence is inside the LM-head dispatch", text)
+        self.assertNotIn("enters the model body", text)
+        # And the layer paragraph, which only makes sense for a body
+        # divergence, must not appear.
+        self.assertNotIn("layer at which it enters", text)
+
+
+class InterleavingAttestationTests(unittest.TestCase):
+    """N-3. The interleaving claim is checked against the timeline, not taken
+    from a boolean.
+
+    The rendered document states the samples are interleaved and that each
+    point beat its own drift. Neither was required of the record, so
+    re-rendering an older baseline would publish the claim over
+    non-interleaved data — in the section that decides the crossover Task 14
+    consumes.
+    """
+
+    def test_a_complete_continuation_validates(self):
+        self.assertEqual(validate(_baseline()), [])
+
+    def test_the_flag_is_required(self):
+        document = _baseline()
+        del document["continuation"]["samples_interleaved"]
+        self.assertTrue(
+            any("samples_interleaved" in p for p in validate(document)),
+            validate(document),
+        )
+
+    def test_a_false_flag_is_rejected(self):
+        document = _baseline()
+        document["continuation"]["samples_interleaved"] = False
+        self.assertTrue(
+            any("samples_interleaved" in p for p in validate(document))
+        )
+
+    def test_the_drift_term_is_required(self):
+        document = _baseline()
+        del document["continuation"]["points"][0]["drift_ns"]
+        self.assertTrue(
+            any("drift_ns" in p for p in validate(document)),
+            validate(document),
+        )
+
+    def test_the_sample_starts_are_required(self):
+        document = _baseline()
+        del document["continuation"]["points"][1]["sample_starts_ns"]
+        self.assertTrue(
+            any("sample_starts_ns" in p for p in validate(document))
+        )
+
+    def test_a_true_flag_over_block_sampled_data_is_caught(self):
+        # THE CASE THE FLAG ALONE CANNOT CATCH: all five append samples, then
+        # all five re-prefill samples, with the boolean still saying true.
+        # This is the shape the round-1 benchmark actually produced.
+        document = _baseline()
+        document["continuation"]["points"][0]["sample_starts_ns"] = [
+            0,
+            100,
+            200,
+            300,
+            400,
+        ]
+        document["continuation"]["points"][1]["sample_starts_ns"] = [
+            500,
+            600,
+            700,
+            800,
+            900,
+        ]
+        problems = validate(document)
+        self.assertTrue(
+            any("do not alternate" in p for p in problems), problems
+        )
+        self.assertTrue(any("aaaaarrrrr" in p for p in problems), problems)
+
+    def test_mismatched_sample_counts_are_caught(self):
+        document = _baseline()
+        document["continuation"]["points"][1]["sample_starts_ns"] = [100, 300]
+        self.assertTrue(
+            any("cannot have been interleaved" in p for p in validate(document))
+        )
+
+    def test_one_swapped_pair_is_caught(self):
+        # A single inversion is enough to break the paired-in-time assumption
+        # the decision rule rests on, and it must not be rounded away.
+        document = _baseline()
+        document["continuation"]["points"][0]["sample_starts_ns"] = [
+            0,
+            350,
+            400,
+            600,
+            800,
+        ]
+        self.assertTrue(
+            any("do not alternate" in p for p in validate(document))
+        )
 
 
 if __name__ == "__main__":

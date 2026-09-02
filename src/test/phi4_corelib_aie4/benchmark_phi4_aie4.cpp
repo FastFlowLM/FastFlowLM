@@ -1013,6 +1013,10 @@ int main(int argc, char** argv) {
             // history between samples instead would have measured the reset,
             // not the route.
             // ---------------------------------------------------------------
+            // A fixed origin for the interleaving evidence below. Offsets
+            // from one epoch are comparable across points; raw clock values
+            // are not portable into JSON.
+            const auto benchmark_epoch = Clock::now();
             const std::vector<std::size_t> histories{512, 2048};
             // DENSE ENOUGH TO BRACKET THE CROSSOVER, not just the design's
             // five reporting points.
@@ -1072,6 +1076,17 @@ int main(int argc, char** argv) {
                     // the same work the append precondition needs anyway.
                     std::vector<std::uint64_t> append_samples;
                     std::vector<std::uint64_t> reprefill_samples;
+                    // WHEN each measured sample started, as an offset from a
+                    // fixed epoch, in measurement order.
+                    //
+                    // The document asserts that the samples are interleaved,
+                    // and an assertion in prose is worth nothing: re-render
+                    // an older baseline and the claim is published over
+                    // non-interleaved data. These offsets let the validator
+                    // CHECK the alternation instead of taking a boolean's
+                    // word for it.
+                    std::vector<std::uint64_t> append_starts;
+                    std::vector<std::uint64_t> reprefill_starts;
                     for (int repeat = -1;
                          repeat < options.continuation_samples;
                          ++repeat) {
@@ -1103,6 +1118,12 @@ int main(int argc, char** argv) {
                                 static_cast<int>(history + suffix));
                             if (repeat >= 0) {
                                 append_samples.push_back(ns);
+                                append_starts.push_back(
+                                    static_cast<std::uint64_t>(
+                                        std::chrono::duration_cast<
+                                            std::chrono::nanoseconds>(
+                                            started - benchmark_epoch)
+                                            .count()));
                             }
                         }
 
@@ -1124,6 +1145,12 @@ int main(int argc, char** argv) {
                                 static_cast<int>(history + suffix));
                             if (repeat >= 0) {
                                 reprefill_samples.push_back(ns);
+                                reprefill_starts.push_back(
+                                    static_cast<std::uint64_t>(
+                                        std::chrono::duration_cast<
+                                            std::chrono::nanoseconds>(
+                                            started - benchmark_epoch)
+                                            .count()));
                             }
                         }
                     }
@@ -1144,6 +1171,7 @@ int main(int argc, char** argv) {
                             ? append_samples.back() - append_samples.front()
                             : append_samples.front() - append_samples.back();
                     append_point["drift_ns"] = append_drift;
+                    append_point["sample_starts_ns"] = append_starts;
                     append_point["tokens_per_second"] =
                         static_cast<double>(suffix) * 1e9 /
                         static_cast<double>(
@@ -1168,6 +1196,7 @@ int main(int argc, char** argv) {
                             : reprefill_samples.front() -
                                   reprefill_samples.back();
                     reprefill_point["drift_ns"] = reprefill_drift;
+                    reprefill_point["sample_starts_ns"] = reprefill_starts;
                     reprefill_point["tokens_per_second"] =
                         static_cast<double>(history + suffix) * 1e9 /
                         static_cast<double>(

@@ -774,13 +774,27 @@ if (-not $ModelDir) {
             $revision = (& git -C $Directory rev-parse HEAD 2>$null)
             if ($LASTEXITCODE -ne 0 -or -not $revision) { return '' }
             $revision = ([string]$revision).Trim()
-            # A dirty tree is recorded as dirty. A SHA on its own would claim
-            # the baseline describes a committed revision when it does not,
-            # and that is a claim nobody can check later.
-            $status = (& git -C $Directory status --porcelain 2>$null)
-            if ($LASTEXITCODE -eq 0 -and
-                (@($status | Where-Object { $_ }).Count -gt 0)) {
-                $revision = "$revision-dirty"
+            # A tree that is not pristine is recorded as such. A SHA on its
+            # own would claim the baseline describes a committed revision when
+            # it does not, and that is a claim nobody can check later.
+            #
+            # Tracked modifications and untracked files are labelled
+            # DIFFERENTLY, because they mean different things and a single
+            # `-dirty` makes the harmless case look like the serious one. The
+            # corelib checkout on the AIE4 target carries four untracked build
+            # output directories and no tracked change at all; calling that
+            # "dirty" would tell a later reader the source had been edited.
+            $status = @(
+                (& git -C $Directory status --porcelain 2>$null) |
+                    Where-Object { $_ })
+            if ($LASTEXITCODE -eq 0 -and $status.Count -gt 0) {
+                $tracked = @(
+                    $status | Where-Object { -not $_.StartsWith('??') })
+                if ($tracked.Count -gt 0) {
+                    $revision = "$revision-dirty"
+                } else {
+                    $revision = "$revision-untracked-only"
+                }
             }
             return $revision
         }

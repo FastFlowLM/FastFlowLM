@@ -514,7 +514,19 @@ def compare(args) -> int:
         expected_document = json.loads(
             Path(args.expected_tokens).read_text(encoding="utf-8")
         )
+        # The artifact records the route as ContinuationRouteName() spells it
+        # ("append"/"reprefill"); the suite and the golden file use the forced
+        # spelling ("force_append"/"force_reprefill"). Accept either, so a
+        # naming difference cannot be mistaken for a missing golden.
         route_key = mine["continuation_route"]
+        if route_key not in expected_document:
+            alternate = (
+                route_key[len("force_") :]
+                if route_key.startswith("force_")
+                else "force_" + route_key
+            )
+            if alternate in expected_document:
+                route_key = alternate
         if route_key not in expected_document:
             failures.check(
                 False,

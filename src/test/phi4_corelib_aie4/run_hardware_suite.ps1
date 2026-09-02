@@ -358,11 +358,6 @@ if (-not $ModelDir) {
             '--continuation-route', $route,
             '--output-json', $fastflowJson
         )
-        if ($BoundarySweep -and $route -eq 'force_reprefill') {
-            # Once, not once per route: the sweep is route-independent and a
-            # 4096-row prefill is the slowest thing in the suite.
-            $e2eArgs += '--boundary-sweep'
-        }
         Invoke-Checked "fastflow ($route)" $e2eExe $e2eArgs
 
         # 3. The same binary, again, on the same input. Run before the
@@ -422,8 +417,29 @@ if (-not $ModelDir) {
         $failures += "numeric golden $route"
       }
     }
+    # The boundary sweep runs on its OWN invocation, never attached to a golden.
+    #
+    # It was previously folded into the reprefill golden's first run, which made
+    # that run and its repeat structurally different: the swept run performed 25
+    # extra prefills, so self-consistency correctly reported the counts
+    # disagreeing (8106 dispatches against 3281) and looked like a
+    # non-determinism finding when it was a harness defect. A run that is
+    # compared against a repeat must be argument-identical to it.
     if ($BoundarySweep) {
-        $ran += 'boundary sweep (real prefills at every helper transition)'
+        try {
+            Invoke-Checked 'boundary sweep' $e2eExe @(
+                '--model-dir', $ModelDir,
+                '--token-ids-json', $tokenPlan,
+                '--decode-steps', '1',
+                '--continuation-route', 'force_reprefill',
+                '--output-json', (Join-Path $artifacts 'boundary-sweep.json'),
+                '--boundary-sweep'
+            )
+            $ran += 'boundary sweep (real prefills at every helper transition)'
+        } catch {
+            Write-Output "BOUNDARY SWEEP FAILED: $($_.Exception.Message)"
+            $failures += 'boundary sweep'
+        }
     } else {
         $skipped += 'boundary sweep real prefills (-BoundarySweep not passed; the helper-table half still ran inside test_phi4_hardware)'
     }

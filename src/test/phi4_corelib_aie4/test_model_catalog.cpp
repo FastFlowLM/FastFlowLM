@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -105,16 +106,21 @@ void TestCatalogContract() {
         model.at("details").at("execution_backend") ==
         "corelib_aie4");
 
+    // Design 8.1. `.gitattributes` is a Git repository artifact and
+    // `genai_config.json` is excluded by MODEL-2: flm.exe runs no ORT or genai
+    // graph, and an unused configuration invites a future reader to believe it
+    // is authoritative. `chat_template.jinja` is kept deliberately, because it
+    // is the verbatim source of the template the overlay inlines and is what
+    // makes the overlay auditable on the target machine.
     const std::set<std::string> expected_files{
-        ".gitattributes",
         "added_tokens.json",
         "chat_template.jinja",
         "config.json",
         "corelib_phi4_manifest.json",
-        "genai_config.json",
         "merges.txt",
         "model.onnx",
         "model.onnx.data",
+        "provenance.json",
         "special_tokens_map.json",
         "tokenizer.json",
         "tokenizer_config.json",
@@ -123,9 +129,10 @@ void TestCatalogContract() {
     CHECK(JsonStringSet(model.at("files")) == expected_files);
 
     const auto& overlays = model.at("bundled_overlays");
-    CHECK(overlays.size() == 3);
+    CHECK(overlays.size() == 4);
     CHECK(overlays.contains("config.json"));
     CHECK(overlays.contains("corelib_phi4_manifest.json"));
+    CHECK(overlays.contains("provenance.json"));
     CHECK(overlays.contains("tokenizer_config.json"));
 
     const std::filesystem::path overlay_root =
@@ -174,10 +181,19 @@ void TestCatalogContract() {
         find_record("tokenizer.json").at("lfs").at("oid") ==
         "382cc235b56c725945e149cc25f191da667c836655efd0857b004320e90e91ea");
 
-    constexpr std::uint64_t kRemoteLogicalBytes = UINT64_C(3270726823);
-    constexpr std::uint64_t kReplacedTokenizerConfigBytes = 2654;
-    const std::uint64_t expected_size =
-        kRemoteLogicalBytes - kReplacedTokenizerConfigBytes + overlay_size;
+    // `size` and `footprint` cover the assembled on-disk directory: the
+    // upstream files actually downloaded plus the overlay files shipped inside
+    // FastFlow. Deriving it from the metadata here, rather than restating a
+    // literal, is what keeps the number honest when the file set changes.
+    std::uint64_t upstream_size = 0;
+    for (const auto& file : model.at("files")) {
+        const auto name = file.get<std::string>();
+        if (overlays.contains(name)) {
+            continue;
+        }
+        upstream_size += find_record(name).at("size").get<std::uint64_t>();
+    }
+    const std::uint64_t expected_size = upstream_size + overlay_size;
     CHECK(model.at("size").get<std::uint64_t>() == expected_size);
     const double expected_footprint =
         std::round(
@@ -186,6 +202,104 @@ void TestCatalogContract() {
                 100.0) /
         100.0;
     CHECK(model.at("footprint").get<double>() == expected_footprint);
+}
+
+// Design `PACKAGE-1`. The assembled package has two provenances and they are
+// checked separately. Requiring every catalog file to carry a Hugging Face
+// metadata record cannot hold: the overlay files are FastFlow-authored and do
+// not exist upstream by construction. The check that matters is the reverse
+// one.
+void TestSplitProvenance() {
+    const std::filesystem::path source(FLM_TEST_SOURCE_DIR);
+    const json catalog = ReadJson(source / "model_list.json");
+    const json metadata = ReadJson(source / "model_info.json");
+    const auto& model =
+        catalog.at("models").at("phi4-mini-it-aie4").at("4b");
+    const auto& overlays = model.at("bundled_overlays");
+    const auto& remote = metadata.at(kTag);
+
+    std::set<std::string> upstream_paths;
+    for (const auto& record : remote) {
+        upstream_paths.insert(record.at("path").get<std::string>());
+    }
+
+    // Upstream files: every one must have a metadata record to download and
+    // hash-check against.
+    for (const auto& file : model.at("files")) {
+        const auto name = file.get<std::string>();
+        if (overlays.contains(name)) {
+            continue;
+        }
+        CHECK(upstream_paths.count(name) == 1);
+    }
+
+    // Overlay files: each must be installed beside FastFlow. Three of them
+    // must have no upstream record at all; an upstream record for one would
+    // mean FastFlow's contract was published to the model repository, which
+    // makes the two provenances indistinguishable.
+    const std::filesystem::path overlay_root = source / "model_overlays";
+    for (const auto& name : {
+             std::string("config.json"),
+             std::string("corelib_phi4_manifest.json"),
+             std::string("provenance.json")}) {
+        CHECK(overlays.contains(name));
+        CHECK(upstream_paths.count(name) == 0);
+        CHECK(
+            std::filesystem::is_regular_file(
+                overlay_root /
+                overlays.at(name).at("path").get<std::string>()));
+    }
+
+    // tokenizer_config.json is the one overlay that also exists upstream. The
+    // overlay shadows it because the published file carries neither a chat
+    // template nor eos_token_id, so its upstream record is expected.
+    CHECK(overlays.contains("tokenizer_config.json"));
+    CHECK(upstream_paths.count("tokenizer_config.json") == 1);
+
+    // Nothing upstream is silently dropped: every record is either packaged or
+    // one of the two files excluded on purpose.
+    const std::set<std::string> excluded{".gitattributes", "genai_config.json"};
+    const auto packaged = JsonStringSet(model.at("files"));
+    for (const auto& path : upstream_paths) {
+        CHECK(packaged.count(path) == 1 || excluded.count(path) == 1);
+    }
+    for (const auto& name : excluded) {
+        CHECK(upstream_paths.count(name) == 1);
+        CHECK(packaged.count(name) == 0);
+    }
+}
+
+// `ModelDownloader::check_model_compatibility` compares three versions: the
+// overlay config.json's flm_version, the catalog's flm_min_version, and the
+// binary's own __FLM_VERSION__. A binary built as 1.0.3 reports Incompatible
+// for a 1.0.4 overlay and refuses its own catalog entry, which is a failure
+// that only appears at first real load. Pin the relationship here instead.
+void TestVersionGateIsSelfConsistent() {
+    const std::filesystem::path source(FLM_TEST_SOURCE_DIR);
+    const json catalog = ReadJson(source / "model_list.json");
+    const auto& model =
+        catalog.at("models").at("phi4-mini-it-aie4").at("4b");
+    const json overlay_config =
+        ReadJson(source / "model_overlays" / "phi4-mini-it-aie4" /
+                 "config.json");
+
+    const auto encode = [](const std::string& version) -> std::uint32_t {
+        int major = -1;
+        int minor = -1;
+        int patch = -1;
+        CHECK(
+            std::sscanf(version.c_str(), "%d.%d.%d", &major, &minor, &patch) ==
+            3);
+        CHECK(major >= 0 && minor >= 0 && patch >= 0);
+        return static_cast<std::uint32_t>(
+            major * 1000000 + minor * 1000 + patch);
+    };
+
+    const auto minimum = model.at("flm_min_version").get<std::string>();
+    const auto packaged = overlay_config.at("flm_version").get<std::string>();
+    CHECK(packaged == minimum);
+    CHECK(encode(packaged) >= encode(minimum));
+    CHECK(encode(std::string(__FLM_VERSION__)) >= encode(packaged));
 }
 
 void TestSourcePolicyAndPinnedUrls() {
@@ -274,6 +388,8 @@ void TestBundledOverlayCopyAndIntegrity() {
 int main() {
     try {
         TestCatalogContract();
+        TestSplitProvenance();
+        TestVersionGateIsSelfConsistent();
         TestSourcePolicyAndPinnedUrls();
         TestBundledOverlayCopyAndIntegrity();
         std::cout << "model catalog tests passed\n";

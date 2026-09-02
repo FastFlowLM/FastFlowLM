@@ -25,6 +25,44 @@ UPSTREAM_API_URL = (
     "?recursive=true&expand=false"
 )
 
+# Design 8.1 / `PACKAGE-1`. The assembled model directory has two provenances
+# and they are validated separately, because a rule requiring every catalog
+# file to carry Hugging Face metadata cannot succeed: these files are
+# FastFlow-authored and do not exist upstream by construction.
+#
+# `tokenizer_config.json` is the one overlay that also exists upstream. The
+# overlay shadows it because the published file carries neither a chat template
+# nor eos_token_id, so it is downloaded from nowhere and its upstream size is
+# not counted, but it legitimately has an upstream record. The other three must
+# never acquire one: an upstream record for `config.json`,
+# `corelib_phi4_manifest.json` or `provenance.json` would mean FastFlow's
+# contract was published to the model repository, which is a provenance error
+# and not a convenience.
+OVERLAY_FILES = (
+    "config.json",
+    "corelib_phi4_manifest.json",
+    "provenance.json",
+    "tokenizer_config.json",
+)
+OVERLAY_FILES_WITHOUT_UPSTREAM = (
+    "config.json",
+    "corelib_phi4_manifest.json",
+    "provenance.json",
+)
+
+# Upstream files deliberately not carried into the assembled package.
+#
+# `genai_config.json` is excluded by `MODEL-2`: flm.exe runs no ORT or genai
+# graph, and shipping an unused configuration invites a future reader to treat
+# it as authoritative. `.gitattributes` is a Git repository artifact rather
+# than a model file. `chat_template.jinja` is deliberately NOT excluded: it is
+# the verbatim source of the template the overlay inlines, and keeping it is
+# what makes the overlay auditable on the target machine.
+EXCLUDED_UPSTREAM_FILES = (
+    ".gitattributes",
+    "genai_config.json",
+)
+
 _EXPECTED_DECODER = {
     "head_size": 128,
     "hidden_size": 3072,
@@ -331,26 +369,26 @@ def build_catalog_entry(
     git_files: list[dict[str, object]],
 ) -> dict[str, object]:
     overlay_dir = Path(overlay_dir)
-    overlay_names = (
-        "config.json",
-        "corelib_phi4_manifest.json",
-        "tokenizer_config.json",
-    )
     overlays = {
         name: {
             "path": f"{overlay_dir.name}/{name}",
             **_sha256_record(overlay_dir / name),
         }
-        for name in overlay_names
+        for name in OVERLAY_FILES
     }
 
     indexed = _index_git_records(git_files)
-    final_files = sorted(set(indexed) | set(overlays))
-    remote_size = sum(
-        int(record["size"])
-        for path, record in indexed.items()
-        if path not in overlays
-    )
+    upstream_files = {
+        path
+        for path in indexed
+        if path not in overlays and path not in EXCLUDED_UPSTREAM_FILES
+    }
+    final_files = sorted(upstream_files | set(overlays))
+    # `size` and `footprint` cover the assembled on-disk directory: the
+    # upstream files actually downloaded plus the overlay files shipped inside
+    # FastFlow. They are not the upstream repository's size, which is larger,
+    # and not the overlay's, which is negligible.
+    remote_size = sum(int(indexed[path]["size"]) for path in upstream_files)
     overlay_size = sum(int(record["size"]) for record in overlays.values())
     size = remote_size + overlay_size
     footprint = round(size / (1024**3), 2)
@@ -377,6 +415,104 @@ def build_catalog_entry(
         "bundled_overlays": overlays,
         "footprint": footprint,
     }
+
+
+def validate_catalog_provenance(
+    entry: dict[str, object],
+    upstream_records: list[dict[str, object]],
+    overlay_dir: Path,
+) -> None:
+    """Check the two provenances of the assembled package separately.
+
+    Design `PACKAGE-1`. Upstream files must each carry a Hugging Face metadata
+    record at the pinned revision and are what the downloader fetches and
+    hash-checks. Overlay files must exist in the shipped overlay directory and,
+    unless they shadow a published file, must have no upstream record at all.
+    """
+    overlay_dir = Path(overlay_dir)
+    indexed = _index_git_records(upstream_records)
+
+    if entry.get("revision") != UPSTREAM_COMMIT:
+        raise ValueError(
+            f"catalog revision must be pinned to {UPSTREAM_COMMIT}"
+        )
+    if UPSTREAM_COMMIT not in str(entry.get("file_url", "")):
+        raise ValueError("catalog file_url must reference the pinned revision")
+    if entry.get("flm_min_version") != FLM_MIN_VERSION:
+        raise ValueError(
+            f"catalog flm_min_version must be {FLM_MIN_VERSION}"
+        )
+    if entry.get("modelscope_supported") is not False:
+        raise ValueError("this tag has no ModelScope publication")
+    if "ms_url" in entry:
+        raise ValueError("a tag without a ModelScope publication has no ms_url")
+
+    overlays = _require_mapping(entry.get("bundled_overlays"), "bundled_overlays")
+    if set(overlays) != set(OVERLAY_FILES):
+        raise ValueError(
+            "bundled_overlays must be exactly "
+            f"{sorted(OVERLAY_FILES)}, got {sorted(overlays)}"
+        )
+
+    catalog_files = entry.get("files")
+    if not isinstance(catalog_files, list):
+        raise ValueError("catalog files must be a list")
+    if sorted(catalog_files) != list(catalog_files):
+        raise ValueError("catalog files must be sorted")
+    if len(set(catalog_files)) != len(catalog_files):
+        raise ValueError("catalog files contains duplicates")
+
+    for name, record in overlays.items():
+        if name not in catalog_files:
+            raise ValueError(f"overlay {name} is missing from catalog files")
+        path = overlay_dir.parent / str(record["path"])
+        if not path.is_file():
+            raise ValueError(f"overlay file is not installed: {path}")
+        actual = _sha256_record(path)
+        if actual != {"size": record["size"], "sha256": record["sha256"]}:
+            raise ValueError(f"overlay {name} does not match its catalog record")
+        if name in OVERLAY_FILES_WITHOUT_UPSTREAM and name in indexed:
+            raise ValueError(
+                f"overlay {name} has an upstream metadata record. FastFlow's "
+                "own package contract appears to have been published to "
+                f"{UPSTREAM_REPOSITORY}, which makes the two provenances "
+                "indistinguishable."
+            )
+
+    for name in catalog_files:
+        if name in overlays:
+            continue
+        if name not in indexed:
+            raise ValueError(
+                f"upstream file {name} has no Hugging Face metadata record"
+            )
+        if name in EXCLUDED_UPSTREAM_FILES:
+            raise ValueError(
+                f"{name} is excluded from the package but is still listed"
+            )
+
+    for name in indexed:
+        if name in catalog_files or name in EXCLUDED_UPSTREAM_FILES:
+            continue
+        raise ValueError(
+            f"upstream file {name} is neither packaged nor explicitly excluded"
+        )
+
+    expected_size = sum(
+        int(indexed[name]["size"])
+        for name in catalog_files
+        if name not in overlays
+    ) + sum(int(record["size"]) for record in overlays.values())
+    if entry.get("size") != expected_size:
+        raise ValueError(
+            f"catalog size must be {expected_size}, got {entry.get('size')}"
+        )
+    expected_footprint = round(expected_size / (1024**3), 2)
+    if entry.get("footprint") != expected_footprint:
+        raise ValueError(
+            f"catalog footprint must be {expected_footprint}, "
+            f"got {entry.get('footprint')}"
+        )
 
 
 def updated_catalog_documents(
@@ -521,6 +657,7 @@ def update_catalog_files(
         Path(model_info_path).read_text(encoding="utf-8")
     )
     entry = build_catalog_entry(overlay_dir, git_files)
+    validate_catalog_provenance(entry, git_files, Path(overlay_dir))
     updated_list, updated_info = updated_catalog_documents(
         model_list,
         model_info,
@@ -529,6 +666,31 @@ def update_catalog_files(
     )
     _write_json(Path(model_list_path), updated_list)
     _write_json(Path(model_info_path), updated_info)
+
+
+def validate_catalog_files(
+    model_list_path: Path,
+    model_info_path: Path,
+    overlay_dir: Path,
+) -> None:
+    """Re-check the committed catalog without contacting the network.
+
+    Regeneration is not always possible on a machine without a metadata
+    checkout, but the committed documents can still be held to the same
+    contract, which is what keeps a hand edit from slipping through.
+    """
+    model_list = json.loads(
+        Path(model_list_path).read_text(encoding="utf-8")
+    )
+    model_info = json.loads(
+        Path(model_info_path).read_text(encoding="utf-8")
+    )
+    entry = model_list["models"]["phi4-mini-it-aie4"]["4b"]
+    validate_catalog_provenance(
+        entry,
+        model_info["phi4-mini-it-aie4:4b"],
+        Path(overlay_dir),
+    )
 
 
 def main() -> int:
@@ -556,7 +718,20 @@ def main() -> int:
         choices=[UPSTREAM_COMMIT],
     )
 
+    validate = subparsers.add_parser("validate-catalog")
+    validate.add_argument("--overlay-dir", type=Path, required=True)
+    validate.add_argument("--model-list", type=Path, required=True)
+    validate.add_argument("--model-info", type=Path, required=True)
+
     args = parser.parse_args()
+    if args.command == "validate-catalog":
+        validate_catalog_files(
+            args.model_list,
+            args.model_info,
+            args.overlay_dir,
+        )
+        return 0
+
     records = huggingface_metadata_records(
         args.git_dir,
         args.upstream_commit,

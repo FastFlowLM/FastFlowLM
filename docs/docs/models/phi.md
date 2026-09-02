@@ -41,3 +41,13 @@ flm run phi4-mini-it-aie4:4b
 
 This package is hosted only on Hugging Face. `--modelscope` is rejected
 before any download starts.
+
+The assembled model directory has two provenances. The weights, tokenizer and
+vocabulary are downloaded from the pinned upstream revision and hash-checked
+against its published metadata. Four files -- `config.json`,
+`tokenizer_config.json`, `corelib_phi4_manifest.json` and `provenance.json` --
+are authored by FastFlowLM and installed with the product, because the upstream
+repository ships no `config.json` and its tokenizer configuration carries
+neither a chat template nor the EOS token IDs this backend needs. Those files
+restate the model contract for FastFlowLM's existing readers; they never
+override it, and a model whose weights disagree with them fails to load.

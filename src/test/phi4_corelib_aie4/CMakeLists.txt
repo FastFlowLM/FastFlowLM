@@ -91,7 +91,8 @@ target_include_directories(test_model_catalog PRIVATE
     ${FASTFLOW_SOURCE_DIR}/include
     ${FASTFLOW_SOURCE_DIR}/pull)
 target_compile_definitions(test_model_catalog PRIVATE
-    FLM_TEST_SOURCE_DIR="${FASTFLOW_SOURCE_DIR}")
+    FLM_TEST_SOURCE_DIR="${FASTFLOW_SOURCE_DIR}"
+    __FLM_VERSION__="${FLM_VERSION}")
 add_test(NAME test_model_catalog COMMAND test_model_catalog)
 
 add_library(test_model_downloader_compile OBJECT

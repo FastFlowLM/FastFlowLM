@@ -44,6 +44,11 @@ param(
     [string]$CorelibIncludeDir,
     [string]$BoostIncludeDir,
 
+    # The product binary. When supplied, Step 7's four generation endpoints run
+    # against a real `flm serve`; when absent, Step 7 is reported as skipped
+    # rather than quietly omitted.
+    [string]$FlmExe,
+
     [string]$BuildDir,
     [string]$Cmake,
     [string]$Python = "python",
@@ -429,17 +434,32 @@ if (-not $ModelDir) {
 # ---------------------------------------------------------------------------
 
 Write-Section 'CLI and server endpoints (Step 7)'
-# BLOCKED, and reported as blocked rather than skipped-and-forgotten.
-# FastFlow depends on tokenizers-cpp, which needs Cargo, and neither cargo nor
-# rustc exists on the development box or on the AIE4 target. flm.exe therefore
-# cannot be built anywhere in this environment, so `flm run`, /api/generate,
-# /api/chat, /v1/chat/completions and /v1/completions are unverified. Installing
-# a Rust toolchain on a shared lab box is a human decision, not something this
-# script should take.
-Write-Output 'BLOCKED: flm.exe cannot be built (no Rust toolchain for tokenizers-cpp).'
-Write-Output '  Unverified: flm run phi4-mini-it-aie4:4b, /api/generate, /api/chat,'
-Write-Output '              /v1/chat/completions, /v1/completions.'
-$skipped += 'Step 7 CLI and server endpoints (BLOCKED: no Rust toolchain, flm.exe unbuildable)'
+if ($FlmExe -and (Test-Path $FlmExe)) {
+    try {
+        Invoke-Checked 'server endpoints' $PSHOME\powershell.exe @(
+            '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+            (Join-Path $suiteDir 'run_server_endpoints.ps1'),
+            '-FlmExe', $FlmExe,
+            '-WorkDir', $BuildDir
+        )
+        $ran += 'Step 7 server endpoints (four generation endpoints, default and over-limit)'
+    } catch {
+        Write-Output "STEP 7 FAILED: $($_.Exception.Message)"
+        $failures += 'Step 7 server endpoints'
+    }
+    # `flm run` is NOT driven here. On Windows the CLI reads through
+    # ReadConsoleInput, a console-only API that cannot see redirected stdin, so
+    # the REPL cannot be scripted: it prints its prompt and exits on the first
+    # read. What is verifiable non-interactively -- that `flm run <tag>` loads
+    # the AIE4 model and enters the REPL, and that `flm validate` reports the
+    # corelib backend ready -- is recorded in the task report rather than
+    # asserted here, because a check that cannot fail is worse than none.
+    $skipped += 'Step 7 interactive `flm run` generation (CLI reads via ReadConsoleInput; not scriptable)'
+} else {
+    Write-Output 'SKIPPED: pass -FlmExe <path to flm.exe> to run the CLI and'
+    Write-Output '  server endpoint checks.'
+    $skipped += 'Step 7 CLI and server endpoints (-FlmExe not supplied)'
+}
 
 # ---------------------------------------------------------------------------
 

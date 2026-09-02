@@ -556,12 +556,41 @@ def compare(args) -> int:
         f"K/V {sum(1 for v in exact['kv'] if v)}/{len(exact['kv'])} tensors, "
         f"last_hidden {hidden_exact}"
     )
+
+    # MODEL STATE must be bit-identical; the LM head's output need not be.
+    #
+    # This split is measured, not a convenience. Across runs the live K/V for
+    # layers 0 and 31 and the final hidden state have been bit-identical to the
+    # reference every single time -- that is the whole 32-layer computation
+    # agreeing exactly -- while one run in three had a single logit vector out
+    # of 17 differ, with every design 12.4 threshold still met and the same
+    # top-1. Identical LM-head input and non-identical LM-head output means the
+    # difference is inside that one 3072 x 200064 dispatch, which is by far the
+    # largest in the model.
+    #
+    # So state bit-identity is enforced: a regression there would mean the
+    # model computed something different. Logit bit-identity is reported and
+    # not enforced, because enforcing a property that is not reliably true
+    # produces a red suite for something that is not a defect -- and a gate
+    # nobody trusts is worse than a number everybody reads.
+    failures.check(
+        kv_exact,
+        "live K/V is NOT bit-identical to the reference. The 32-layer "
+        "computation itself has diverged, which is a different and more "
+        "serious thing than a logit difference within tolerance.",
+    )
+    failures.check(
+        hidden_exact,
+        "the final hidden state is NOT bit-identical to the reference "
+        "(design 15.3 checkpoint)",
+    )
     if args.require_bit_exact:
         failures.check(
             all_exact,
-            "--require-bit-exact was given and the result is not "
-            "bit-identical to the reference. Any report describing it as "
-            "bit-identical is now wrong.",
+            "--require-bit-exact was given and the LOGITS are not "
+            "bit-identical. State and last_hidden are checked "
+            "unconditionally; this flag additionally demands the LM-head "
+            "output match, which is a diagnostic rather than a release gate.",
         )
 
     # Deliberately NOT compared: synchronize counts. FastFlow uses four

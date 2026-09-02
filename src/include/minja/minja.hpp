@@ -1810,7 +1810,20 @@ private:
       if (it == end) return nullptr;
       if (*it == '"' || *it == '\'') {
         auto str = parseString();
-        if (str) return std::make_shared<Value>(*str);
+        if (str) {
+          // Python / Jinja2 implicit concatenation of adjacent string literals:
+          //   "foo " "bar"  ==  "foo bar"
+          std::string result = *str;
+          while (true) {
+            auto mark = it;
+            consumeSpaces();
+            if (it == end || (*it != '"' && *it != '\'')) { it = mark; break; }
+            auto next_str = parseString();
+            if (!next_str) { it = mark; break; }
+            result += *next_str;
+          }
+          return std::make_shared<Value>(result);
+        }
       }
       static std::regex prim_tok(R"(true\b|True\b|false\b|False\b|None\b)");
       auto token = consumeToken(prim_tok);

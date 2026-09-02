@@ -107,6 +107,28 @@ class LM_Config{
             // read the json file as a string
             std::string json_str((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
             this->_json_config = nlohmann::json::parse(json_str);
+            this->_load_processor_json();
+        }
+
+        /// \brief read model_path/processor_config.json into _json_config["processor_config"]
+        /// \note config.json describes the network; the preprocessing constants
+        ///       (rescale_factor, image_mean/std, patch_size, pooling_kernel_size,
+        ///       sampling_rate, audio_samples_per_token, the soft token budgets)
+        ///       live in the processor config the checkpoint ships alongside it.
+        ///       Optional: models without one keep whatever defaults their reader
+        ///       carries, so this is never fatal.
+        void _load_processor_json(){
+            const std::string path = this->model_path + "/processor_config.json";
+            std::ifstream file(path);
+            if (!file.is_open()){
+                return;
+            }
+            std::string json_str((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+            try {
+                this->_json_config["processor_config"] = nlohmann::json::parse(json_str);
+            } catch (const nlohmann::json::exception& e){
+                std::cerr << "Failed to parse " << path << ": " << e.what() << std::endl;
+            }
         }
 
         /// \brief turn the relative weight names into full paths and publish the

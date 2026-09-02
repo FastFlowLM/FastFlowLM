@@ -80,7 +80,7 @@ private:
 
     // Overwritten in load_model() from processor_config.json; the literal is the
     // released Gemma4-12B value, used when the checkpoint ships no processor config.
-    int image_softtoken_budget = 1120;
+    int image_softtoken_budget = 280;
 
     void preprocess_image(
       gemma4_12b_image_t &image,
@@ -151,6 +151,20 @@ public:
             } catch (const std::bad_any_cast&) {
                 return false;
             }
+        }
+        else if (parameter_name == "image_max_tokens") {
+            try {
+                this->image_softtoken_budget = std::any_cast<int>(value);
+                
+                if(image_softtoken_budget != 70 && image_softtoken_budget != 140 &&
+                    image_softtoken_budget != 280 && image_softtoken_budget != 560 && image_softtoken_budget != 1120) {
+                    header_print("WARNING", "Invalid image budget value: " << image_softtoken_budget << ". Supported values are 70, 140, 280, 560, 1120. Using 280...");
+                    this->image_softtoken_budget = 280;
+                }
+                return true;
+            } catch (const std::bad_any_cast&) {
+                return false;
+            }            
         }
 
         return false;

@@ -21,9 +21,13 @@ BRANCHES ON rather than the case that exists:
     routes measured on a denser grid select a different, larger threshold, so
     an implementation that silently drops the extra points fails;
   * the header writer branches on bootstrap-versus-regenerate and must be
-    idempotent, so it is applied twice; and
-  * the cross-run agreement check branches on agree / disagree / nothing
-    comparable, and the disagreeing case must reach a non-zero exit.
+    idempotent, so it is applied twice;
+  * the cross-run check branches on permits / contradicts / permits-without-
+    confirming / nothing comparable, and the contradicting case must reach a
+    non-zero exit; and
+  * the published concession is ordered by COST, and the cheapest member of a
+    conceded band is its widest suffix -- so there is a test that the reported
+    worst case is not the widest one.
 """
 
 from __future__ import annotations
@@ -43,6 +47,7 @@ from tools.calibrate_phi4_corelib_continuation import (
     apply_section_to_document,
     apply_threshold_to_header,
     build_document_section,
+    conceded_points,
     history_agreement,
     load_continuation_samples,
     main,
@@ -493,8 +498,148 @@ class IngestionTest(unittest.TestCase):
         self.assertEqual(loaded.crossover_disagreements(selection), ())
 
 
+class MinIdentityTest(unittest.TestCase):
+    """`min` over per-history ceilings is an UPPER BOUND, not the rule.
+
+    Section 10.7 selects the largest suffix in the INTERSECTION of the
+    per-history winner sets. `min` of the ceilings equals that only when each
+    winner set is downward-closed, and a crossover record stores edges rather
+    than winner sets, so it cannot attest that. These tests pin the gap so a
+    later simplification back to `min` cannot pass silently.
+    """
+
+    def test_min_of_ceilings_can_exceed_what_the_rule_selects(self):
+        """W512 = {1, 8}, W2048 = {1, 2, 4}: rule gives 1, `min` gives 4."""
+        samples = {
+            1: _per_history(h512=(1.0, 5.0), h2048=(1.0, 5.0)),
+            2: _per_history(h512=(9.0, 5.0), h2048=(1.0, 5.0)),
+            4: _per_history(h512=(9.0, 5.0), h2048=(1.0, 5.0)),
+            8: _per_history(h512=(1.0, 5.0), h2048=(9.0, 5.0)),
+        }
+        selection = select_threshold_detailed(samples)
+        # The intersection is {1}, which IS a prefix, so the Section 10.7
+        # monotonicity assertion passes and the rule returns a threshold.
+        self.assertEqual(selection.verdict, "selected")
+        self.assertEqual(selection.winners, (1,))
+        self.assertEqual(selection.threshold, 1)
+        # Ceilings are 8 and 4; `min` would have said 4.
+        ceilings = {512: 8, 2048: 4}
+        self.assertEqual(min(ceilings.values()), 4)
+        self.assertNotEqual(selection.threshold, min(ceilings.values()))
+
+    def test_the_loader_reports_a_history_whose_winners_are_not_closed(self):
+        document = _synthetic_document(
+            suffixes=(1, 2, 4, 8, 32, 128, 256),
+            reprefill_ns={512: 500_000_000, 2048: 500_000_000},
+        )
+        # Make append LOSE at 512/2 and keep winning at 512/4, so history 512's
+        # winner set is {1, 4, 8} -- not downward-closed.
+        for point in document["continuation"]["points"]:
+            if (
+                point["history_rows"] == 512
+                and point["suffix"] == 2
+                and point["route"] == "append"
+            ):
+                point["samples_ns"] = [900_000_000 + i for i in range(5)]
+                point["count"] = 5
+                point["p50_ns"] = 900_000_002
+                point["p95_ns"] = 900_000_004
+        loaded = load_continuation_samples(document)
+        self.assertEqual(loaded.winners_by_history()[512], (1, 4, 8))
+        unclosed = loaded.unclosed_histories()
+        self.assertTrue(unclosed)
+        self.assertIn("512", " ".join(unclosed))
+        self.assertNotIn("2048", " ".join(unclosed))
+
+    def test_closed_winner_sets_report_nothing(self):
+        loaded = load_continuation_samples(_synthetic_document())
+        self.assertEqual(loaded.unclosed_histories(), ())
+
+    def test_the_committed_measurement_has_closed_winner_sets(self):
+        loaded = load_continuation_samples(
+            json.loads(_BASELINE.read_text(encoding="utf-8"))
+        )
+        self.assertEqual(loaded.unclosed_histories(), ())
+
+
+class ConcessionTest(unittest.TestCase):
+    """What the single constant gives up, and which member of it is worst.
+
+    The penalty at a conceded point is `reprefill - append`. Append cost grows
+    with suffix length and re-prefill cost does not, so within a conceded band
+    the NARROWEST suffix is the most expensive and the widest is the cheapest.
+    Naming the widest -- the obvious thing to do, and the thing the first
+    version of this did -- understates the cost.
+    """
+
+    def _conceded_document(self):
+        # Append 50 ms/token; re-prefill 500 ms at 512 and 1,700 ms at 2048.
+        # Winners: {1,2,4,8} at 512, {1,2,4,8,32} at 2048. Threshold 8; the
+        # conceded band is 2048 at suffix 32 only, so widen it by also making
+        # 512 lose earlier.
+        return _synthetic_document(
+            suffixes=(1, 2, 4, 8, 32, 128, 256),
+            reprefill_ns={512: 300_000_000, 2048: 1_700_000_000},
+        )
+
+    def test_the_worst_conceded_point_is_the_narrowest_not_the_widest(self):
+        loaded = load_continuation_samples(self._conceded_document())
+        selection = select_threshold_detailed(loaded.samples())
+        # 512 re-prefill is 300 ms, so append wins only at 1, 2, 4.
+        self.assertEqual(loaded.winners_by_history()[512], (1, 2, 4))
+        self.assertEqual(loaded.winners_by_history()[2048], (1, 2, 4, 8, 32))
+        self.assertEqual(selection.threshold, 4)
+
+        rows = conceded_points(loaded, selection.threshold)
+        self.assertEqual([(row[0], row[1]) for row in rows], [(2048, 8), (2048, 32)])
+        # Ordered worst-first, and the worst is the NARROWER suffix.
+        self.assertGreater(rows[0][3], rows[1][3])
+        self.assertLess(rows[0][1], rows[1][1])
+        # The widest conceded suffix would have been the cheaper quote.
+        widest = max(rows, key=lambda row: row[1])
+        self.assertLess(widest[3], rows[0][3])
+
+    def test_the_section_quotes_the_worst_case_not_the_widest_suffix(self):
+        loaded = load_continuation_samples(self._conceded_document())
+        selection = select_threshold_detailed(loaded.samples())
+        rows = conceded_points(loaded, selection.threshold)
+        agreement = history_agreement(
+            [
+                {
+                    "utc": "2026-09-02T15:34:01Z",
+                    "samples_interleaved": True,
+                    "edges": {"512": [4, 8], "2048": [32, 128]},
+                }
+            ],
+            selection.threshold,
+        )
+        section = build_document_section(loaded, selection, agreement)
+        self.assertIn(f"suffix {rows[0][1]} — {rows[0][3]:,.1f}x slower", section)
+        # Every conceded point appears, not just the worst.
+        for _, suffix, _, _ in rows:
+            self.assertIn(f"| 2048 | {suffix} |", section)
+
+    def test_no_concession_when_nothing_is_given_up(self):
+        loaded = load_continuation_samples(_synthetic_document())
+        selection = select_threshold_detailed(loaded.samples())
+        self.assertEqual(conceded_points(loaded, selection.threshold), ())
+
+    def test_the_committed_measurement_concedes_2048_at_8_worst(self):
+        loaded = load_continuation_samples(
+            json.loads(_BASELINE.read_text(encoding="utf-8"))
+        )
+        rows = conceded_points(loaded, 4)
+        self.assertEqual([(row[0], row[1]) for row in rows], [(2048, 8), (2048, 12)])
+        self.assertAlmostEqual(rows[0][3], 2.995, places=2)
+        self.assertAlmostEqual(rows[1][3], 1.961, places=2)
+
+
 class HistoryAgreementTest(unittest.TestCase):
-    """Whether earlier interleaved runs would have chosen the same constant."""
+    """Whether earlier interleaved runs PERMIT the constant.
+
+    Not whether they would have selected it: see `MinIdentityTest` for why the
+    stronger claim is not available from a crossover record.
+    """
 
     @staticmethod
     def _record(interleaved, edges, utc="2026-09-02T15:34:01Z", note=None):
@@ -507,26 +652,40 @@ class HistoryAgreementTest(unittest.TestCase):
             record["note"] = note
         return record
 
-    def test_agreeing_interleaved_runs_produce_no_diagnostic(self):
+    def test_interleaved_runs_that_permit_it_produce_no_diagnostic(self):
         records = [
             self._record(True, {512: (4, 8), 2048: (12, 16)}),
             self._record(True, {512: (4, 12), 2048: (12, 64)}),
         ]
         report = history_agreement(records, 4)
         self.assertTrue(report.comparable)
-        self.assertTrue(report.agrees)
+        self.assertTrue(report.permits)
         self.assertEqual(report.diagnostics, ())
-        self.assertEqual([row.derived for row in report.rows if row.comparable], [4, 4])
+        self.assertEqual(
+            [row.upper_bound for row in report.rows if row.comparable], [4, 4]
+        )
+        self.assertEqual(len(report.tight), 2)
 
-    def test_a_disagreeing_interleaved_run_is_a_diagnostic(self):
+    def test_a_run_that_contradicts_the_threshold_is_a_diagnostic(self):
         records = [
             self._record(True, {512: (4, 8), 2048: (12, 16)}),
-            self._record(True, {512: (8, 12), 2048: (12, 64)}),
+            self._record(True, {512: (2, 12), 2048: (12, 64)}),
         ]
         report = history_agreement(records, 4)
         self.assertTrue(report.comparable)
-        self.assertFalse(report.agrees)
+        self.assertFalse(report.permits)
         self.assertTrue(report.diagnostics)
+        self.assertIn("bounds it at 2", " ".join(report.diagnostics))
+
+    def test_a_run_whose_bound_is_higher_permits_without_confirming(self):
+        """8 > 4: that run cannot contradict 4, and cannot vouch for it."""
+        records = [self._record(True, {512: (8, 12), 2048: (12, 64)})]
+        report = history_agreement(records, 4)
+        self.assertTrue(report.permits)
+        self.assertEqual(report.diagnostics, ())
+        self.assertEqual(report.tight, ())
+        self.assertEqual(report.rows[0].upper_bound, 8)
+        self.assertFalse(report.rows[0].tight)
 
     def test_non_interleaved_runs_are_excluded_from_the_verdict(self):
         records = [
@@ -534,21 +693,40 @@ class HistoryAgreementTest(unittest.TestCase):
             self._record(True, {512: (4, 8), 2048: (12, 16)}),
         ]
         report = history_agreement(records, 4)
-        self.assertTrue(report.agrees)
+        self.assertTrue(report.permits)
         self.assertEqual(sum(1 for row in report.rows if not row.comparable), 1)
+
+    def test_a_non_interleaved_run_cannot_contradict_the_threshold(self):
+        """Its bound is 2, below 4 -- and it must still not fail the check."""
+        records = [
+            self._record(None, {512: (2, None), 2048: (2, None)}),
+            self._record(True, {512: (4, 8), 2048: (12, 16)}),
+        ]
+        report = history_agreement(records, 4)
+        self.assertEqual(report.rows[0].upper_bound, 2)
+        self.assertFalse(report.rows[0].permits)
+        self.assertTrue(report.permits)
+        self.assertEqual(report.diagnostics, ())
 
     def test_only_non_interleaved_runs_means_nothing_is_comparable(self):
         records = [self._record(False, {512: (2, None), 2048: (2, None)})]
         report = history_agreement(records, 4)
         self.assertFalse(report.comparable)
-        self.assertFalse(report.agrees)
+        self.assertFalse(report.permits)
         self.assertTrue(report.diagnostics)
 
-    def test_a_null_lower_edge_derives_zero(self):
+    def test_a_null_lower_edge_bounds_at_zero(self):
         records = [self._record(True, {512: (None, None), 2048: (12, 16)})]
         report = history_agreement(records, 0)
-        self.assertTrue(report.agrees)
-        self.assertEqual(report.rows[0].derived, 0)
+        self.assertTrue(report.permits)
+        self.assertEqual(report.rows[0].upper_bound, 0)
+        self.assertTrue(report.rows[0].tight)
+
+    def test_a_null_lower_edge_contradicts_a_positive_threshold(self):
+        records = [self._record(True, {512: (None, None), 2048: (12, 16)})]
+        report = history_agreement(records, 4)
+        self.assertFalse(report.permits)
+        self.assertTrue(report.diagnostics)
 
     def test_an_empty_history_file_means_nothing_is_comparable(self):
         report = history_agreement([], 4)
@@ -872,7 +1050,8 @@ class CommandLineTest(unittest.TestCase):
         payload = json.loads(summary.read_text(encoding="utf-8"))
         self.assertEqual(payload["verdict"], "selected")
         self.assertEqual(payload["threshold"], 4)
-        self.assertTrue(payload["history_agreement"]["agrees"])
+        self.assertTrue(payload["history_agreement"]["permits"])
+        self.assertTrue(payload["winners_downward_closed"])
 
 
 class CheckedInArtefactsTest(unittest.TestCase):
@@ -923,7 +1102,7 @@ class CheckedInArtefactsTest(unittest.TestCase):
         records = json.loads(_HISTORY.read_text(encoding="utf-8"))
         report = history_agreement(records, 4)
         self.assertTrue(report.comparable)
-        self.assertTrue(report.agrees)
+        self.assertTrue(report.permits)
 
 
 if __name__ == "__main__":

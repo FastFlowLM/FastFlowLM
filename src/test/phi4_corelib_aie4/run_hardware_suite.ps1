@@ -380,6 +380,62 @@ if (Test-ClosureRan $ctestText) {
 }
 
 # ---------------------------------------------------------------------------
+# Task 14: the generated threshold still matches the measurement
+# ---------------------------------------------------------------------------
+#
+# kContinuationAppendThreshold is generated from phi4_aie4_baseline.json. If
+# the header, the published benchmark document and that measurement drift
+# apart, everything still compiles and every test above still passes -- the
+# shipped constant simply stops corresponding to anything measured. `--check`
+# is the only guard, so it runs here as well as inside ctest.
+#
+# Not folded into the ctest block: that block reports one aggregate result, and
+# a drift failure buried in it reads as "the C++ suite is broken", which sends
+# the reader to the wrong place entirely.
+Write-Section 'Continuation threshold matches the measurement (Task 14)'
+$repoRoot = Split-Path -Parent $sourceDir
+# The repository has TWO tools directories -- src/tools (compare_phi4_corelib_e2e.py)
+# and a root-level tools/ (the offline generators). The calibrator is in the
+# root one, and $sourceDir is src/, so this must not be joined onto $sourceDir.
+$calibrator = Join-Path $repoRoot 'tools/calibrate_phi4_corelib_continuation.py'
+$thresholdHeader = Join-Path $sourceDir 'include/models/phi4/phi4_corelib_aie4_tuning.hpp'
+$baselineJson = Join-Path $repoRoot 'docs/docs/benchmarks/phi4_aie4_baseline.json'
+$crossoverJson = Join-Path $repoRoot 'docs/docs/benchmarks/phi4_aie4_crossover_history.json'
+$resultsDoc = Join-Path $repoRoot 'docs/docs/benchmarks/phi4_results.md'
+
+$calibratorInputs = @($calibrator, $thresholdHeader, $baselineJson,
+                      $crossoverJson, $resultsDoc)
+$missingInputs = $calibratorInputs | Where-Object { -not (Test-Path $_) }
+if ($missingInputs) {
+    # A missing input is a FAILURE, not a skip. Every one of these is committed
+    # to this repository, so absence means the tree is wrong -- and skipping
+    # would report a green suite over an unchecked shipped constant.
+    Write-Output 'THRESHOLD CHECK FAILED: committed input(s) missing:'
+    $missingInputs | ForEach-Object { Write-Output "  $_" }
+    $failures += 'continuation threshold check (committed inputs missing)'
+} else {
+    try {
+        & $Python $calibrator `
+            --baseline $baselineJson `
+            --crossover-history $crossoverJson `
+            --header $thresholdHeader `
+            --document $resultsDoc `
+            --check
+        $checkExit = $LASTEXITCODE
+        if ($checkExit -ne 0) {
+            throw ("calibrator --check exited $checkExit; the generated " +
+                   'threshold, the benchmark document and the measurement ' +
+                   'no longer agree')
+        }
+        $ran += ('continuation threshold matches the measurement ' +
+                 '(calibrator --check)')
+    } catch {
+        Write-Output "THRESHOLD CHECK FAILED: $($_.Exception.Message)"
+        $failures += 'continuation threshold check'
+    }
+}
+
+# ---------------------------------------------------------------------------
 # Numeric goldens, one per forced continuation route
 # ---------------------------------------------------------------------------
 

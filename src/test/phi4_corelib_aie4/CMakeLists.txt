@@ -526,3 +526,50 @@ add_task10_production_compile_check(
 add_task10_production_compile_check(
     task10_production_compile_on
     TRUE)
+
+# ---------------------------------------------------------------------------
+# Task 14: the continuation-threshold calibrator, and the artifact-drift guard
+# ---------------------------------------------------------------------------
+#
+# `kContinuationAppendThreshold` in phi4_corelib_aie4_tuning.hpp is GENERATED
+# from docs/docs/benchmarks/phi4_aie4_baseline.json. Nothing in the C++ build
+# can notice if the header, the published benchmark document and the
+# measurement drift apart -- the header would still compile, the tests would
+# still pass, and the shipped constant would no longer correspond to any
+# measurement. `--check` is the only guard against that, so it has to be
+# reachable from a runner rather than only from a human who remembers.
+#
+# The unittest module registered here runs the calibrator's own suite AND, in
+# CheckedInArtefactsTest, invokes the calibrator with `--check` against the
+# committed header, baseline, crossover history and benchmark document.
+find_program(FLM_PYTHON_EXECUTABLE
+             NAMES python3 python
+             DOC "Python used to run the offline tooling tests")
+
+if(FLM_PYTHON_EXECUTABLE)
+    # WORKING_DIRECTORY is the repository root because the tests import
+    # `tools.calibrate_phi4_corelib_continuation` as a package and resolve the
+    # committed artifacts relative to it.
+    add_test(NAME test_phi4_continuation_calibration
+             COMMAND "${FLM_PYTHON_EXECUTABLE}"
+                     -m unittest
+                     tools.tests.test_calibrate_phi4_corelib_continuation
+                     -v)
+    set_tests_properties(test_phi4_continuation_calibration PROPERTIES
+        WORKING_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}/../../.."
+        TIMEOUT 300)
+else()
+    # Not silently omitted. Registering a test that FAILS is the honest
+    # outcome: without Python this build cannot check that the shipped
+    # threshold still matches the measurement it claims to come from, and a
+    # green suite would say it did. Install Python or accept a red test.
+    add_test(NAME test_phi4_continuation_calibration
+             COMMAND "${CMAKE_COMMAND}" -E false)
+    set_tests_properties(test_phi4_continuation_calibration PROPERTIES
+        TIMEOUT 60)
+    message(WARNING
+        "Python was not found. test_phi4_continuation_calibration is "
+        "registered as a FAILING test: the generated "
+        "kContinuationAppendThreshold cannot be checked against the "
+        "measurement it was derived from.")
+endif()

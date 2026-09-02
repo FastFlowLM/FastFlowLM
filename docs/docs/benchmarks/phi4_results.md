@@ -265,10 +265,13 @@ The rule is a conjunction, so the constant is the smaller of those ceilings. It 
 
 ### What the single constant gives up
 
-| history rows | suffixes append would have won and now loses | widest such suffix | append p95 there | re-prefill p95 there | route taken |
-| ---: | :--- | ---: | ---: | ---: | :--- |
-| 512 | none | — | — | — | — |
-| 2048 | [8, 12] | 12 | 589.4 ms | 1,156.0 ms | re-prefill |
+**Worst case: history 2048, suffix 8 — 3.0x slower, +771.2 ms.** Every conceded point follows, ordered by slowdown. The widest conceded suffix is not the most expensive one, because append cost grows with suffix length while re-prefill cost does not — so the band's cost must be read off its narrow end.
+
+| history rows | suffix | append p95 | re-prefill p95 | route taken | penalty | slowdown |
+| ---: | ---: | ---: | ---: | :--- | ---: | ---: |
+| 2048 | 8 | 386.5 ms | 1,157.7 ms | re-prefill | +771.2 ms | 3.0x |
+| 2048 | 12 | 589.4 ms | 1,156.0 ms | re-prefill | +566.6 ms | 2.0x |
+| 512 | none | — | — | — | — | — |
 
 Those are measured losses taken deliberately. The alternative — a threshold above the smaller ceiling — is optimal for the longer history and WRONG for the shorter one, where it would append past the point at which append has already lost. Conceding measured throughput at one history is the cheaper error than routing against the measurement at the other.
 
@@ -303,20 +306,26 @@ There is a second reason to prefer the smaller ceiling, and it is about confiden
 
 At least 5 warm samples per route per point, append and re-prefill interleaved WITHIN each point. p50 and p95 are nearest-rank and were recomputed from the raw samples by the calibrator, not copied.
 
-### Would earlier runs have chosen the same constant?
+### Do the earlier runs permit this constant?
 
-Each recorded crossover run carries, per history, the bracket `[lower, upper]`. The lower edge IS that run's per-history winner ceiling, so the constant is recomputable from every recorded run. Task 13 measured the lower edges to be stable and the upper edges not; this derivation touches only the lower edges, which is why an unstable upper edge does not move the answer.
+Not: would they have selected it. Each recorded crossover run carries, per history, the bracket `[lower, upper]`, and the lower edge is that run's per-history winner CEILING. The minimum of those ceilings is an **upper bound** on what Section 10.7 would have selected from that run, and in general only an upper bound: the rule takes the largest suffix in the INTERSECTION of the winner sets, which equals the minimum of the ceilings only when each winner set is downward-closed. A crossover record stores the edges and never the winner sets, so that property cannot be checked from it. What holds with no assumption is the inequality — any suffix winning at every history is at most every ceiling — so that is what is enforced here.
 
-| measured (UTC) | interleaved | would select | agrees with 4 |
-| --- | :---: | ---: | :---: |
-| 2026-09-02T13:12:13Z | no | (2) | excluded — routes not measured against the same machine state |
-| 2026-09-02T14:55:44Z | no | (4) | excluded — routes not measured against the same machine state |
-| 2026-09-02T15:34:01Z | yes | 4 | yes |
-| 2026-09-02T16:32:18Z | yes | 4 | yes |
+Task 13 measured the lower edges to be stable and the upper edges not. This bound touches only the lower edges, which is why an unstable upper edge cannot move it.
 
-Every interleaved run on record would have selected 4.
+| measured (UTC) | interleaved | bounds the threshold at | permits 4 | meets the bound exactly |
+| --- | :---: | ---: | :---: | :---: |
+| 2026-09-02T13:12:13Z | no | (2) | excluded — routes not measured against the same machine state | — |
+| 2026-09-02T14:55:44Z | no | (4) | excluded — routes not measured against the same machine state | — |
+| 2026-09-02T15:34:01Z | yes | 4 | yes | yes |
+| 2026-09-02T16:32:18Z | yes | 4 | yes | yes |
 
-The non-interleaved rows are shown for provenance and excluded from the verdict, because their two routes were measured in separate blocks and a machine regime shift there lands on one route and not the other. The first of them derives a smaller constant for a reason that has nothing to do with the machine: it swept only the five suffix lengths Section 10.7 names, and on `{1, 2, 32, 128, 256}` the last winning sampled length is 2 whether the true crossover is at 3 or at 31. **Two earlier answers are withdrawn and must not be reused: the threshold `2` from that sparse grid, and the extrapolated figures `≈9 at history 512, ≈26 at history 2048` from a contended non-interleaved run.** The calibrator therefore treats the five named lengths as a floor and uses every additional measured length.
+Every interleaved run on record permits 4, and 2 of 2 bound it there exactly. An exactly-met bound is what "that run would have selected the same constant" would need, but only under the downward-closure assumption above, which its record does not attest.
+
+This run's own per-history winner sets ARE downward-closed at every history, checked directly from the sampled points rather than assumed. That is only a property of this run; it says nothing about the earlier ones, whose winner sets were never recorded.
+
+The non-interleaved rows are shown for provenance and excluded from the verdict, because their two routes were measured in separate blocks and a machine regime shift there lands on one route and not the other. The first of them bounds the constant lower for a reason that has nothing to do with the machine: it swept only the five suffix lengths Section 10.7 names, and on `{1, 2, 32, 128, 256}` the last winning sampled length is 2 whether the true crossover is at 3 or at 31. **Two earlier answers are withdrawn and must not be reused: the threshold `2` from that sparse grid, and the extrapolated figures `≈9 at history 512, ≈26 at history 2048` from a contended non-interleaved run.**
+
+**The selection RULE is Section 10.7's, verbatim and unqualified; the measurement GRID is wider than Section 10.7 specifies, deliberately.** Those are two different things and only one of them changed. The rule — largest suffix whose append p95 is lower at both history lengths, after asserting the winners are prefix-contiguous — was applied as written. The grid was not: Section 10.7 names five suffix lengths, and on those five alone this same measurement yields 2, the answer since retracted as a grid artifact. Locating a crossover needs sample points near it, so the five named lengths are treated as a floor and every additional measured length is used. The measurement plan was corrected; the decision rule was not touched.
 
 ### Identity of the run this constant came from
 
@@ -331,6 +340,8 @@ The non-interleaved rows are shown for provenance and excluded from the verdict,
 | model SHA-256 | `d6f503a9ea142c8b6320313d6ae341a88049b1b8ef01e641b2313fe42cdc7309` |
 | FastFlow revision | `a02a2cf7e6cda62ab21e1383de2674b933ed2b74-untracked-only` |
 | measured (UTC) | `2026-09-02T16:32:18Z` |
+
+**"Release-fixed" does not mean hardware-independent.** Every measurement behind this constant comes from the single machine, corelib build and model named above. Nothing here establishes where the crossover sits on different silicon, on a corelib whose append or prefill path changed, or on a different model. Section 10.7 fixes the constant for the release rather than calibrating at run time, so that scope is intended — but a port to other hardware needs this re-measured, not inherited.
 
 The timing table above is published here and is NOT shipped in the model package: Section 10.7 carries the threshold and no cost table.
 

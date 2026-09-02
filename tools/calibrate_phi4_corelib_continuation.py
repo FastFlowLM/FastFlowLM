@@ -307,6 +307,35 @@ class Measurements:
             for history in self.histories
         }
 
+    def unclosed_histories(self) -> tuple:
+        """Histories whose own winner set is NOT downward-closed.
+
+        Section 10.7 asserts monotonicity of the CONJUNCTION, and that is the
+        gate. This is the same property one level down, per history, and it is
+        worth checking for two reasons.
+
+        It carries the same meaning: append cost grows with suffix length, so a
+        loss at a short suffix followed by a win at a longer one at the SAME
+        history is the machine moving during the sweep.
+
+        And it is the exact condition under which `min` over per-history
+        ceilings stops equalling the Section 10.7 answer -- the identity the
+        cross-run bound in `history_agreement` would need in order to be an
+        equality rather than an upper bound. Here the winner sets are known, so
+        unlike in a stored crossover record the property can actually be
+        checked.
+        """
+        found = []
+        for history, won in self.winners_by_history().items():
+            if won != self.suffixes[: len(won)]:
+                missing = [s for s in self.suffixes[: len(won)] if s not in won]
+                found.append(
+                    f"history {history}: append lost at {missing} and won again "
+                    f"at a longer suffix; winners {list(won)} are not a prefix "
+                    f"of the sampled set {list(self.suffixes)}"
+                )
+        return tuple(found)
+
     def crossover_disagreements(self, selection: Selection) -> tuple:
         """Compare the p95 rule against the recorder's own p50-based verdict.
 
@@ -482,8 +511,12 @@ class HistoryRow:
     utc: str
     interleaved: bool
     comparable: bool
-    derived: int
-    agrees: bool
+    # `min` over that run's per-history winner ceilings. An UPPER BOUND on what
+    # Section 10.7 would have selected from it, not the selection itself -- see
+    # `history_agreement` for why the two differ.
+    upper_bound: int
+    permits: bool
+    tight: bool
     note: str
 
 
@@ -491,23 +524,47 @@ class HistoryRow:
 class HistoryReport:
     rows: tuple
     comparable: bool
-    agrees: bool
+    # Every interleaved run bounds the threshold at or above its value.
+    permits: bool
+    # The interleaved runs whose bound the threshold exactly meets.
+    tight: tuple
     diagnostics: tuple
 
 
 def history_agreement(records: Sequence[Mapping], threshold: int) -> HistoryReport:
-    """Would each earlier run have selected the same constant?
+    """Do the earlier runs PERMIT this constant? Not: would they select it.
 
     Each crossover record carries, per history, the bracket `[lower, upper]`.
-    The lower edge is the largest suffix at which append DECISIVELY won, so it
-    is exactly that run's per-history winner ceiling, and the Section 10.7
-    conjunction over histories is the minimum of those ceilings. That makes the
-    constant recomputable from every recorded run without re-running anything.
+    The lower edge is the largest suffix at which append decisively won, so it
+    is that run's per-history winner CEILING. The minimum of those ceilings is
+    an **upper bound** on what Section 10.7 would have selected from that run,
+    and in general it is only an upper bound.
+
+    The reason matters, because the obvious reading is wrong. Section 10.7
+    selects the largest suffix in the INTERSECTION of the per-history winner
+    sets, and `min` of the ceilings equals that only when each winner set is
+    downward-closed. It need not be. Take sampled `{1, 2, 4, 8}` with
+    `W512 = {1, 8}` and `W2048 = {1, 2, 4}`: the intersection is `{1}`, which
+    is a prefix, so the monotonicity assertion passes and the rule returns 1 --
+    while `min(8, 4)` is 4. A crossover record stores only the edges, never the
+    winner sets, so downward-closure CANNOT be verified from it.
+
+    What is sound without that assumption is the inequality: any suffix that
+    wins at every history is at most every ceiling, hence at most their
+    minimum. So this function checks
+
+        threshold <= min(ceilings)                          -- sound, enforced
+        threshold == min(ceilings)                          -- "tight", reported
+
+    A run whose bound the threshold EXCEEDS contradicts it outright and is a
+    hard diagnostic. A run whose bound it merely meets is consistent, and is
+    reported as tight only under the stated assumption. A run whose bound it
+    falls below permits the constant without confirming it.
 
     Task 13's finding is that the lower edges are stable and the upper edges
-    are not; because this derivation touches only the lower edges, an
-    unstable upper edge does not move the answer. Non-interleaved records are
-    shown but excluded from the verdict.
+    are not; because this bound touches only the lower edges, an unstable upper
+    edge cannot move it. Non-interleaved records are shown but excluded from
+    the verdict.
     """
     if not _is_int(threshold) or threshold < 0:
         raise CalibrationError(f"threshold {threshold!r} is not a non-negative int")
@@ -540,14 +597,15 @@ def history_agreement(records: Sequence[Mapping], threshold: int) -> HistoryRepo
                     f"crossover history record {index}: history {history} lower "
                     f"edge {lower!r} is not a non-negative integer or null"
                 )
-        derived = min(lowers)
+        upper_bound = min(lowers)
         rows.append(
             HistoryRow(
                 utc=str(record.get("utc", "")),
                 interleaved=interleaved,
                 comparable=interleaved,
-                derived=derived,
-                agrees=interleaved and derived == threshold,
+                upper_bound=upper_bound,
+                permits=interleaved and threshold <= upper_bound,
+                tight=interleaved and threshold == upper_bound,
                 note=str(record.get("note", "")),
             )
         )
@@ -560,19 +618,23 @@ def history_agreement(records: Sequence[Mapping], threshold: int) -> HistoryRepo
             "constant; a non-interleaved run cannot, because its two routes "
             "were not measured against the same machine state"
         )
-    disagreeing = [row for row in comparable_rows if not row.agrees]
-    if disagreeing:
+    contradicting = [row for row in comparable_rows if not row.permits]
+    if contradicting:
         diagnostics.append(
-            "the constant is not run-stable: interleaved run(s) "
-            + ", ".join(f"{row.utc} would select {row.derived}" for row in disagreeing)
-            + f", not {threshold}. A release-fixed constant that changes with "
-            "the run is the wrong shape for this measurement; a human has to "
-            "decide, not this script."
+            "the constant exceeds what an interleaved run can support: "
+            + ", ".join(
+                f"{row.utc} bounds it at {row.upper_bound}" for row in contradicting
+            )
+            + f", and the selected threshold is {threshold}. At that run, some "
+            "history had already stopped favouring append below this suffix "
+            "length. A release-fixed constant that one recorded run "
+            "contradicts is a decision for a human, not for this script."
         )
     return HistoryReport(
         rows=tuple(rows),
         comparable=bool(comparable_rows),
-        agrees=bool(comparable_rows) and not disagreeing,
+        permits=bool(comparable_rows) and not contradicting,
+        tight=tuple(row for row in comparable_rows if row.tight),
         diagnostics=tuple(diagnostics),
     )
 
@@ -642,6 +704,40 @@ def _ms(nanoseconds: float) -> str:
     return f"{nanoseconds / 1e6:,.1f} ms"
 
 
+def conceded_points(measurements: Measurements, threshold: int) -> tuple:
+    """What the single constant gives up, worst cost first.
+
+    A conceded point is a `(history, suffix)` where append p95 beat re-prefill
+    p95 but the suffix exceeds the threshold, so the route goes to re-prefill
+    anyway. Ordered by SLOWDOWN, descending -- not by suffix.
+
+    That ordering is the point. The penalty is `reprefill - append`; append
+    grows with suffix length and re-prefill is roughly flat in it, so within a
+    conceded band the NARROWEST suffix is the most expensive one. Quoting the
+    widest conceded suffix understates the cost, which is the mistake this
+    function exists to prevent.
+
+    Returns `(history, suffix, penalty_ns, slowdown)` tuples.
+    """
+    winners = measurements.winners_by_history()
+    points = []
+    for history in measurements.histories:
+        for suffix in winners[history]:
+            if suffix <= threshold:
+                continue
+            append = measurements.point(history, suffix, "append").p95_ns
+            reprefill = measurements.point(history, suffix, "reprefill").p95_ns
+            points.append(
+                (
+                    history,
+                    suffix,
+                    reprefill - append,
+                    reprefill / append if append else float("inf"),
+                )
+            )
+    return tuple(sorted(points, key=lambda row: (-row[3], row[0], row[1])))
+
+
 def _identity_rows(identity: Mapping) -> list:
     wanted = (
         ("machine", "machine"),
@@ -668,6 +764,7 @@ def build_document_section(
 ) -> str:
     """Render the Section 15.6 telemetry for the selected constant."""
     winners = measurements.winners_by_history()
+    unclosed = measurements.unclosed_histories()
     out = []
     add = out.append
 
@@ -727,29 +824,38 @@ def build_document_section(
 
     add("### What the single constant gives up")
     add("")
-    conceded = {
-        history: [s for s in winners[history] if s > selection.threshold]
-        for history in measurements.histories
-    }
-    if any(conceded.values()):
+    concessions = conceded_points(measurements, selection.threshold)
+    if concessions:
+        # EVERY conceded point is listed, worst cost first. Naming a
+        # representative one would understate the cost: the penalty is
+        # `reprefill - append`, append grows with suffix length and re-prefill
+        # does not, so the most expensive point in a conceded band is its
+        # NARROWEST suffix, not its widest.
+        worst = concessions[0]
         add(
-            "| history rows | suffixes append would have won and now loses | "
-            "widest such suffix | append p95 there | re-prefill p95 there | "
-            "route taken |"
+            f"**Worst case: history {worst[0]}, suffix {worst[1]} — "
+            f"{worst[3]:,.1f}x slower, +{_ms(worst[2])}.** Every conceded point "
+            f"follows, ordered by slowdown. The widest conceded suffix is not "
+            f"the most expensive one, because append cost grows with suffix "
+            f"length while re-prefill cost does not — so the band's cost must "
+            f"be read off its narrow end."
         )
-        add("| ---: | :--- | ---: | ---: | ---: | :--- |")
-        for history in measurements.histories:
-            given_up = conceded[history]
-            if not given_up:
-                add(f"| {history} | none | — | — | — | — |")
-                continue
-            worst = max(given_up)
+        add("")
+        add(
+            "| history rows | suffix | append p95 | re-prefill p95 | route "
+            "taken | penalty | slowdown |"
+        )
+        add("| ---: | ---: | ---: | ---: | :--- | ---: | ---: |")
+        for history, suffix, penalty, slowdown in concessions:
             add(
-                f"| {history} | {given_up} | {worst} | "
-                f"{_ms(measurements.point(history, worst, 'append').p95_ns)} | "
-                f"{_ms(measurements.point(history, worst, 'reprefill').p95_ns)} | "
-                f"re-prefill |"
+                f"| {history} | {suffix} | "
+                f"{_ms(measurements.point(history, suffix, 'append').p95_ns)} | "
+                f"{_ms(measurements.point(history, suffix, 'reprefill').p95_ns)} "
+                f"| re-prefill | +{_ms(penalty)} | {slowdown:,.1f}x |"
             )
+        for history in measurements.histories:
+            if not any(row[0] == history for row in concessions):
+                add(f"| {history} | none | — | — | — | — | — |")
         add("")
         add(
             "Those are measured losses taken deliberately. The alternative — a "
@@ -804,55 +910,102 @@ def build_document_section(
     )
     add("")
 
-    add("### Would earlier runs have chosen the same constant?")
+    add("### Do the earlier runs permit this constant?")
     add("")
     add(
-        "Each recorded crossover run carries, per history, the bracket "
-        "`[lower, upper]`. The lower edge IS that run's per-history winner "
-        "ceiling, so the constant is recomputable from every recorded run. "
-        "Task 13 measured the lower edges to be stable and the upper edges not; "
-        "this derivation touches only the lower edges, which is why an unstable "
-        "upper edge does not move the answer."
+        "Not: would they have selected it. Each recorded crossover run carries, "
+        "per history, the bracket `[lower, upper]`, and the lower edge is that "
+        "run's per-history winner CEILING. The minimum of those ceilings is an "
+        "**upper bound** on what Section 10.7 would have selected from that "
+        "run, and in general only an upper bound: the rule takes the largest "
+        "suffix in the INTERSECTION of the winner sets, which equals the "
+        "minimum of the ceilings only when each winner set is downward-closed. "
+        "A crossover record stores the edges and never the winner sets, so that "
+        "property cannot be checked from it. What holds with no assumption is "
+        "the inequality — any suffix winning at every history is at most every "
+        "ceiling — so that is what is enforced here."
     )
     add("")
-    add("| measured (UTC) | interleaved | would select | agrees with "
-        f"{selection.threshold} |")
-    add("| --- | :---: | ---: | :---: |")
+    add(
+        "Task 13 measured the lower edges to be stable and the upper edges not. "
+        "This bound touches only the lower edges, which is why an unstable "
+        "upper edge cannot move it."
+    )
+    add("")
+    add("| measured (UTC) | interleaved | bounds the threshold at | permits "
+        f"{selection.threshold} | meets the bound exactly |")
+    add("| --- | :---: | ---: | :---: | :---: |")
     for row in agreement.rows:
         if not row.comparable:
             add(
-                f"| {row.utc} | no | ({row.derived}) | excluded — routes not "
-                f"measured against the same machine state |"
+                f"| {row.utc} | no | ({row.upper_bound}) | excluded — routes "
+                f"not measured against the same machine state | — |"
             )
         else:
             add(
-                f"| {row.utc} | yes | {row.derived} | "
-                f"{'yes' if row.agrees else 'NO'} |"
+                f"| {row.utc} | yes | {row.upper_bound} | "
+                f"{'yes' if row.permits else 'NO'} | "
+                f"{'yes' if row.tight else 'no'} |"
             )
     add("")
-    if agreement.agrees:
+    if agreement.permits:
+        tight = len(agreement.tight)
+        total = sum(1 for row in agreement.rows if row.comparable)
         add(
-            f"Every interleaved run on record would have selected "
-            f"{selection.threshold}."
+            f"Every interleaved run on record permits {selection.threshold}, "
+            f"and {tight} of {total} bound it there exactly. An exactly-met "
+            f"bound is what "
+            f"\"that run would have selected the same constant\" would need, "
+            f"but only under the downward-closure assumption above, which its "
+            f"record does not attest."
         )
     else:
         for line in agreement.diagnostics:
             add(f"**{line}**")
     add("")
+    if unclosed:
+        add(
+            "**This run's own winner sets are not all downward-closed**, which "
+            "is the condition under which the bound above stops being an "
+            "equality — and, more importantly, means append lost at a short "
+            "suffix and won again at a longer one:"
+        )
+        for line in unclosed:
+            add(f"- {line}")
+    else:
+        add(
+            "This run's own per-history winner sets ARE downward-closed at "
+            "every history, checked directly from the sampled points rather "
+            "than assumed. That is only a property of this run; it says nothing "
+            "about the earlier ones, whose winner sets were never recorded."
+        )
+    add("")
     add(
         "The non-interleaved rows are shown for provenance and excluded from "
         "the verdict, because their two routes were measured in separate "
         "blocks and a machine regime shift there lands on one route and not "
-        "the other. The first of them derives a smaller constant for a reason "
+        "the other. The first of them bounds the constant lower for a reason "
         "that has nothing to do with the machine: it swept only the five "
         "suffix lengths Section 10.7 names, and on `{1, 2, 32, 128, 256}` the "
         "last winning sampled length is 2 whether the true crossover is at 3 "
         "or at 31. **Two earlier answers are withdrawn and must not be "
         "reused: the threshold `2` from that sparse grid, and the "
         "extrapolated figures `≈9 at history 512, ≈26 at history 2048` from a "
-        "contended non-interleaved run.** The calibrator therefore treats the "
-        "five named lengths as a floor and uses every additional measured "
-        "length."
+        "contended non-interleaved run.**"
+    )
+    add("")
+    add(
+        "**The selection RULE is Section 10.7's, verbatim and unqualified; the "
+        "measurement GRID is wider than Section 10.7 specifies, deliberately.** "
+        "Those are two different things and only one of them changed. The rule "
+        "— largest suffix whose append p95 is lower at both history lengths, "
+        "after asserting the winners are prefix-contiguous — was applied as "
+        "written. The grid was not: Section 10.7 names five suffix lengths, and "
+        "on those five alone this same measurement yields 2, the answer since "
+        "retracted as a grid artifact. Locating a crossover needs sample points "
+        "near it, so the five named lengths are treated as a floor and every "
+        "additional measured length is used. The measurement plan was "
+        "corrected; the decision rule was not touched."
     )
     add("")
 
@@ -862,6 +1015,17 @@ def build_document_section(
     add("| --- | --- |")
     for label, value in _identity_rows(measurements.identity):
         add(f"| {label} | `{value}` |")
+    add("")
+    add(
+        "**\"Release-fixed\" does not mean hardware-independent.** Every "
+        "measurement behind this constant comes from the single machine, "
+        "corelib build and model named above. Nothing here establishes where "
+        "the crossover sits on different silicon, on a corelib whose append or "
+        "prefill path changed, or on a different model. Section 10.7 fixes the "
+        "constant for the release rather than calibrating at run time, so that "
+        "scope is intended — but a port to other hardware needs this "
+        "re-measured, not inherited."
+    )
     add("")
     add(
         "The timing table above is published here and is NOT shipped in the "
@@ -901,6 +1065,7 @@ def _read_json(path: pathlib.Path, what: str):
 
 def _provenance(measurements: Measurements, selection: Selection) -> list:
     identity = measurements.identity
+    concessions = conceded_points(measurements, selection.threshold)
     return [
         "Generated. Do not edit this block by hand; re-run the calibrator.",
         "",
@@ -915,6 +1080,24 @@ def _provenance(measurements: Measurements, selection: Selection) -> list:
         f"{identity.get('machine', 'unknown')}",
         f"corelib:  {identity.get('corelib_dll_sha256', 'unknown')}",
         f"model:    {identity.get('model_sha256', 'unknown')}",
+        "",
+        "RELEASE-FIXED IS NOT HARDWARE-INDEPENDENT. Every measurement behind",
+        "this value comes from the single machine, corelib build and model",
+        "above. Nothing establishes where the crossover sits on different",
+        "silicon, on a corelib whose append or prefill path changed, or on a",
+        "different model. A port needs this re-measured, not inherited.",
+        "",
+        "What this value gives up, measured: "
+        + (
+            "; ".join(
+                f"history {history} suffix {suffix} "
+                f"({slowdown:,.1f}x slower, +{delta / 1e6:,.1f} ms)"
+                for history, suffix, delta, slowdown in concessions
+            )
+            if concessions
+            else "nothing the measurement can see"
+        )
+        + ".",
     ]
 
 
@@ -941,6 +1124,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         selection = select_threshold_detailed(measurements.samples())
         crossover_notes = measurements.crossover_disagreements(selection)
+        unclosed = measurements.unclosed_histories()
         records = _read_json(args.crossover_history, "crossover history")
         if not isinstance(records, Sequence) or isinstance(records, (str, bytes)):
             raise CalibrationError("crossover history is not a list of records")
@@ -973,6 +1157,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"diagnostic: {line}", file=sys.stderr)
     for line in crossover_notes:
         print(f"diagnostic: {line}", file=sys.stderr)
+    for line in unclosed:
+        print(f"diagnostic: {line}", file=sys.stderr)
     for line in agreement.diagnostics:
         print(f"diagnostic: {line}", file=sys.stderr)
 
@@ -981,8 +1167,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         failed.append(
             "the Section 10.7 p95 rule contradicts the recorded bracket"
         )
-    if not agreement.agrees:
-        failed.append("the constant is not supported by every interleaved run")
+    if unclosed:
+        failed.append(
+            "a per-history winner set is not downward-closed, so append lost "
+            "at a short suffix and won again at a longer one"
+        )
+    if not agreement.permits:
+        failed.append("the constant is contradicted by an interleaved run")
 
     stale = []
     if args.check:
@@ -1019,10 +1210,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                     },
                     "diagnostics": list(selection.diagnostics)
                     + list(crossover_notes)
+                    + list(unclosed)
                     + list(agreement.diagnostics),
+                    "winners_downward_closed": not unclosed,
                     "history_agreement": {
                         "comparable": agreement.comparable,
-                        "agrees": agreement.agrees,
+                        "permits": agreement.permits,
+                        "tight": [row.utc for row in agreement.tight],
                         "rows": [
                             dataclasses.asdict(row) for row in agreement.rows
                         ],

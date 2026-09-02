@@ -808,9 +808,10 @@ def render_markdown(document: dict) -> str:
             add("")
             add(
                 "| rendered history | append decisively wins up to | "
-                "re-prefill decisively wins from | crossover lies in |"
+                "re-prefill decisively wins from | crossover lies in | "
+                "margin at each bracket edge |"
             )
-            add("| ---: | ---: | ---: | :--- |")
+            add("| ---: | ---: | ---: | :--- | :--- |")
             for history, entry in crossover.items():
                 lower = entry.get("append_wins_up_to")
                 upper = entry.get("reprefill_wins_from")
@@ -820,7 +821,38 @@ def render_markdown(document: dict) -> str:
                     span = f"exactly {upper}"
                 else:
                     span = f"`({lower}, {upper}]` — not resolved further"
-                add(f"| {history} | {lower} | {upper} | {span} |")
+                # HOW FIRM EACH EDGE IS, as the gap over the uncertainty that
+                # had to be beaten. Without it "decisively" is a word rather
+                # than a number, and the bracket's edges are exactly where a
+                # reader should be allowed to check the strength of the call.
+                margins = []
+                for decision in entry.get("decisions", []):
+                    if decision.get("suffix") in (lower, upper):
+                        ratio = decision.get("gap_over_uncertainty")
+                        if isinstance(ratio, (int, float)):
+                            margins.append(
+                                f"{decision['suffix']}: {ratio:.1f}x"
+                            )
+                add(
+                    f"| {history} | {lower} | {upper} | {span} | "
+                    f"{', '.join(margins) if margins else 'n/a'} |"
+                )
+            add("")
+            undecided = sum(
+                1
+                for entry in crossover.values()
+                for decision in entry.get("decisions", [])
+                if not decision.get("decided")
+            )
+            total = sum(
+                len(entry.get("decisions", [])) for entry in crossover.values()
+            )
+            add(
+                f"{total - undecided} of {total} sweep points were decided; "
+                f"{undecided} were not and widen the brackets above. The "
+                f"margin column is the gap between the routes divided by the "
+                f"uncertainty it had to beat at that suffix."
+            )
             add("")
             add(
                 f"Prefix-monotonic: "

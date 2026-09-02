@@ -10,103 +10,136 @@
         ],
         "decisions": [
           {
-            "append_p50_ns": 68966400,
+            "append_p50_ns": 80734400,
             "decided": true,
-            "gap_ns": 1127961700,
-            "reprefill_p50_ns": 1196928100,
+            "drift_across_point_ns": 19086300,
+            "gap_ns": 1121263900,
+            "gap_over_uncertainty": 58.74705416974479,
+            "reprefill_p50_ns": 1201998300,
             "suffix": 1,
+            "uncertainty_ns": 19086300,
             "winner": "append",
-            "within_route_spread_ns": 89607300
+            "within_route_spread_ns": 18947500
           },
           {
-            "append_p50_ns": 158673600,
+            "append_p50_ns": 171907200,
             "decided": true,
-            "gap_ns": 1038078500,
-            "reprefill_p50_ns": 1196752100,
+            "drift_across_point_ns": 13486100,
+            "gap_ns": 1017100700,
+            "gap_over_uncertainty": 54.27605472960714,
+            "reprefill_p50_ns": 1189007900,
             "suffix": 2,
+            "uncertainty_ns": 18739400,
             "winner": "append",
-            "within_route_spread_ns": 22194200
+            "within_route_spread_ns": 18739400
           },
           {
-            "append_p50_ns": 300095900,
+            "append_p50_ns": 361515700,
             "decided": true,
-            "gap_ns": 895232500,
-            "reprefill_p50_ns": 1195328400,
+            "drift_across_point_ns": 16231100,
+            "gap_ns": 824462100,
+            "gap_over_uncertainty": 30.707710242954036,
+            "reprefill_p50_ns": 1185977800,
             "suffix": 4,
+            "uncertainty_ns": 26848700,
             "winner": "append",
-            "within_route_spread_ns": 15614500
+            "within_route_spread_ns": 26848700
           },
           {
-            "append_p50_ns": 623845400,
+            "append_p50_ns": 638199900,
             "decided": true,
-            "gap_ns": 567453400,
-            "reprefill_p50_ns": 1191298800,
+            "drift_across_point_ns": 20285500,
+            "gap_ns": 553723100,
+            "gap_over_uncertainty": 20.874494369738713,
+            "reprefill_p50_ns": 1191923000,
             "suffix": 8,
+            "uncertainty_ns": 26526300,
             "winner": "append",
-            "within_route_spread_ns": 30581400
+            "within_route_spread_ns": 26526300
           },
           {
-            "append_p50_ns": 942993900,
+            "append_p50_ns": 945217100,
             "decided": true,
-            "gap_ns": 255451900,
-            "reprefill_p50_ns": 1198445800,
+            "drift_across_point_ns": 26243300,
+            "gap_ns": 252008500,
+            "gap_over_uncertainty": 5.19000545755975,
+            "reprefill_p50_ns": 1197225600,
             "suffix": 12,
+            "uncertainty_ns": 48556500,
             "winner": "append",
-            "within_route_spread_ns": 39088800
+            "within_route_spread_ns": 48556500
           },
           {
-            "append_p50_ns": 1227691700,
+            "append_p50_ns": 1319190800,
             "decided": true,
-            "gap_ns": 36499300,
-            "reprefill_p50_ns": 1191192400,
+            "drift_across_point_ns": 31243200,
+            "gap_ns": 133789400,
+            "gap_over_uncertainty": 4.282192605110872,
+            "reprefill_p50_ns": 1185401400,
             "suffix": 16,
+            "uncertainty_ns": 31243200,
             "winner": "reprefill",
-            "within_route_spread_ns": 28542900
+            "within_route_spread_ns": 31243200
           },
           {
-            "append_p50_ns": 1873724200,
+            "append_p50_ns": 1969250900,
             "decided": true,
-            "gap_ns": 684723900,
-            "reprefill_p50_ns": 1189000300,
+            "drift_across_point_ns": 65210400,
+            "gap_ns": 774554900,
+            "gap_over_uncertainty": 11.87778176487186,
+            "reprefill_p50_ns": 1194696000,
             "suffix": 24,
+            "uncertainty_ns": 65210400,
             "winner": "reprefill",
-            "within_route_spread_ns": 70739800
+            "within_route_spread_ns": 10663000
           },
           {
-            "append_p50_ns": 1444593900,
-            "decided": false,
-            "gap_ns": 274201100,
-            "reprefill_p50_ns": 1170392800,
+            "append_p50_ns": 2763301800,
+            "decided": true,
+            "drift_across_point_ns": 31724800,
+            "gap_ns": 1568624100,
+            "gap_over_uncertainty": 11.763810228043125,
+            "reprefill_p50_ns": 1194677700,
             "suffix": 32,
-            "winner": "undecided",
-            "within_route_spread_ns": 1057114200
+            "uncertainty_ns": 133343200,
+            "winner": "reprefill",
+            "within_route_spread_ns": 133343200
           },
           {
-            "append_p50_ns": 2864452300,
+            "append_p50_ns": 2942252400,
             "decided": true,
-            "gap_ns": 1689101500,
-            "reprefill_p50_ns": 1175350800,
+            "drift_across_point_ns": 674764400,
+            "gap_ns": 1793296700,
+            "gap_over_uncertainty": 2.6576634748365504,
+            "reprefill_p50_ns": 1148955700,
             "suffix": 64,
+            "uncertainty_ns": 674764400,
             "winner": "reprefill",
-            "within_route_spread_ns": 25251100
+            "within_route_spread_ns": 674764400
           },
           {
-            "append_p50_ns": 5753280200,
+            "append_p50_ns": 6159008100,
             "decided": true,
-            "gap_ns": 4581655000,
-            "reprefill_p50_ns": 1171625200,
+            "drift_across_point_ns": 45754000,
+            "gap_ns": 5011282200,
+            "gap_over_uncertainty": 5.890206434761615,
+            "reprefill_p50_ns": 1147725900,
             "suffix": 128,
+            "uncertainty_ns": 850782100,
             "winner": "reprefill",
-            "within_route_spread_ns": 360470700
+            "within_route_spread_ns": 850782100
           },
           {
-            "append_p50_ns": 11609403800,
+            "append_p50_ns": 13732877500,
             "decided": true,
-            "gap_ns": 10435968900,
-            "reprefill_p50_ns": 1173434900,
+            "drift_across_point_ns": 2317485000,
+            "gap_ns": 12576535400,
+            "gap_over_uncertainty": 5.426803366580582,
+            "reprefill_p50_ns": 1156342100,
             "suffix": 256,
+            "uncertainty_ns": 2317485000,
             "winner": "reprefill",
-            "within_route_spread_ns": 94167800
+            "within_route_spread_ns": 275483100
           }
         ],
         "reprefill_wins_from": 16
@@ -120,109 +153,142 @@
         ],
         "decisions": [
           {
-            "append_p50_ns": 73463600,
+            "append_p50_ns": 43868600,
             "decided": true,
-            "gap_ns": 308158100,
-            "reprefill_p50_ns": 381621700,
+            "drift_across_point_ns": 4762800,
+            "gap_ns": 316708800,
+            "gap_over_uncertainty": 13.882334376561555,
+            "reprefill_p50_ns": 360577400,
             "suffix": 1,
+            "uncertainty_ns": 22813800,
             "winner": "append",
-            "within_route_spread_ns": 22295600
+            "within_route_spread_ns": 22813800
           },
           {
-            "append_p50_ns": 155414900,
+            "append_p50_ns": 115827100,
             "decided": true,
-            "gap_ns": 227893100,
-            "reprefill_p50_ns": 383308000,
+            "drift_across_point_ns": 16067100,
+            "gap_ns": 232573900,
+            "gap_over_uncertainty": 1.820814416581135,
+            "reprefill_p50_ns": 348401000,
             "suffix": 2,
+            "uncertainty_ns": 127730700,
             "winner": "append",
-            "within_route_spread_ns": 23890300
+            "within_route_spread_ns": 127730700
           },
           {
-            "append_p50_ns": 312100200,
+            "append_p50_ns": 316475800,
             "decided": true,
-            "gap_ns": 71468200,
-            "reprefill_p50_ns": 383568400,
+            "drift_across_point_ns": 16368900,
+            "gap_ns": 64429500,
+            "gap_over_uncertainty": 3.9360922236680533,
+            "reprefill_p50_ns": 380905300,
             "suffix": 4,
+            "uncertainty_ns": 16368900,
             "winner": "append",
-            "within_route_spread_ns": 21850200
+            "within_route_spread_ns": 15998000
           },
           {
-            "append_p50_ns": 615517300,
+            "append_p50_ns": 654078200,
             "decided": true,
-            "gap_ns": 231098800,
-            "reprefill_p50_ns": 384418500,
+            "drift_across_point_ns": 9574100,
+            "gap_ns": 273279600,
+            "gap_over_uncertainty": 19.263084438241453,
+            "reprefill_p50_ns": 380798600,
             "suffix": 8,
+            "uncertainty_ns": 14186700,
             "winner": "reprefill",
-            "within_route_spread_ns": 29243000
+            "within_route_spread_ns": 14186700
           },
           {
-            "append_p50_ns": 949306300,
+            "append_p50_ns": 1006677100,
             "decided": true,
-            "gap_ns": 565193900,
-            "reprefill_p50_ns": 384112400,
+            "drift_across_point_ns": 46715500,
+            "gap_ns": 628730700,
+            "gap_over_uncertainty": 5.801281442065218,
+            "reprefill_p50_ns": 377946400,
             "suffix": 12,
+            "uncertainty_ns": 108377900,
             "winner": "reprefill",
-            "within_route_spread_ns": 205615900
+            "within_route_spread_ns": 108377900
           },
           {
-            "append_p50_ns": 1224635000,
+            "append_p50_ns": 1270073200,
             "decided": true,
-            "gap_ns": 838474700,
-            "reprefill_p50_ns": 386160300,
+            "drift_across_point_ns": 41673500,
+            "gap_ns": 885673300,
+            "gap_over_uncertainty": 21.252673761503114,
+            "reprefill_p50_ns": 384399900,
             "suffix": 16,
+            "uncertainty_ns": 41673500,
             "winner": "reprefill",
-            "within_route_spread_ns": 23712100
+            "within_route_spread_ns": 41673500
           },
           {
-            "append_p50_ns": 1871576400,
+            "append_p50_ns": 1914352000,
             "decided": true,
-            "gap_ns": 1488009100,
-            "reprefill_p50_ns": 383567300,
+            "drift_across_point_ns": 123159600,
+            "gap_ns": 1530135300,
+            "gap_over_uncertainty": 12.424003488156831,
+            "reprefill_p50_ns": 384216700,
             "suffix": 24,
+            "uncertainty_ns": 123159600,
             "winner": "reprefill",
-            "within_route_spread_ns": 17227700
+            "within_route_spread_ns": 50048100
           },
           {
-            "append_p50_ns": 2590020700,
+            "append_p50_ns": 2505845000,
             "decided": true,
-            "gap_ns": 2206847600,
-            "reprefill_p50_ns": 383173100,
+            "drift_across_point_ns": 4014200,
+            "gap_ns": 2122874900,
+            "gap_over_uncertainty": 24.833419118765253,
+            "reprefill_p50_ns": 382970100,
             "suffix": 32,
+            "uncertainty_ns": 85484600,
             "winner": "reprefill",
-            "within_route_spread_ns": 86937700
+            "within_route_spread_ns": 85484600
           },
           {
-            "append_p50_ns": 5150181800,
+            "append_p50_ns": 4977157000,
             "decided": true,
-            "gap_ns": 4765317000,
-            "reprefill_p50_ns": 384864800,
+            "drift_across_point_ns": 80146900,
+            "gap_ns": 4591725300,
+            "gap_over_uncertainty": 38.74242676087354,
+            "reprefill_p50_ns": 385431700,
             "suffix": 64,
+            "uncertainty_ns": 118519300,
             "winner": "reprefill",
-            "within_route_spread_ns": 195101400
+            "within_route_spread_ns": 118519300
           },
           {
-            "append_p50_ns": 10033267200,
+            "append_p50_ns": 9744188100,
             "decided": true,
-            "gap_ns": 9641373000,
-            "reprefill_p50_ns": 391894200,
+            "drift_across_point_ns": 753681500,
+            "gap_ns": 9359303000,
+            "gap_over_uncertainty": 12.418114283022735,
+            "reprefill_p50_ns": 384885100,
             "suffix": 128,
+            "uncertainty_ns": 753681500,
             "winner": "reprefill",
-            "within_route_spread_ns": 154903400
+            "within_route_spread_ns": 440858000
           },
           {
-            "append_p50_ns": 19788270500,
+            "append_p50_ns": 19725667000,
             "decided": true,
-            "gap_ns": 19402089900,
-            "reprefill_p50_ns": 386180600,
+            "drift_across_point_ns": 854450400,
+            "gap_ns": 19338208000,
+            "gap_over_uncertainty": 22.63233535849477,
+            "reprefill_p50_ns": 387459000,
             "suffix": 256,
+            "uncertainty_ns": 854450400,
             "winner": "reprefill",
-            "within_route_spread_ns": 996703800
+            "within_route_spread_ns": 854450400
           }
         ],
         "reprefill_wins_from": 8
       }
     },
-    "decision_rule": "a point is decided only when the gap between the two routes' p50 exceeds the larger of the two routes' own p50-to-p95 spread at that point; the reported figure is a BRACKET, not a threshold",
+    "decision_rule": "append and re-prefill samples are INTERLEAVED, so a machine regime shift moves both routes together; a point is decided only when the gap between the two routes' p50 exceeds BOTH the larger within-point p50-to-p95 spread AND the larger drift between a route's first and last sample at that point. The reported figure is a BRACKET, not a threshold.",
     "histories": [
       512,
       2048
@@ -230,886 +296,975 @@
     "points": [
       {
         "count": 5,
+        "drift_ns": 4762800,
         "history_rows": 512,
-        "max_ns": 95759200,
-        "mean_ns": 66911000,
-        "min_ns": 40243600,
+        "interleaved_with_reprefill": true,
+        "max_ns": 66682400,
+        "mean_ns": 48142200,
+        "min_ns": 38186600,
         "model_steps": 1,
-        "p50_ns": 73463600,
-        "p95_ns": 95759200,
+        "p50_ns": 43868600,
+        "p95_ns": 66682400,
         "route": "append",
         "samples_ns": [
-          42256900,
-          40243600,
-          95759200,
-          73463600,
-          82831700
+          48368100,
+          66682400,
+          38186600,
+          43868600,
+          43605300
         ],
         "suffix": 1,
-        "tokens_per_second": 13.612183448673902
+        "tokens_per_second": 22.795347925395387
       },
       {
         "count": 5,
+        "drift_ns": 386500,
         "history_rows": 512,
-        "max_ns": 385980300,
-        "mean_ns": 382149160,
-        "min_ns": 380285000,
+        "interleaved_with_append": true,
+        "max_ns": 364085600,
+        "mean_ns": 352774780,
+        "min_ns": 335646500,
         "model_steps": 1,
-        "p50_ns": 381621700,
-        "p95_ns": 385980300,
+        "p50_ns": 360577400,
+        "p95_ns": 364085600,
         "route": "reprefill",
         "samples_ns": [
-          385980300,
-          381910000,
-          380948800,
-          380285000,
-          381621700
+          360963900,
+          335646500,
+          364085600,
+          342600500,
+          360577400
         ],
         "suffix": 1,
-        "tokens_per_second": 1344.2631800026047
+        "tokens_per_second": 1422.718118218169
       },
       {
         "count": 5,
+        "drift_ns": 9338100,
         "history_rows": 512,
-        "max_ns": 179305200,
-        "mean_ns": 158815800,
-        "min_ns": 147420200,
+        "interleaved_with_reprefill": true,
+        "max_ns": 243557800,
+        "mean_ns": 134774960,
+        "min_ns": 85322800,
         "model_steps": 2,
-        "p50_ns": 155414900,
-        "p95_ns": 179305200,
+        "p50_ns": 115827100,
+        "p95_ns": 243557800,
         "route": "append",
         "samples_ns": [
-          147893300,
-          164045400,
-          179305200,
-          155414900,
-          147420200
+          125165200,
+          104001900,
+          85322800,
+          243557800,
+          115827100
         ],
         "suffix": 2,
-        "tokens_per_second": 12.86877899094617
+        "tokens_per_second": 17.267116244816627
       },
       {
         "count": 5,
+        "drift_ns": 16067100,
         "history_rows": 512,
-        "max_ns": 385829800,
-        "mean_ns": 383353520,
-        "min_ns": 380237900,
+        "interleaved_with_append": true,
+        "max_ns": 440270900,
+        "mean_ns": 371791560,
+        "min_ns": 332333900,
         "model_steps": 1,
-        "p50_ns": 383308000,
-        "p95_ns": 385829800,
+        "p50_ns": 348401000,
+        "p95_ns": 440270900,
         "route": "reprefill",
         "samples_ns": [
-          380237900,
-          383308000,
-          385829800,
-          382493900,
-          384898000
+          348401000,
+          336442100,
+          401509900,
+          440270900,
+          332333900
         ],
         "suffix": 2,
-        "tokens_per_second": 1340.958185062665
+        "tokens_per_second": 1475.311494513506
       },
       {
         "count": 5,
+        "drift_ns": 16368900,
         "history_rows": 512,
-        "max_ns": 333950400,
-        "mean_ns": 310362440,
-        "min_ns": 285073600,
+        "interleaved_with_reprefill": true,
+        "max_ns": 323886900,
+        "mean_ns": 316091900,
+        "min_ns": 307335500,
         "model_steps": 4,
-        "p50_ns": 312100200,
-        "p95_ns": 333950400,
+        "p50_ns": 316475800,
+        "p95_ns": 323886900,
         "route": "append",
         "samples_ns": [
-          333950400,
-          285073600,
-          320740300,
-          312100200,
-          299947700
+          323704400,
+          323886900,
+          316475800,
+          309056900,
+          307335500
         ],
         "suffix": 4,
-        "tokens_per_second": 12.816396785391358
+        "tokens_per_second": 12.639197057089357
       },
       {
         "count": 5,
+        "drift_ns": 4395300,
         "history_rows": 512,
-        "max_ns": 393321900,
-        "mean_ns": 386761240,
-        "min_ns": 382061500,
+        "interleaved_with_append": true,
+        "max_ns": 396903300,
+        "mean_ns": 383160320,
+        "min_ns": 376510000,
         "model_steps": 1,
-        "p50_ns": 383568400,
-        "p95_ns": 393321900,
+        "p50_ns": 380905300,
+        "p95_ns": 396903300,
         "route": "reprefill",
         "samples_ns": [
-          383568400,
-          391348100,
-          382061500,
-          383506300,
-          393321900
+          380905300,
+          380573300,
+          380909700,
+          396903300,
+          376510000
         ],
         "suffix": 4,
-        "tokens_per_second": 1345.2620184561606
+        "tokens_per_second": 1354.6674199597642
       },
       {
         "count": 5,
+        "drift_ns": 2826200,
         "history_rows": 512,
-        "max_ns": 644760300,
-        "mean_ns": 618426820,
-        "min_ns": 607071900,
+        "interleaved_with_reprefill": true,
+        "max_ns": 668264900,
+        "mean_ns": 647583540,
+        "min_ns": 624902500,
         "model_steps": 8,
-        "p50_ns": 615517300,
-        "p95_ns": 644760300,
+        "p50_ns": 654078200,
+        "p95_ns": 668264900,
         "route": "append",
         "samples_ns": [
-          615517300,
-          608324000,
-          644760300,
-          616460600,
-          607071900
+          624902500,
+          668264900,
+          654078200,
+          662943400,
+          627728700
         ],
         "suffix": 8,
-        "tokens_per_second": 12.997197641723474
+        "tokens_per_second": 12.230953424223587
       },
       {
         "count": 5,
+        "drift_ns": 9574100,
         "history_rows": 512,
-        "max_ns": 386668300,
-        "mean_ns": 384255140,
-        "min_ns": 381122400,
+        "interleaved_with_append": true,
+        "max_ns": 390267000,
+        "mean_ns": 382155420,
+        "min_ns": 377411400,
         "model_steps": 1,
-        "p50_ns": 384418500,
-        "p95_ns": 386668300,
+        "p50_ns": 380798600,
+        "p95_ns": 390267000,
         "route": "reprefill",
         "samples_ns": [
-          386000300,
-          384418500,
-          383066200,
-          386668300,
-          381122400
+          380692900,
+          380798600,
+          381607200,
+          377411400,
+          390267000
         ],
         "suffix": 8,
-        "tokens_per_second": 1352.6924432617056
+        "tokens_per_second": 1365.5512388963614
       },
       {
         "count": 5,
+        "drift_ns": 46715500,
         "history_rows": 512,
-        "max_ns": 1154922200,
-        "mean_ns": 978310380,
-        "min_ns": 905595700,
+        "interleaved_with_reprefill": true,
+        "max_ns": 1115055000,
+        "mean_ns": 937542980,
+        "min_ns": 551452600,
         "model_steps": 12,
-        "p50_ns": 949306300,
-        "p95_ns": 1154922200,
+        "p50_ns": 1006677100,
+        "p95_ns": 1115055000,
         "route": "append",
         "samples_ns": [
-          918456100,
-          949306300,
-          1154922200,
-          963271600,
-          905595700
+          1006677100,
+          551452600,
+          1115055000,
+          1054568600,
+          959961600
         ],
         "suffix": 12,
-        "tokens_per_second": 12.640809399453053
+        "tokens_per_second": 11.920406255392122
       },
       {
         "count": 5,
+        "drift_ns": 29270300,
         "history_rows": 512,
-        "max_ns": 385111700,
-        "mean_ns": 384101380,
-        "min_ns": 383264500,
+        "interleaved_with_append": true,
+        "max_ns": 386260600,
+        "mean_ns": 371919340,
+        "min_ns": 356891200,
         "model_steps": 1,
-        "p50_ns": 384112400,
-        "p95_ns": 385111700,
+        "p50_ns": 377946400,
+        "p95_ns": 386260600,
         "route": "reprefill",
         "samples_ns": [
-          385111700,
-          383264500,
-          384546600,
-          383471700,
-          384112400
+          356990300,
+          356891200,
+          381508200,
+          377946400,
+          386260600
         ],
         "suffix": 12,
-        "tokens_per_second": 1364.1840253009275
+        "tokens_per_second": 1386.4399819656967
       },
       {
         "count": 5,
+        "drift_ns": 41673500,
         "history_rows": 512,
-        "max_ns": 1248347100,
-        "mean_ns": 1228353820,
-        "min_ns": 1209285000,
+        "interleaved_with_reprefill": true,
+        "max_ns": 1311746700,
+        "mean_ns": 1276659420,
+        "min_ns": 1244562800,
         "model_steps": 16,
-        "p50_ns": 1224635000,
-        "p95_ns": 1248347100,
+        "p50_ns": 1270073200,
+        "p95_ns": 1311746700,
         "route": "append",
         "samples_ns": [
-          1224635000,
-          1209285000,
-          1248347100,
-          1211209400,
-          1248292600
+          1311746700,
+          1244562800,
+          1303161200,
+          1253753200,
+          1270073200
         ],
         "suffix": 16,
-        "tokens_per_second": 13.06511736149955
+        "tokens_per_second": 12.597699093249114
       },
       {
         "count": 5,
+        "drift_ns": 380700,
         "history_rows": 512,
-        "max_ns": 388027600,
-        "mean_ns": 385921820,
-        "min_ns": 383408200,
+        "interleaved_with_append": true,
+        "max_ns": 385083300,
+        "mean_ns": 383583160,
+        "min_ns": 380775600,
         "model_steps": 1,
-        "p50_ns": 386160300,
-        "p95_ns": 388027600,
+        "p50_ns": 384399900,
+        "p95_ns": 385083300,
         "route": "reprefill",
         "samples_ns": [
-          386160300,
-          388027600,
-          386946000,
-          385067000,
-          383408200
+          384780600,
+          380775600,
+          382876400,
+          385083300,
+          384399900
         ],
         "suffix": 16,
-        "tokens_per_second": 1367.3078252735975
+        "tokens_per_second": 1373.569556079489
       },
       {
         "count": 5,
+        "drift_ns": 123159600,
         "history_rows": 512,
-        "max_ns": 1888804100,
-        "mean_ns": 1862417900,
-        "min_ns": 1811065900,
+        "interleaved_with_reprefill": true,
+        "max_ns": 1964400100,
+        "mean_ns": 1904382660,
+        "min_ns": 1841240500,
         "model_steps": 24,
-        "p50_ns": 1871576400,
-        "p95_ns": 1888804100,
+        "p50_ns": 1914352000,
+        "p95_ns": 1964400100,
         "route": "append",
         "samples_ns": [
-          1874099700,
-          1866543400,
-          1811065900,
-          1888804100,
-          1871576400
+          1841240500,
+          1874585400,
+          1914352000,
+          1927335300,
+          1964400100
         ],
         "suffix": 24,
-        "tokens_per_second": 12.823414529056896
+        "tokens_per_second": 12.536879319999665
       },
       {
         "count": 5,
+        "drift_ns": 733700,
         "history_rows": 512,
-        "max_ns": 393676800,
-        "mean_ns": 385151680,
-        "min_ns": 380897900,
+        "interleaved_with_append": true,
+        "max_ns": 386040300,
+        "mean_ns": 384341020,
+        "min_ns": 382608600,
         "model_steps": 1,
-        "p50_ns": 383567300,
-        "p95_ns": 393676800,
+        "p50_ns": 384216700,
+        "p95_ns": 386040300,
         "route": "reprefill",
         "samples_ns": [
-          383567300,
-          383450800,
-          384165600,
-          393676800,
-          380897900
+          384052900,
+          386040300,
+          384216700,
+          382608600,
+          384786600
         ],
         "suffix": 24,
-        "tokens_per_second": 1397.4079646518355
+        "tokens_per_second": 1395.046076862354
       },
       {
         "count": 5,
+        "drift_ns": 4014200,
         "history_rows": 512,
-        "max_ns": 2676958400,
-        "mean_ns": 2591301680,
-        "min_ns": 2521471600,
+        "interleaved_with_reprefill": true,
+        "max_ns": 2591329600,
+        "mean_ns": 2517460040,
+        "min_ns": 2480742300,
         "model_steps": 32,
-        "p50_ns": 2590020700,
-        "p95_ns": 2676958400,
+        "p50_ns": 2505845000,
+        "p95_ns": 2591329600,
         "route": "append",
         "samples_ns": [
-          2676958400,
-          2576289400,
-          2591768300,
-          2521471600,
-          2590020700
+          2505845000,
+          2480742300,
+          2507552500,
+          2591329600,
+          2501830800
         ],
         "suffix": 32,
-        "tokens_per_second": 12.35511360970976
+        "tokens_per_second": 12.770143404719764
       },
       {
         "count": 5,
+        "drift_ns": 1054700,
         "history_rows": 512,
-        "max_ns": 385903700,
-        "mean_ns": 383621280,
-        "min_ns": 382597200,
+        "interleaved_with_append": true,
+        "max_ns": 385320900,
+        "mean_ns": 382991100,
+        "min_ns": 380445200,
         "model_steps": 1,
-        "p50_ns": 383173100,
-        "p95_ns": 385903700,
+        "p50_ns": 382970100,
+        "p95_ns": 385320900,
         "route": "reprefill",
         "samples_ns": [
-          383744800,
-          385903700,
-          383173100,
-          382687600,
-          382597200
+          382582300,
+          382970100,
+          385320900,
+          380445200,
+          383637000
         ],
         "suffix": 32,
-        "tokens_per_second": 1419.723879364183
+        "tokens_per_second": 1420.4764288387005
       },
       {
         "count": 5,
+        "drift_ns": 80146900,
         "history_rows": 512,
-        "max_ns": 5345283200,
-        "mean_ns": 5169382700,
-        "min_ns": 5063297600,
+        "interleaved_with_reprefill": true,
+        "max_ns": 5095676300,
+        "mean_ns": 5001145360,
+        "min_ns": 4910837300,
         "model_steps": 64,
-        "p50_ns": 5150181800,
-        "p95_ns": 5345283200,
+        "p50_ns": 4977157000,
+        "p95_ns": 5095676300,
         "route": "append",
         "samples_ns": [
-          5345283200,
-          5178687300,
-          5109463600,
-          5063297600,
-          5150181800
+          5057303900,
+          5095676300,
+          4910837300,
+          4964752300,
+          4977157000
         ],
         "suffix": 64,
-        "tokens_per_second": 12.426745789828235
+        "tokens_per_second": 12.858746469118817
       },
       {
         "count": 5,
+        "drift_ns": 3357100,
         "history_rows": 512,
-        "max_ns": 386444100,
-        "mean_ns": 384482320,
-        "min_ns": 380903000,
+        "interleaved_with_append": true,
+        "max_ns": 388788800,
+        "mean_ns": 384800500,
+        "min_ns": 381537100,
         "model_steps": 1,
-        "p50_ns": 384864800,
-        "p95_ns": 386444100,
+        "p50_ns": 385431700,
+        "p95_ns": 388788800,
         "route": "reprefill",
         "samples_ns": [
-          380903000,
-          384239600,
-          385960100,
-          384864800,
-          386444100
+          388788800,
+          382348300,
+          385896600,
+          381537100,
+          385431700
         ],
         "suffix": 64,
-        "tokens_per_second": 1496.6294657240674
+        "tokens_per_second": 1494.4281957088635
       },
       {
         "count": 5,
+        "drift_ns": 753681500,
         "history_rows": 512,
-        "max_ns": 10188170600,
-        "mean_ns": 10026654180,
-        "min_ns": 9779174000,
+        "interleaved_with_reprefill": true,
+        "max_ns": 10185046100,
+        "mean_ns": 9650365500,
+        "min_ns": 9136597900,
         "model_steps": 128,
-        "p50_ns": 10033267200,
-        "p95_ns": 10188170600,
+        "p50_ns": 9744188100,
+        "p95_ns": 10185046100,
         "route": "append",
         "samples_ns": [
-          10142071200,
-          10033267200,
-          10188170600,
-          9990587900,
-          9779174000
+          9890279400,
+          9744188100,
+          10185046100,
+          9295716000,
+          9136597900
         ],
         "suffix": 128,
-        "tokens_per_second": 12.757559172748833
+        "tokens_per_second": 13.136035417871295
       },
       {
         "count": 5,
+        "drift_ns": 17231800,
         "history_rows": 512,
-        "max_ns": 405782600,
-        "mean_ns": 392639640,
-        "min_ns": 381230600,
+        "interleaved_with_append": true,
+        "max_ns": 405238000,
+        "mean_ns": 382898740,
+        "min_ns": 354015400,
         "model_steps": 1,
-        "p50_ns": 391894200,
-        "p95_ns": 405782600,
+        "p50_ns": 384885100,
+        "p95_ns": 405238000,
         "route": "reprefill",
         "samples_ns": [
-          405782600,
-          386203800,
-          398087000,
-          381230600,
-          391894200
+          388006200,
+          384885100,
+          354015400,
+          382349000,
+          405238000
         ],
         "suffix": 128,
-        "tokens_per_second": 1633.0938299163397
+        "tokens_per_second": 1662.8339210845004
       },
       {
         "count": 5,
+        "drift_ns": 854450400,
         "history_rows": 512,
-        "max_ns": 20784974300,
-        "mean_ns": 19955463180,
-        "min_ns": 19660897200,
+        "interleaved_with_reprefill": true,
+        "max_ns": 20580117400,
+        "mean_ns": 18902557560,
+        "min_ns": 15372662100,
         "model_steps": 256,
-        "p50_ns": 19788270500,
-        "p95_ns": 20784974300,
+        "p50_ns": 19725667000,
+        "p95_ns": 20580117400,
         "route": "append",
         "samples_ns": [
-          19788270500,
-          19799953100,
-          19743220800,
-          19660897200,
-          20784974300
+          19725667000,
+          15372662100,
+          18594961800,
+          20239379500,
+          20580117400
         ],
         "suffix": 256,
-        "tokens_per_second": 12.936956769415499
+        "tokens_per_second": 12.978014887912282
       },
       {
         "count": 5,
+        "drift_ns": 4054500,
         "history_rows": 512,
-        "max_ns": 395468900,
-        "mean_ns": 388743860,
-        "min_ns": 384664500,
+        "interleaved_with_append": true,
+        "max_ns": 389653000,
+        "mean_ns": 379565740,
+        "min_ns": 348544700,
         "model_steps": 1,
-        "p50_ns": 386180600,
-        "p95_ns": 395468900,
+        "p50_ns": 387459000,
+        "p95_ns": 389653000,
         "route": "reprefill",
         "samples_ns": [
-          386180600,
-          385544400,
-          395468900,
-          384664500,
-          391860900
+          383404500,
+          348544700,
+          389653000,
+          388767500,
+          387459000
         ],
         "suffix": 256,
-        "tokens_per_second": 1988.7068381995366
+        "tokens_per_second": 1982.1452076219678
       },
       {
         "count": 5,
+        "drift_ns": 19086300,
         "history_rows": 2048,
-        "max_ns": 107121500,
-        "mean_ns": 76201600,
-        "min_ns": 45832100,
+        "interleaved_with_reprefill": true,
+        "max_ns": 99681900,
+        "mean_ns": 85880500,
+        "min_ns": 78112900,
         "model_steps": 1,
-        "p50_ns": 68966400,
-        "p95_ns": 107121500,
+        "p50_ns": 80734400,
+        "p95_ns": 99681900,
         "route": "append",
         "samples_ns": [
-          45832100,
-          68080600,
-          68966400,
-          107121500,
-          91007400
+          99681900,
+          80734400,
+          90277700,
+          78112900,
+          80595600
         ],
         "suffix": 1,
-        "tokens_per_second": 14.49981440237565
+        "tokens_per_second": 12.386293822707545
       },
       {
         "count": 5,
+        "drift_ns": 12344000,
         "history_rows": 2048,
-        "max_ns": 1286535400,
-        "mean_ns": 1217610160,
-        "min_ns": 1184161600,
+        "interleaved_with_append": true,
+        "max_ns": 1204732500,
+        "mean_ns": 1197463760,
+        "min_ns": 1184166900,
         "model_steps": 1,
-        "p50_ns": 1196928100,
-        "p95_ns": 1286535400,
+        "p50_ns": 1201998300,
+        "p95_ns": 1204732500,
         "route": "reprefill",
         "samples_ns": [
-          1236076200,
-          1184349500,
-          1184161600,
-          1286535400,
-          1196928100
+          1204732500,
+          1201998300,
+          1184166900,
+          1204032600,
+          1192388500
         ],
         "suffix": 1,
-        "tokens_per_second": 1711.8822759696259
+        "tokens_per_second": 1704.6613127489447
       },
       {
         "count": 5,
+        "drift_ns": 2138600,
         "history_rows": 2048,
-        "max_ns": 180867800,
-        "mean_ns": 158319400,
-        "min_ns": 142883500,
+        "interleaved_with_reprefill": true,
+        "max_ns": 179992700,
+        "mean_ns": 171046400,
+        "min_ns": 157399700,
         "model_steps": 2,
-        "p50_ns": 158673600,
-        "p95_ns": 180867800,
+        "p50_ns": 171907200,
+        "p95_ns": 179992700,
         "route": "append",
         "samples_ns": [
-          142883500,
-          180867800,
-          166098100,
-          143074000,
-          158673600
+          171907200,
+          171886600,
+          179992700,
+          157399700,
+          174045800
         ],
         "suffix": 2,
-        "tokens_per_second": 12.6044912323159
+        "tokens_per_second": 11.634184024869231
       },
       {
         "count": 5,
+        "drift_ns": 13486100,
         "history_rows": 2048,
-        "max_ns": 1205995100,
-        "mean_ns": 1197672280,
-        "min_ns": 1192319000,
+        "interleaved_with_append": true,
+        "max_ns": 1207747300,
+        "mean_ns": 1191166740,
+        "min_ns": 1176400000,
         "model_steps": 1,
-        "p50_ns": 1196752100,
-        "p95_ns": 1205995100,
+        "p50_ns": 1189007900,
+        "p95_ns": 1207747300,
         "route": "reprefill",
         "samples_ns": [
-          1205995100,
-          1198406700,
-          1194888500,
-          1196752100,
-          1192319000
+          1202494000,
+          1176400000,
+          1180184500,
+          1207747300,
+          1189007900
         ],
         "suffix": 2,
-        "tokens_per_second": 1712.9696283800129
+        "tokens_per_second": 1724.126475526361
       },
       {
         "count": 5,
+        "drift_ns": 12746800,
         "history_rows": 2048,
-        "max_ns": 315710400,
-        "mean_ns": 300553800,
-        "min_ns": 291434800,
+        "interleaved_with_reprefill": true,
+        "max_ns": 370077800,
+        "mean_ns": 355327600,
+        "min_ns": 334078700,
         "model_steps": 4,
-        "p50_ns": 300095900,
-        "p95_ns": 315710400,
+        "p50_ns": 361515700,
+        "p95_ns": 370077800,
         "route": "append",
         "samples_ns": [
-          295300800,
-          300095900,
-          300227100,
-          291434800,
-          315710400
+          346825500,
+          370077800,
+          364140300,
+          361515700,
+          334078700
         ],
         "suffix": 4,
-        "tokens_per_second": 13.329072473166079
+        "tokens_per_second": 11.064526381565171
       },
       {
         "count": 5,
+        "drift_ns": 16231100,
         "history_rows": 2048,
-        "max_ns": 1202353200,
-        "mean_ns": 1194328060,
-        "min_ns": 1185934500,
+        "interleaved_with_append": true,
+        "max_ns": 1212826500,
+        "mean_ns": 1192285280,
+        "min_ns": 1182768900,
         "model_steps": 1,
-        "p50_ns": 1195328400,
-        "p95_ns": 1202353200,
+        "p50_ns": 1185977800,
+        "p95_ns": 1212826500,
         "route": "reprefill",
         "samples_ns": [
-          1202353200,
-          1195328400,
-          1198126500,
-          1185934500,
-          1189897700
+          1196595400,
+          1185977800,
+          1183257800,
+          1182768900,
+          1212826500
         ],
         "suffix": 4,
-        "tokens_per_second": 1716.6830471023695
+        "tokens_per_second": 1730.2178843482568
       },
       {
         "count": 5,
+        "drift_ns": 20285500,
         "history_rows": 2048,
-        "max_ns": 654426800,
-        "mean_ns": 628646620,
-        "min_ns": 610351700,
+        "interleaved_with_reprefill": true,
+        "max_ns": 664726200,
+        "mean_ns": 638109800,
+        "min_ns": 612478400,
         "model_steps": 8,
-        "p50_ns": 623845400,
-        "p95_ns": 654426800,
+        "p50_ns": 638199900,
+        "p95_ns": 664726200,
         "route": "append",
         "samples_ns": [
-          610748500,
-          610351700,
-          643860700,
-          654426800,
-          623845400
+          664726200,
+          630703800,
+          638199900,
+          612478400,
+          644440700
         ],
         "suffix": 8,
-        "tokens_per_second": 12.823689971906502
+        "tokens_per_second": 12.535257369987052
       },
       {
         "count": 5,
+        "drift_ns": 2175600,
         "history_rows": 2048,
-        "max_ns": 1200309900,
-        "mean_ns": 1191552920,
-        "min_ns": 1178334400,
+        "interleaved_with_append": true,
+        "max_ns": 1201608700,
+        "mean_ns": 1190288220,
+        "min_ns": 1177909400,
         "model_steps": 1,
-        "p50_ns": 1191298800,
-        "p95_ns": 1200309900,
+        "p50_ns": 1191923000,
+        "p95_ns": 1201608700,
         "route": "reprefill",
         "samples_ns": [
-          1197524200,
-          1191298800,
-          1200309900,
-          1178334400,
-          1190297300
+          1194098600,
+          1177909400,
+          1185901400,
+          1201608700,
+          1191923000
         ],
         "suffix": 8,
-        "tokens_per_second": 1725.847453216607
+        "tokens_per_second": 1724.94364149362
       },
       {
         "count": 5,
+        "drift_ns": 26243300,
         "history_rows": 2048,
-        "max_ns": 982082700,
-        "mean_ns": 944051620,
-        "min_ns": 910861900,
+        "interleaved_with_reprefill": true,
+        "max_ns": 993773600,
+        "mean_ns": 955911440,
+        "min_ns": 929457200,
         "model_steps": 12,
-        "p50_ns": 942993900,
-        "p95_ns": 982082700,
+        "p50_ns": 945217100,
+        "p95_ns": 993773600,
         "route": "append",
         "samples_ns": [
-          982082700,
-          940012300,
-          942993900,
-          910861900,
-          944307300
+          968676300,
+          945217100,
+          929457200,
+          993773600,
+          942433000
         ],
         "suffix": 12,
-        "tokens_per_second": 12.72542696193475
+        "tokens_per_second": 12.69549609290818
       },
       {
         "count": 5,
+        "drift_ns": 11990000,
         "history_rows": 2048,
-        "max_ns": 1212363900,
-        "mean_ns": 1200591740,
-        "min_ns": 1191356900,
+        "interleaved_with_append": true,
+        "max_ns": 1205534400,
+        "mean_ns": 1198327940,
+        "min_ns": 1192831300,
         "model_steps": 1,
-        "p50_ns": 1198445800,
-        "p95_ns": 1212363900,
+        "p50_ns": 1197225600,
+        "p95_ns": 1205534400,
         "route": "reprefill",
         "samples_ns": [
-          1196724400,
-          1212363900,
-          1198445800,
-          1204067700,
-          1191356900
+          1205534400,
+          1197225600,
+          1192831300,
+          1202504000,
+          1193544400
         ],
         "suffix": 12,
-        "tokens_per_second": 1718.892919479546
+        "tokens_per_second": 1720.644797438344
       },
       {
         "count": 5,
+        "drift_ns": 31243200,
         "history_rows": 2048,
-        "max_ns": 1248757600,
-        "mean_ns": 1230916040,
-        "min_ns": 1211656200,
+        "interleaved_with_reprefill": true,
+        "max_ns": 1350434000,
+        "mean_ns": 1317204460,
+        "min_ns": 1274786600,
         "model_steps": 16,
-        "p50_ns": 1227691700,
-        "p95_ns": 1248757600,
+        "p50_ns": 1319190800,
+        "p95_ns": 1350434000,
         "route": "append",
         "samples_ns": [
-          1248757600,
-          1227691700,
-          1211656200,
-          1242825000,
-          1223649700
+          1350434000,
+          1297521400,
+          1274786600,
+          1344089500,
+          1319190800
         ],
         "suffix": 16,
-        "tokens_per_second": 13.032587904601783
+        "tokens_per_second": 12.128647349572176
       },
       {
         "count": 5,
+        "drift_ns": 9010600,
         "history_rows": 2048,
-        "max_ns": 1219735300,
-        "mean_ns": 1196646100,
-        "min_ns": 1169212500,
+        "interleaved_with_append": true,
+        "max_ns": 1197106600,
+        "mean_ns": 1178838880,
+        "min_ns": 1154853700,
         "model_steps": 1,
-        "p50_ns": 1191192400,
-        "p95_ns": 1219735300,
+        "p50_ns": 1185401400,
+        "p95_ns": 1197106600,
         "route": "reprefill",
         "samples_ns": [
-          1187381600,
-          1219735300,
-          1169212500,
-          1191192400,
-          1215708700
+          1163864300,
+          1192968400,
+          1197106600,
+          1185401400,
+          1154853700
         ],
         "suffix": 16,
-        "tokens_per_second": 1732.7175693867757
+        "tokens_per_second": 1741.1823539266952
       },
       {
         "count": 5,
+        "drift_ns": 65210400,
         "history_rows": 2048,
-        "max_ns": 1944464000,
-        "mean_ns": 1871708640,
-        "min_ns": 1823350900,
+        "interleaved_with_reprefill": true,
+        "max_ns": 1978790600,
+        "mean_ns": 1953975220,
+        "min_ns": 1904040500,
         "model_steps": 24,
-        "p50_ns": 1873724200,
-        "p95_ns": 1944464000,
+        "p50_ns": 1969250900,
+        "p95_ns": 1978790600,
         "route": "append",
         "samples_ns": [
-          1944464000,
-          1884514700,
-          1823350900,
-          1832489400,
-          1873724200
+          1969250900,
+          1978790600,
+          1940669600,
+          1977124500,
+          1904040500
         ],
         "suffix": 24,
-        "tokens_per_second": 12.808715391518133
+        "tokens_per_second": 12.187375412650567
       },
       {
         "count": 5,
+        "drift_ns": 10663000,
         "history_rows": 2048,
-        "max_ns": 1199590100,
-        "mean_ns": 1189086360,
-        "min_ns": 1176507700,
+        "interleaved_with_append": true,
+        "max_ns": 1205359000,
+        "mean_ns": 1196333420,
+        "min_ns": 1188753100,
         "model_steps": 1,
-        "p50_ns": 1189000300,
-        "p95_ns": 1199590100,
+        "p50_ns": 1194696000,
+        "p95_ns": 1205359000,
         "route": "reprefill",
         "samples_ns": [
-          1196301800,
-          1189000300,
-          1199590100,
-          1176507700,
-          1184031900
+          1194696000,
+          1188753100,
+          1191580900,
+          1201278100,
+          1205359000
         ],
         "suffix": 24,
-        "tokens_per_second": 1742.640434994003
+        "tokens_per_second": 1734.3324159451442
       },
       {
         "count": 5,
+        "drift_ns": 31724800,
         "history_rows": 2048,
-        "max_ns": 2501708100,
-        "mean_ns": 1847603820,
-        "min_ns": 1396431200,
+        "interleaved_with_reprefill": true,
+        "max_ns": 2896645000,
+        "mean_ns": 2732117360,
+        "min_ns": 2594257300,
         "model_steps": 32,
-        "p50_ns": 1444593900,
-        "p95_ns": 2501708100,
+        "p50_ns": 2763301800,
+        "p95_ns": 2896645000,
         "route": "append",
         "samples_ns": [
-          2501708100,
-          2483398400,
-          1444593900,
-          1411887500,
-          1396431200
+          2625982100,
+          2896645000,
+          2763301800,
+          2780400600,
+          2594257300
         ],
         "suffix": 32,
-        "tokens_per_second": 22.151554149577954
+        "tokens_per_second": 11.580349276362067
       },
       {
         "count": 5,
+        "drift_ns": 5705300,
         "history_rows": 2048,
-        "max_ns": 1175874600,
-        "mean_ns": 1169287740,
-        "min_ns": 1158003000,
+        "interleaved_with_append": true,
+        "max_ns": 1212054600,
+        "mean_ns": 1187965320,
+        "min_ns": 1140800000,
         "model_steps": 1,
-        "p50_ns": 1170392800,
-        "p95_ns": 1175874600,
+        "p50_ns": 1194677700,
+        "p95_ns": 1212054600,
         "route": "reprefill",
         "samples_ns": [
-          1170392800,
-          1175546200,
-          1166622100,
-          1175874600,
-          1158003000
+          1194677700,
+          1140800000,
+          1191911300,
+          1212054600,
+          1200383000
         ],
         "suffix": 32,
-        "tokens_per_second": 1777.181130984401
+        "tokens_per_second": 1741.0553490702973
       },
       {
         "count": 5,
+        "drift_ns": 674764400,
         "history_rows": 2048,
-        "max_ns": 2889703400,
-        "mean_ns": 2852510140,
-        "min_ns": 2807010100,
+        "interleaved_with_reprefill": true,
+        "max_ns": 3617016800,
+        "mean_ns": 3073030600,
+        "min_ns": 2903266100,
         "model_steps": 64,
-        "p50_ns": 2864452300,
-        "p95_ns": 2889703400,
+        "p50_ns": 2942252400,
+        "p95_ns": 3617016800,
         "route": "append",
         "samples_ns": [
-          2889703400,
-          2807010100,
-          2874445800,
-          2864452300,
-          2826939100
+          3617016800,
+          2976652600,
+          2903266100,
+          2925965100,
+          2942252400
         ],
         "suffix": 64,
-        "tokens_per_second": 22.342840200201625
+        "tokens_per_second": 21.752042754727636
       },
       {
         "count": 5,
+        "drift_ns": 8929200,
         "history_rows": 2048,
-        "max_ns": 1186257600,
-        "mean_ns": 1173708120,
-        "min_ns": 1159269300,
+        "interleaved_with_append": true,
+        "max_ns": 1155572600,
+        "mean_ns": 1146914520,
+        "min_ns": 1140026500,
         "model_steps": 1,
-        "p50_ns": 1175350800,
-        "p95_ns": 1186257600,
+        "p50_ns": 1148955700,
+        "p95_ns": 1155572600,
         "route": "reprefill",
         "samples_ns": [
-          1159269300,
-          1186257600,
-          1175350800,
-          1169195200,
-          1178467700
+          1140026500,
+          1140315000,
+          1149702800,
+          1155572600,
+          1148955700
         ],
         "suffix": 64,
-        "tokens_per_second": 1796.9103351952456
+        "tokens_per_second": 1838.1909763796812
       },
       {
         "count": 5,
+        "drift_ns": 12634100,
         "history_rows": 2048,
-        "max_ns": 6113750900,
-        "mean_ns": 5802522980,
-        "min_ns": 5636904600,
+        "interleaved_with_reprefill": true,
+        "max_ns": 7009790200,
+        "mean_ns": 6329315220,
+        "min_ns": 5963538600,
         "model_steps": 128,
-        "p50_ns": 5753280200,
-        "p95_ns": 6113750900,
+        "p50_ns": 6159008100,
+        "p95_ns": 7009790200,
         "route": "append",
         "samples_ns": [
-          5733636700,
-          5753280200,
-          6113750900,
-          5775042500,
-          5636904600
+          5963538600,
+          6159008100,
+          6538066500,
+          7009790200,
+          5976172700
         ],
         "suffix": 128,
-        "tokens_per_second": 22.248177656982534
+        "tokens_per_second": 20.78256724487828
       },
       {
         "count": 5,
+        "drift_ns": 45754000,
         "history_rows": 2048,
-        "max_ns": 1175737200,
-        "mean_ns": 1172900560,
-        "min_ns": 1170430700,
+        "interleaved_with_append": true,
+        "max_ns": 1193479900,
+        "mean_ns": 1155781600,
+        "min_ns": 1115511900,
         "model_steps": 1,
-        "p50_ns": 1171625200,
-        "p95_ns": 1175737200,
+        "p50_ns": 1147725900,
+        "p95_ns": 1193479900,
         "route": "reprefill",
         "samples_ns": [
-          1175737200,
-          1171625200,
-          1175228800,
-          1171480900,
-          1170430700
+          1147725900,
+          1138788100,
+          1115511900,
+          1183402200,
+          1193479900
         ],
         "suffix": 128,
-        "tokens_per_second": 1857.249229531765
+        "tokens_per_second": 1895.9230596782734
       },
       {
         "count": 5,
+        "drift_ns": 2317485000,
         "history_rows": 2048,
-        "max_ns": 11703571600,
-        "mean_ns": 11543509200,
-        "min_ns": 11375475200,
+        "interleaved_with_reprefill": true,
+        "max_ns": 14008360600,
+        "mean_ns": 13140085720,
+        "min_ns": 11605866900,
         "model_steps": 256,
-        "p50_ns": 11609403800,
-        "p95_ns": 11703571600,
+        "p50_ns": 13732877500,
+        "p95_ns": 14008360600,
         "route": "append",
         "samples_ns": [
-          11389931500,
-          11375475200,
-          11609403800,
-          11703571600,
-          11639163900
+          13923351900,
+          13732877500,
+          14008360600,
+          12429971700,
+          11605866900
         ],
         "suffix": 256,
-        "tokens_per_second": 22.051089307445746
+        "tokens_per_second": 18.64139543952096
       },
       {
         "count": 5,
+        "drift_ns": 18926100,
         "history_rows": 2048,
-        "max_ns": 1186855400,
-        "mean_ns": 1175411100,
-        "min_ns": 1163812700,
+        "interleaved_with_append": true,
+        "max_ns": 1171092800,
+        "mean_ns": 1153761960,
+        "min_ns": 1140398600,
         "model_steps": 1,
-        "p50_ns": 1173434900,
-        "p95_ns": 1186855400,
+        "p50_ns": 1156342100,
+        "p95_ns": 1171092800,
         "route": "reprefill",
         "samples_ns": [
-          1168046800,
-          1186855400,
-          1184905700,
-          1173434900,
-          1163812700
+          1140398600,
+          1141651600,
+          1156342100,
+          1171092800,
+          1159324700
         ],
         "suffix": 256,
-        "tokens_per_second": 1963.4664010760205
+        "tokens_per_second": 1992.4899387473656
       }
     ],
     "prefix_monotonic": true,
+    "samples_interleaved": true,
     "suffixes": [
       1,
       2,
@@ -1132,148 +1287,148 @@
         "device_tensor_creates_after_warmup": 0,
         "dispatches_per_pass": 193,
         "live_corelib_object_delta": 0,
-        "max_ns": 131725500,
-        "mean_ns": 45863629,
-        "min_ns": 34294200,
-        "p50_ns": 42214700,
-        "p95_ns": 74209300,
+        "max_ns": 77488700,
+        "mean_ns": 43174651,
+        "min_ns": 38053000,
+        "p50_ns": 41947100,
+        "p95_ns": 51420900,
         "samples_ns": [
-          51844500,
-          44520700,
-          53938400,
-          42894600,
-          41718800,
-          113741500,
-          131725500,
-          64935500,
-          68262700,
-          57031700,
-          76915900,
-          84096700,
-          74209300,
-          45331700,
-          46473300,
-          41687600,
-          34294200,
-          37311300,
-          37680500,
-          34316400,
-          34554200,
-          36680400,
-          39240400,
-          44655600,
-          43626100,
-          40094900,
-          49665000,
-          39554700,
-          59543300,
-          44687900,
-          41678800,
-          54257700,
-          38302400,
-          40587000,
-          45890800,
-          46342100,
-          46351400,
-          40625200,
-          50326000,
-          39920500,
-          39730800,
-          39132600,
-          40015300,
-          39887400,
-          46528800,
-          44105900,
-          43311200,
-          47051100,
-          40741100,
-          43166900,
-          40358500,
-          50438500,
-          74281300,
-          46373000,
-          41712200,
-          47778600,
-          44029900,
-          39328600,
-          40847700,
-          42129400,
-          39206700,
-          53304600,
-          40866300,
-          40692100,
-          40235600,
-          40003400,
-          43455200,
-          42243300,
-          44099400,
-          39980400,
-          40422300,
-          43863300,
-          42214700,
-          47284800,
-          46972900,
-          46085400,
-          39649600,
-          38571700,
-          48165800,
-          38270800,
-          39730700,
-          43297000,
-          41177200,
-          42074800,
-          39025500,
-          39973200,
-          39541200,
-          39615600,
-          39349600,
-          43347800,
-          43387300,
-          40644800,
-          39389900,
-          43061400,
-          47757000,
-          39447800,
-          52388500,
-          43411900,
-          77526500,
-          43177100,
-          42113300,
-          43264200,
-          43746200,
-          40159400,
-          40114900,
-          46303100,
-          42733500,
-          39992500,
-          39004500,
-          39940200,
-          41912100,
-          38789400,
-          50660600,
-          47204200,
-          42065100,
-          39743300,
-          46157000,
-          40739000,
-          39454700,
-          45461000,
-          41054500,
-          39768700,
-          40025800,
-          42365400,
-          45698100,
-          42716600,
-          44863600,
-          41116600
+          56215800,
+          51420900,
+          50109900,
+          45003200,
+          40177200,
+          43492500,
+          39865500,
+          43292000,
+          39609000,
+          39033000,
+          38693500,
+          42722000,
+          44622400,
+          38844100,
+          40196600,
+          39323200,
+          39120700,
+          40852300,
+          39780700,
+          42675100,
+          40237800,
+          39810300,
+          43073700,
+          39273000,
+          40383900,
+          48336700,
+          39259800,
+          42548200,
+          42638900,
+          39807600,
+          41837500,
+          43271900,
+          60350600,
+          41177100,
+          41905300,
+          43040600,
+          40220800,
+          39355300,
+          43723300,
+          41947100,
+          40543300,
+          42277000,
+          39108500,
+          42432500,
+          46616100,
+          66947200,
+          44775600,
+          49158300,
+          40451500,
+          38760100,
+          39952300,
+          48929300,
+          39637100,
+          44279500,
+          46885700,
+          40500500,
+          43791000,
+          42208500,
+          40220000,
+          40545700,
+          40577600,
+          40002000,
+          41964000,
+          38910500,
+          39839000,
+          43211700,
+          41985200,
+          46436000,
+          55776000,
+          40658100,
+          51280600,
+          47068200,
+          40561300,
+          46187600,
+          45149000,
+          43705200,
+          49634300,
+          40793800,
+          43706900,
+          43988500,
+          43026600,
+          43632500,
+          39024700,
+          38902200,
+          44210200,
+          44080300,
+          40779500,
+          39860100,
+          38531100,
+          40087900,
+          77488700,
+          44798100,
+          47385100,
+          43872400,
+          39264900,
+          39292100,
+          43059300,
+          43203900,
+          41835100,
+          39212800,
+          43110700,
+          46295400,
+          60578600,
+          48270700,
+          43869900,
+          42907200,
+          41293300,
+          39709100,
+          40026700,
+          40651200,
+          38053000,
+          39862500,
+          39666700,
+          39741200,
+          42806700,
+          38697500,
+          42871100,
+          39894800,
+          39420900,
+          42150800,
+          45701200,
+          38797800,
+          43290900,
+          45963900,
+          40762500,
+          43656300,
+          38947400,
+          41105700
         ],
         "start_context": 128,
         "synchronizes_per_pass": 129,
         "tokens": 128,
-        "tokens_per_second": 21.080154355477738,
-        "total_ns": 6072061800,
+        "tokens_per_second": 22.268432699516328,
+        "total_ns": 5748047100,
         "v_bytes": 16777216,
-        "v_scatter_ns": 7626700,
+        "v_scatter_ns": 6186300,
         "weight_creates_after_warmup": 0
       },
       {
@@ -1281,148 +1436,148 @@
         "device_tensor_creates_after_warmup": 0,
         "dispatches_per_pass": 193,
         "live_corelib_object_delta": 0,
-        "max_ns": 78646000,
-        "mean_ns": 44416614,
-        "min_ns": 39235900,
-        "p50_ns": 42438700,
-        "p95_ns": 54635700,
+        "max_ns": 77120900,
+        "mean_ns": 44163877,
+        "min_ns": 39602200,
+        "p50_ns": 42404400,
+        "p95_ns": 55325600,
         "samples_ns": [
-          46452700,
-          44523800,
-          46511100,
-          42862600,
-          49309200,
-          48686700,
-          42457100,
-          43096600,
-          41313100,
-          40693300,
-          47397300,
-          58095300,
-          58599800,
-          53791200,
-          42438700,
-          41302500,
-          45660900,
-          41083400,
-          44412700,
-          44412600,
-          41333700,
-          40965700,
-          40815500,
-          40736900,
-          41439900,
-          40702900,
-          51628000,
-          42128300,
-          44633400,
-          41796200,
-          43439800,
+          51785500,
+          59427100,
+          44026600,
+          60757400,
+          45888400,
+          45025800,
+          44771400,
+          41486700,
+          39835000,
+          39997600,
+          40056500,
+          43206800,
+          44548900,
+          46989600,
+          45236600,
+          41201600,
+          40828400,
+          40556600,
+          44621500,
+          40004000,
+          43414200,
+          40013000,
+          40884300,
+          45549400,
+          42662600,
+          40981600,
+          41008600,
+          40957300,
+          47965300,
+          43645600,
+          39602200,
+          40815200,
+          40996100,
+          43981400,
+          40187100,
+          42964900,
+          47156300,
+          41145600,
+          56131500,
+          45395600,
+          42746800,
+          42197500,
+          40305500,
+          40055800,
+          40072800,
+          44046100,
+          40459900,
+          45307000,
+          41104600,
+          77120900,
+          46422300,
+          45571500,
+          41067100,
+          40465600,
+          55325600,
+          41715400,
+          42005200,
+          44539600,
+          43310800,
+          47502800,
+          48517700,
+          41665000,
+          45804400,
+          44616300,
+          40778900,
+          40978300,
+          40850700,
+          44717200,
+          41402800,
+          43507000,
+          40884300,
+          48170300,
+          47165500,
+          45224900,
+          39722700,
+          43558800,
+          43294100,
+          39989500,
+          40982000,
+          40491900,
+          54996300,
+          45409600,
+          42023600,
+          40400800,
+          41277400,
+          48416500,
+          41137500,
+          41539800,
+          42786500,
+          40402800,
+          44973700,
+          51522000,
+          41707000,
+          48753900,
+          65018200,
+          48521900,
+          41707700,
+          40470800,
+          41208200,
+          44540000,
+          41238100,
+          40933500,
+          47942500,
+          40593700,
+          51094000,
+          44586100,
+          42569100,
+          41374300,
+          41070300,
+          41256600,
+          40352800,
+          40244600,
+          44123700,
+          40446500,
+          39960500,
+          40426300,
+          47319400,
+          42714700,
+          43070400,
+          40588300,
           43673600,
-          40041200,
-          45464300,
-          40549200,
-          43380500,
-          53165100,
-          40923400,
-          44761400,
-          40713600,
-          39859700,
-          43832600,
-          40949700,
-          40908900,
-          40853000,
-          40911800,
-          40729600,
-          44198500,
-          46707500,
-          42009300,
-          40456000,
-          44409400,
-          40205100,
-          41058600,
-          43843700,
-          40387300,
-          47465500,
-          78646000,
-          46264000,
-          41378000,
-          54635700,
-          41489000,
-          40703200,
-          48608700,
-          41537200,
-          41079300,
-          41023900,
-          40385700,
-          39752800,
-          50817000,
-          52305900,
-          48885900,
-          42839100,
-          41620200,
-          44192200,
-          41749800,
-          40215200,
-          40291700,
-          41225400,
-          41844700,
-          52772600,
-          40953400,
-          40856100,
-          44209900,
-          40192300,
-          40820400,
-          43550400,
-          46399600,
-          41595700,
-          41352200,
-          47082900,
-          45201700,
-          41482600,
-          47593000,
-          48437300,
-          54966500,
-          61128800,
-          41207700,
-          39235900,
-          42485400,
-          53926200,
-          63245900,
-          41434800,
-          44889900,
-          42293600,
-          41637800,
-          40412900,
-          44119400,
-          41115900,
-          41136700,
-          44057900,
-          46889200,
-          42132500,
-          48383400,
-          45672400,
-          44920100,
-          44872800,
-          44795800,
-          43035300,
-          41415500,
-          41307900,
-          41582300,
-          44367300,
-          44284400,
-          46074600,
-          39907400,
-          39546900,
-          40673400
+          60109700,
+          42404400,
+          42060600,
+          41317900,
+          51031800,
+          42701300,
+          41582500
         ],
         "start_context": 512,
         "synchronizes_per_pass": 129,
         "tokens": 128,
-        "tokens_per_second": 21.736099267814403,
-        "total_ns": 5888821100,
+        "tokens_per_second": 21.879284568590165,
+        "total_ns": 5850282700,
         "v_bytes": 16777216,
-        "v_scatter_ns": 6565000,
+        "v_scatter_ns": 6481800,
         "weight_creates_after_warmup": 0
       },
       {
@@ -1430,148 +1585,148 @@
         "device_tensor_creates_after_warmup": 0,
         "dispatches_per_pass": 193,
         "live_corelib_object_delta": 0,
-        "max_ns": 81246900,
-        "mean_ns": 46569989,
-        "min_ns": 41990600,
-        "p50_ns": 44605700,
-        "p95_ns": 54023800,
+        "max_ns": 79620800,
+        "mean_ns": 46676203,
+        "min_ns": 38670200,
+        "p50_ns": 45627600,
+        "p95_ns": 55302600,
         "samples_ns": [
-          60338000,
-          81246900,
-          54765500,
-          49612500,
-          45602800,
-          44391300,
-          47736100,
-          42521100,
-          44253500,
-          46841100,
-          43832900,
-          43399500,
-          43738500,
-          46144300,
-          43214500,
-          43600600,
-          43247400,
-          43680800,
-          46042100,
-          46757000,
-          53966000,
-          44285000,
-          43132500,
-          45048700,
-          43438000,
-          44904200,
-          46489900,
-          43915000,
-          43775200,
-          41990600,
-          42841900,
-          46691300,
-          47668500,
-          47709800,
-          44900200,
-          47428100,
-          44023000,
-          44104500,
-          43691400,
-          42900300,
-          43743700,
-          47249200,
-          43800300,
-          43586100,
-          76006800,
-          52116100,
-          44950700,
-          47973000,
-          43048500,
-          43959400,
-          46114100,
-          47197500,
-          44188800,
-          44765600,
-          43007800,
-          47861100,
-          47078800,
-          47617600,
-          45222000,
-          42588500,
-          43671900,
-          47251200,
-          45833000,
-          43103200,
-          43807700,
-          54023800,
-          43146400,
-          52768400,
-          43507900,
-          43752900,
-          42402800,
-          43266800,
-          50031300,
-          42929800,
-          50667500,
-          47977300,
-          44772600,
-          51088200,
-          44795900,
-          44125400,
-          47140800,
-          60540300,
-          48401800,
-          44993200,
-          47440200,
-          43484200,
-          77043200,
-          48258400,
-          44946900,
-          44877400,
-          53996500,
-          43507800,
-          47388900,
-          43919800,
-          43858400,
-          47133200,
-          48130200,
-          44218400,
-          44448700,
-          42767200,
-          43540100,
-          43672400,
-          46258100,
-          51011900,
-          52104800,
-          47494600,
-          44507900,
-          45407700,
-          42653000,
-          43386600,
-          43647500,
-          42436300,
-          50235400,
-          43348900,
-          44605700,
-          43513400,
-          46744800,
-          44139400,
-          43137800,
-          50547600,
-          44572800,
-          44159800,
-          46155800,
-          44311200,
-          44662800,
-          42105700,
-          43647900,
-          43583200
+          56108900,
+          49802900,
+          51067200,
+          51471800,
+          48483600,
+          45512100,
+          45115500,
+          42734500,
+          43054100,
+          54012100,
+          47529200,
+          44319500,
+          47882400,
+          46362600,
+          46456200,
+          47796300,
+          46234900,
+          42285900,
+          46789300,
+          43658000,
+          46908600,
+          43831500,
+          42706600,
+          43435200,
+          46183300,
+          49678100,
+          44590800,
+          44703200,
+          51188100,
+          43597200,
+          50331200,
+          44634300,
+          43860200,
+          46501100,
+          42851200,
+          43441000,
+          45627600,
+          60476600,
+          55970100,
+          47096300,
+          54084900,
+          47956000,
+          46639300,
+          44124100,
+          46971700,
+          46209200,
+          43901800,
+          46983500,
+          47279500,
+          43532800,
+          49441600,
+          44442500,
+          44182300,
+          42937000,
+          43560800,
+          42708200,
+          45429900,
+          48190500,
+          43570600,
+          41552200,
+          43779300,
+          42426600,
+          49282300,
+          38670200,
+          38981100,
+          41068000,
+          42681700,
+          44429500,
+          48127200,
+          45537900,
+          46538500,
+          46162600,
+          44202700,
+          52846300,
+          48155700,
+          43435300,
+          44079200,
+          54655000,
+          44220000,
+          48435800,
+          79620800,
+          44940800,
+          48341200,
+          44600900,
+          47429100,
+          47569800,
+          46869700,
+          47943900,
+          46875900,
+          52009300,
+          47927400,
+          46842900,
+          44504900,
+          44139300,
+          43394800,
+          43084500,
+          44028900,
+          42377800,
+          44734200,
+          43990400,
+          48613500,
+          40656600,
+          41391600,
+          42556100,
+          52921200,
+          46752100,
+          43249500,
+          49633900,
+          50734700,
+          48310700,
+          43424900,
+          47162700,
+          43333800,
+          45720300,
+          44240100,
+          43895600,
+          43998100,
+          42942700,
+          47439000,
+          42934300,
+          47578000,
+          47612100,
+          59898800,
+          60583200,
+          55302600,
+          44945300,
+          47129700,
+          44664000
         ],
         "start_context": 2048,
         "synchronizes_per_pass": 129,
         "tokens": 128,
-        "tokens_per_second": 20.771555198631,
-        "total_ns": 6162273300,
+        "tokens_per_second": 20.670069724505275,
+        "total_ns": 6192528700,
         "v_bytes": 16777216,
-        "v_scatter_ns": 6495500,
+        "v_scatter_ns": 6457800,
         "weight_creates_after_warmup": 0
       }
     ]
@@ -1584,7 +1739,7 @@
     "corelib_version": "0.1.0",
     "cpu_sku": "AMD Eng Sample: 100-000001713-33_N",
     "dynamic_dispatch_version": "9999.0.0.0 (C:\\Users\\chiz\\work\\aie4-runtime-mirrored\\dyn_dispatch_core.dll)",
-    "fastflow_revision": "21ad125ffdea96341d7bf898348dcccc1c26e0ad-untracked-only",
+    "fastflow_revision": "26f2dcb5d2d8d8b7cd2915f5a56db94e5a68fb7d-untracked-only",
     "machine": "xcomedusad-43",
     "model_dir": "C:\\Users\\chiz\\work\\FastFlowLM\\src\\build\\phi4-hardware\\model",
     "model_files": {
@@ -1601,14 +1756,14 @@
       }
     },
     "model_hash_verified": true,
-    "model_hash_verify_ns": 22408655500,
+    "model_hash_verify_ns": 22605065600,
     "model_sha256": "d6f503a9ea142c8b6320313d6ae341a88049b1b8ef01e641b2313fe42cdc7309",
     "npu_driver_version": "32.0.20214.4161",
     "npu_sku": "AMD XDNA(TM) NPU",
     "prompt_id": "ff6a21dcdcff126f",
     "prompt_source": "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\phi4_tokens.json",
     "ryzen_mm_version": "0.10.2.0 (C:\\Users\\chiz\\work\\aie4-runtime-mirrored\\ryzen_mm.dll)",
-    "utc": "2026-09-02T14:55:44Z",
+    "utc": "2026-09-02T15:34:01Z",
     "xrt_version": "32.0.20214.4161 (C:\\Windows\\SYSTEM32\\xrt_coreutil.dll)"
   },
   "memory": {
@@ -1622,527 +1777,527 @@
     "live_corelib_objects_now": 238,
     "mapped_source_bytes": 3248488448,
     "packed_weight_bytes": 2098112512,
-    "peak_private_bytes": 8212766720,
-    "peak_working_set_bytes": 10242392064,
-    "private_bytes_at_end": 8051392512,
-    "private_bytes_at_warmup": 8076120064,
-    "private_bytes_before_load": 13660160,
-    "private_bytes_delta": -24727552,
+    "peak_private_bytes": 8191242240,
+    "peak_working_set_bytes": 10249895936,
+    "private_bytes_at_end": 8034533376,
+    "private_bytes_at_warmup": 8063295488,
+    "private_bytes_before_load": 13381632,
+    "private_bytes_delta": -28762112,
     "private_bytes_growth": 0,
-    "private_bytes_slope_exact": -264469.7508438086,
-    "private_bytes_slope_per_token": -264469,
+    "private_bytes_slope_exact": -240597.3303701646,
+    "private_bytes_slope_per_token": -240597,
     "samples": [
       {
-        "private_bytes": 8076120064,
-        "working_set_bytes": 10143469568
+        "private_bytes": 8063295488,
+        "working_set_bytes": 10130915328
       },
       {
-        "private_bytes": 8076120064,
-        "working_set_bytes": 10143477760
+        "private_bytes": 8063295488,
+        "working_set_bytes": 10130923520
       },
       {
-        "private_bytes": 8076120064,
-        "working_set_bytes": 10143477760
+        "private_bytes": 8063295488,
+        "working_set_bytes": 10130923520
       },
       {
-        "private_bytes": 8076120064,
-        "working_set_bytes": 10143477760
+        "private_bytes": 8063295488,
+        "working_set_bytes": 10130923520
       },
       {
-        "private_bytes": 8076120064,
-        "working_set_bytes": 10143477760
+        "private_bytes": 8063295488,
+        "working_set_bytes": 10130923520
       },
       {
-        "private_bytes": 8076120064,
-        "working_set_bytes": 10143477760
+        "private_bytes": 8063295488,
+        "working_set_bytes": 10130923520
       },
       {
-        "private_bytes": 8076120064,
-        "working_set_bytes": 10143477760
+        "private_bytes": 8063295488,
+        "working_set_bytes": 10130923520
       },
       {
-        "private_bytes": 8076120064,
-        "working_set_bytes": 10143477760
+        "private_bytes": 8063295488,
+        "working_set_bytes": 10130923520
       },
       {
-        "private_bytes": 8076120064,
-        "working_set_bytes": 10143477760
+        "private_bytes": 8063295488,
+        "working_set_bytes": 10130923520
       },
       {
-        "private_bytes": 8076120064,
-        "working_set_bytes": 10143477760
+        "private_bytes": 8063295488,
+        "working_set_bytes": 10130923520
       },
       {
-        "private_bytes": 8076120064,
-        "working_set_bytes": 10143485952
+        "private_bytes": 8063295488,
+        "working_set_bytes": 10130931712
       },
       {
-        "private_bytes": 8076120064,
-        "working_set_bytes": 10143485952
+        "private_bytes": 8063295488,
+        "working_set_bytes": 10130931712
       },
       {
-        "private_bytes": 8076120064,
-        "working_set_bytes": 10143485952
+        "private_bytes": 8063295488,
+        "working_set_bytes": 10130939904
       },
       {
-        "private_bytes": 8076120064,
-        "working_set_bytes": 10143485952
+        "private_bytes": 8063295488,
+        "working_set_bytes": 10130939904
       },
       {
-        "private_bytes": 8076120064,
-        "working_set_bytes": 10143485952
+        "private_bytes": 8063295488,
+        "working_set_bytes": 10130939904
       },
       {
-        "private_bytes": 8076120064,
-        "working_set_bytes": 10143485952
+        "private_bytes": 8063295488,
+        "working_set_bytes": 10130939904
       },
       {
-        "private_bytes": 8076120064,
-        "working_set_bytes": 10143485952
+        "private_bytes": 8063295488,
+        "working_set_bytes": 10130939904
       },
       {
-        "private_bytes": 8076120064,
-        "working_set_bytes": 10143485952
+        "private_bytes": 8063295488,
+        "working_set_bytes": 10130939904
       },
       {
-        "private_bytes": 8076120064,
-        "working_set_bytes": 10143494144
+        "private_bytes": 8063295488,
+        "working_set_bytes": 10130939904
       },
       {
-        "private_bytes": 8076120064,
-        "working_set_bytes": 10143494144
+        "private_bytes": 8063295488,
+        "working_set_bytes": 10130939904
       },
       {
-        "private_bytes": 8076120064,
-        "working_set_bytes": 10143502336
+        "private_bytes": 8063295488,
+        "working_set_bytes": 10130948096
       },
       {
-        "private_bytes": 8076120064,
-        "working_set_bytes": 10143502336
+        "private_bytes": 8063295488,
+        "working_set_bytes": 10130948096
       },
       {
-        "private_bytes": 8076120064,
-        "working_set_bytes": 10143502336
+        "private_bytes": 8063295488,
+        "working_set_bytes": 10130956288
       },
       {
-        "private_bytes": 8076120064,
-        "working_set_bytes": 10143502336
+        "private_bytes": 8063295488,
+        "working_set_bytes": 10130956288
       },
       {
-        "private_bytes": 8076120064,
-        "working_set_bytes": 10143502336
+        "private_bytes": 8063295488,
+        "working_set_bytes": 10130956288
       },
       {
-        "private_bytes": 8076120064,
-        "working_set_bytes": 10143502336
+        "private_bytes": 8063295488,
+        "working_set_bytes": 10130956288
       },
       {
-        "private_bytes": 8076120064,
-        "working_set_bytes": 10143502336
+        "private_bytes": 8063295488,
+        "working_set_bytes": 10130956288
       },
       {
-        "private_bytes": 8076120064,
-        "working_set_bytes": 10143502336
+        "private_bytes": 8063295488,
+        "working_set_bytes": 10130964480
       },
       {
-        "private_bytes": 8076120064,
-        "working_set_bytes": 10143502336
+        "private_bytes": 8063295488,
+        "working_set_bytes": 10130972672
       },
       {
-        "private_bytes": 8076120064,
-        "working_set_bytes": 10143502336
+        "private_bytes": 8063295488,
+        "working_set_bytes": 10130972672
       },
       {
-        "private_bytes": 8076120064,
-        "working_set_bytes": 10143502336
+        "private_bytes": 8063295488,
+        "working_set_bytes": 10130980864
       },
       {
-        "private_bytes": 8076120064,
-        "working_set_bytes": 10143502336
+        "private_bytes": 8063295488,
+        "working_set_bytes": 10130989056
       },
       {
-        "private_bytes": 8076120064,
-        "working_set_bytes": 10143510528
+        "private_bytes": 8063295488,
+        "working_set_bytes": 10130989056
       },
       {
-        "private_bytes": 8076120064,
-        "working_set_bytes": 10143510528
+        "private_bytes": 8063295488,
+        "working_set_bytes": 10130989056
       },
       {
-        "private_bytes": 8076120064,
-        "working_set_bytes": 10143518720
+        "private_bytes": 8063295488,
+        "working_set_bytes": 10130989056
       },
       {
-        "private_bytes": 8076120064,
-        "working_set_bytes": 10143526912
+        "private_bytes": 8063295488,
+        "working_set_bytes": 10130989056
       },
       {
-        "private_bytes": 8076120064,
-        "working_set_bytes": 10143526912
+        "private_bytes": 8063295488,
+        "working_set_bytes": 10130989056
       },
       {
-        "private_bytes": 8076120064,
-        "working_set_bytes": 10143535104
+        "private_bytes": 8063295488,
+        "working_set_bytes": 10130989056
       },
       {
-        "private_bytes": 8076120064,
-        "working_set_bytes": 10143535104
+        "private_bytes": 8063295488,
+        "working_set_bytes": 10130989056
       },
       {
-        "private_bytes": 8076120064,
-        "working_set_bytes": 10143535104
+        "private_bytes": 8063295488,
+        "working_set_bytes": 10130989056
       },
       {
-        "private_bytes": 8076120064,
-        "working_set_bytes": 10143535104
+        "private_bytes": 8063295488,
+        "working_set_bytes": 10130989056
       },
       {
-        "private_bytes": 8076120064,
-        "working_set_bytes": 10143535104
+        "private_bytes": 8063295488,
+        "working_set_bytes": 10130989056
       },
       {
-        "private_bytes": 8076120064,
-        "working_set_bytes": 10143543296
+        "private_bytes": 8063295488,
+        "working_set_bytes": 10130997248
       },
       {
-        "private_bytes": 8076120064,
-        "working_set_bytes": 10143551488
+        "private_bytes": 8063295488,
+        "working_set_bytes": 10131005440
       },
       {
-        "private_bytes": 8076120064,
-        "working_set_bytes": 10143559680
+        "private_bytes": 8063295488,
+        "working_set_bytes": 10131013632
       },
       {
-        "private_bytes": 8076120064,
-        "working_set_bytes": 10143559680
+        "private_bytes": 8063295488,
+        "working_set_bytes": 10131013632
       },
       {
-        "private_bytes": 8076120064,
-        "working_set_bytes": 10143567872
+        "private_bytes": 8063295488,
+        "working_set_bytes": 10131021824
       },
       {
-        "private_bytes": 8064757760,
-        "working_set_bytes": 10132238336
+        "private_bytes": 8063295488,
+        "working_set_bytes": 10131030016
       },
       {
-        "private_bytes": 8064757760,
-        "working_set_bytes": 10132238336
+        "private_bytes": 8063295488,
+        "working_set_bytes": 10131030016
       },
       {
-        "private_bytes": 8064757760,
-        "working_set_bytes": 10132238336
+        "private_bytes": 8063295488,
+        "working_set_bytes": 10131030016
       },
       {
-        "private_bytes": 8064757760,
-        "working_set_bytes": 10132238336
+        "private_bytes": 8063295488,
+        "working_set_bytes": 10131030016
       },
       {
-        "private_bytes": 8053395456,
-        "working_set_bytes": 10120900608
+        "private_bytes": 8046551040,
+        "working_set_bytes": 10131030016
       },
       {
-        "private_bytes": 8053395456,
-        "working_set_bytes": 10120900608
+        "private_bytes": 8046551040,
+        "working_set_bytes": 10131030016
       },
       {
-        "private_bytes": 8053395456,
-        "working_set_bytes": 10120900608
+        "private_bytes": 8046551040,
+        "working_set_bytes": 10131030016
       },
       {
-        "private_bytes": 8053395456,
-        "working_set_bytes": 10120908800
+        "private_bytes": 8046551040,
+        "working_set_bytes": 10131038208
       },
       {
-        "private_bytes": 8053395456,
-        "working_set_bytes": 10120908800
+        "private_bytes": 8046551040,
+        "working_set_bytes": 10131038208
       },
       {
-        "private_bytes": 8053395456,
-        "working_set_bytes": 10120908800
+        "private_bytes": 8046551040,
+        "working_set_bytes": 10131038208
       },
       {
-        "private_bytes": 8053395456,
-        "working_set_bytes": 10120908800
+        "private_bytes": 8046551040,
+        "working_set_bytes": 10131038208
       },
       {
-        "private_bytes": 8053395456,
-        "working_set_bytes": 10120908800
+        "private_bytes": 8046551040,
+        "working_set_bytes": 10131038208
       },
       {
-        "private_bytes": 8053395456,
-        "working_set_bytes": 10120908800
+        "private_bytes": 8046551040,
+        "working_set_bytes": 10131038208
       },
       {
-        "private_bytes": 8053395456,
-        "working_set_bytes": 10120916992
+        "private_bytes": 8046551040,
+        "working_set_bytes": 10131046400
       },
       {
-        "private_bytes": 8053395456,
-        "working_set_bytes": 10120916992
+        "private_bytes": 8046551040,
+        "working_set_bytes": 10131046400
       },
       {
-        "private_bytes": 8053395456,
-        "working_set_bytes": 10120925184
+        "private_bytes": 8046551040,
+        "working_set_bytes": 10131054592
       },
       {
-        "private_bytes": 8053395456,
-        "working_set_bytes": 10120933376
+        "private_bytes": 8046551040,
+        "working_set_bytes": 10131062784
       },
       {
-        "private_bytes": 8053395456,
-        "working_set_bytes": 10120933376
+        "private_bytes": 8046551040,
+        "working_set_bytes": 10131062784
       },
       {
-        "private_bytes": 8053395456,
-        "working_set_bytes": 10120941568
+        "private_bytes": 8046551040,
+        "working_set_bytes": 10131070976
       },
       {
-        "private_bytes": 8053395456,
-        "working_set_bytes": 10120941568
+        "private_bytes": 8046551040,
+        "working_set_bytes": 10131070976
       },
       {
-        "private_bytes": 8053395456,
-        "working_set_bytes": 10120941568
+        "private_bytes": 8046551040,
+        "working_set_bytes": 10131070976
       },
       {
-        "private_bytes": 8053395456,
-        "working_set_bytes": 10120941568
+        "private_bytes": 8046551040,
+        "working_set_bytes": 10131070976
       },
       {
-        "private_bytes": 8053395456,
-        "working_set_bytes": 10120941568
+        "private_bytes": 8046551040,
+        "working_set_bytes": 10131070976
       },
       {
-        "private_bytes": 8053395456,
-        "working_set_bytes": 10120941568
+        "private_bytes": 8046551040,
+        "working_set_bytes": 10131070976
       },
       {
-        "private_bytes": 8053395456,
-        "working_set_bytes": 10120941568
+        "private_bytes": 8046551040,
+        "working_set_bytes": 10131070976
       },
       {
-        "private_bytes": 8053395456,
-        "working_set_bytes": 10120941568
+        "private_bytes": 8046551040,
+        "working_set_bytes": 10131070976
       },
       {
-        "private_bytes": 8053395456,
-        "working_set_bytes": 10120941568
+        "private_bytes": 8046551040,
+        "working_set_bytes": 10131070976
       },
       {
-        "private_bytes": 8053395456,
-        "working_set_bytes": 10120941568
+        "private_bytes": 8046551040,
+        "working_set_bytes": 10131070976
       },
       {
-        "private_bytes": 8053395456,
-        "working_set_bytes": 10120941568
+        "private_bytes": 8046551040,
+        "working_set_bytes": 10131070976
       },
       {
-        "private_bytes": 8053395456,
-        "working_set_bytes": 10120941568
+        "private_bytes": 8046551040,
+        "working_set_bytes": 10131079168
       },
       {
-        "private_bytes": 8053395456,
-        "working_set_bytes": 10120941568
+        "private_bytes": 8046551040,
+        "working_set_bytes": 10131079168
       },
       {
-        "private_bytes": 8053395456,
-        "working_set_bytes": 10120941568
+        "private_bytes": 8046551040,
+        "working_set_bytes": 10131079168
       },
       {
-        "private_bytes": 8053395456,
-        "working_set_bytes": 10120941568
+        "private_bytes": 8046551040,
+        "working_set_bytes": 10131079168
       },
       {
-        "private_bytes": 8053395456,
-        "working_set_bytes": 10120941568
+        "private_bytes": 8046551040,
+        "working_set_bytes": 10131079168
       },
       {
-        "private_bytes": 8053395456,
-        "working_set_bytes": 10120941568
+        "private_bytes": 8046551040,
+        "working_set_bytes": 10131087360
       },
       {
-        "private_bytes": 8053395456,
-        "working_set_bytes": 10120941568
+        "private_bytes": 8046551040,
+        "working_set_bytes": 10131095552
       },
       {
-        "private_bytes": 8053395456,
-        "working_set_bytes": 10120941568
+        "private_bytes": 8046551040,
+        "working_set_bytes": 10131103744
       },
       {
-        "private_bytes": 8053395456,
-        "working_set_bytes": 10120949760
+        "private_bytes": 8046551040,
+        "working_set_bytes": 10131103744
       },
       {
-        "private_bytes": 8053395456,
-        "working_set_bytes": 10120949760
+        "private_bytes": 8046551040,
+        "working_set_bytes": 10131103744
       },
       {
-        "private_bytes": 8053395456,
-        "working_set_bytes": 10120957952
+        "private_bytes": 8046551040,
+        "working_set_bytes": 10131111936
       },
       {
-        "private_bytes": 8053395456,
-        "working_set_bytes": 10120957952
+        "private_bytes": 8046551040,
+        "working_set_bytes": 10131111936
       },
       {
-        "private_bytes": 8053395456,
-        "working_set_bytes": 10120957952
+        "private_bytes": 8046551040,
+        "working_set_bytes": 10131111936
       },
       {
-        "private_bytes": 8053395456,
-        "working_set_bytes": 10120966144
+        "private_bytes": 8046551040,
+        "working_set_bytes": 10131120128
       },
       {
-        "private_bytes": 8053395456,
-        "working_set_bytes": 10120966144
+        "private_bytes": 8046551040,
+        "working_set_bytes": 10131120128
       },
       {
-        "private_bytes": 8053395456,
-        "working_set_bytes": 10120966144
+        "private_bytes": 8046551040,
+        "working_set_bytes": 10131120128
       },
       {
-        "private_bytes": 8053395456,
-        "working_set_bytes": 10120966144
+        "private_bytes": 8046551040,
+        "working_set_bytes": 10131120128
       },
       {
-        "private_bytes": 8053395456,
-        "working_set_bytes": 10120966144
+        "private_bytes": 8046551040,
+        "working_set_bytes": 10131120128
       },
       {
-        "private_bytes": 8053395456,
-        "working_set_bytes": 10120966144
+        "private_bytes": 8046551040,
+        "working_set_bytes": 10131120128
       },
       {
-        "private_bytes": 8053395456,
-        "working_set_bytes": 10120966144
+        "private_bytes": 8046551040,
+        "working_set_bytes": 10131120128
       },
       {
-        "private_bytes": 8053395456,
-        "working_set_bytes": 10120974336
+        "private_bytes": 8046551040,
+        "working_set_bytes": 10131128320
       },
       {
-        "private_bytes": 8053395456,
-        "working_set_bytes": 10120974336
+        "private_bytes": 8046551040,
+        "working_set_bytes": 10131128320
       },
       {
-        "private_bytes": 8053395456,
-        "working_set_bytes": 10120974336
+        "private_bytes": 8046551040,
+        "working_set_bytes": 10131128320
       },
       {
-        "private_bytes": 8053395456,
-        "working_set_bytes": 10120974336
+        "private_bytes": 8046551040,
+        "working_set_bytes": 10131128320
       },
       {
-        "private_bytes": 8053395456,
-        "working_set_bytes": 10120974336
+        "private_bytes": 8046551040,
+        "working_set_bytes": 10131136512
       },
       {
-        "private_bytes": 8053395456,
-        "working_set_bytes": 10120974336
+        "private_bytes": 8046551040,
+        "working_set_bytes": 10131140608
       },
       {
-        "private_bytes": 8053395456,
-        "working_set_bytes": 10120974336
+        "private_bytes": 8046551040,
+        "working_set_bytes": 10131148800
       },
       {
-        "private_bytes": 8053395456,
-        "working_set_bytes": 10120982528
+        "private_bytes": 8046551040,
+        "working_set_bytes": 10131148800
       },
       {
-        "private_bytes": 8053395456,
-        "working_set_bytes": 10120982528
+        "private_bytes": 8046551040,
+        "working_set_bytes": 10131156992
       },
       {
-        "private_bytes": 8053395456,
-        "working_set_bytes": 10120982528
+        "private_bytes": 8046551040,
+        "working_set_bytes": 10131156992
       },
       {
-        "private_bytes": 8053395456,
-        "working_set_bytes": 10120990720
+        "private_bytes": 8046551040,
+        "working_set_bytes": 10131156992
       },
       {
-        "private_bytes": 8053395456,
-        "working_set_bytes": 10120990720
+        "private_bytes": 8046551040,
+        "working_set_bytes": 10131156992
       },
       {
-        "private_bytes": 8053395456,
-        "working_set_bytes": 10120990720
+        "private_bytes": 8046551040,
+        "working_set_bytes": 10131156992
       },
       {
-        "private_bytes": 8053395456,
-        "working_set_bytes": 10120990720
+        "private_bytes": 8046551040,
+        "working_set_bytes": 10131156992
       },
       {
-        "private_bytes": 8053395456,
-        "working_set_bytes": 10120990720
+        "private_bytes": 8046551040,
+        "working_set_bytes": 10131156992
       },
       {
-        "private_bytes": 8052060160,
-        "working_set_bytes": 10119663616
+        "private_bytes": 8043880448,
+        "working_set_bytes": 10128502784
       },
       {
-        "private_bytes": 8052060160,
-        "working_set_bytes": 10119663616
+        "private_bytes": 8043880448,
+        "working_set_bytes": 10128502784
       },
       {
-        "private_bytes": 8052060160,
-        "working_set_bytes": 10119663616
+        "private_bytes": 8043880448,
+        "working_set_bytes": 10128510976
       },
       {
-        "private_bytes": 8052060160,
-        "working_set_bytes": 10119663616
+        "private_bytes": 8043880448,
+        "working_set_bytes": 10128510976
       },
       {
-        "private_bytes": 8052060160,
-        "working_set_bytes": 10119663616
+        "private_bytes": 8040542208,
+        "working_set_bytes": 10125193216
       },
       {
-        "private_bytes": 8052060160,
-        "working_set_bytes": 10119671808
+        "private_bytes": 8040542208,
+        "working_set_bytes": 10125193216
       },
       {
-        "private_bytes": 8052060160,
-        "working_set_bytes": 10119671808
+        "private_bytes": 8040542208,
+        "working_set_bytes": 10125193216
       },
       {
-        "private_bytes": 8052060160,
-        "working_set_bytes": 10119671808
+        "private_bytes": 8040542208,
+        "working_set_bytes": 10125193216
       },
       {
-        "private_bytes": 8052060160,
-        "working_set_bytes": 10119680000
+        "private_bytes": 8040542208,
+        "working_set_bytes": 10125193216
       },
       {
-        "private_bytes": 8052060160,
-        "working_set_bytes": 10119688192
+        "private_bytes": 8037203968,
+        "working_set_bytes": 10121875456
       },
       {
-        "private_bytes": 8052060160,
-        "working_set_bytes": 10119688192
+        "private_bytes": 8037203968,
+        "working_set_bytes": 10121875456
       },
       {
-        "private_bytes": 8052060160,
-        "working_set_bytes": 10119696384
+        "private_bytes": 8037203968,
+        "working_set_bytes": 10121875456
       },
       {
-        "private_bytes": 8052060160,
-        "working_set_bytes": 10119696384
+        "private_bytes": 8034533376,
+        "working_set_bytes": 10119221248
       },
       {
-        "private_bytes": 8051392512,
-        "working_set_bytes": 10119041024
+        "private_bytes": 8034533376,
+        "working_set_bytes": 10119221248
       },
       {
-        "private_bytes": 8051392512,
-        "working_set_bytes": 10119049216
+        "private_bytes": 8034533376,
+        "working_set_bytes": 10119221248
       },
       {
-        "private_bytes": 8051392512,
-        "working_set_bytes": 10119057408
+        "private_bytes": 8034533376,
+        "working_set_bytes": 10119221248
       },
       {
-        "private_bytes": 8051392512,
-        "working_set_bytes": 10119065600
+        "private_bytes": 8034533376,
+        "working_set_bytes": 10119221248
       }
     ],
     "scratch_bytes": 169751296,
@@ -2154,136 +2309,136 @@
     "weight_objects_created_total": 161
   },
   "model_load": {
-    "benchmark_second_shape_plan_ns": 10956249400,
-    "device_setup_ns": 124520600,
+    "benchmark_second_shape_plan_ns": 11335673500,
+    "device_setup_ns": 146309400,
     "device_tensors": 76,
-    "engine_reported_total_ns": 12791128600,
-    "manifest_map_ns": 4583300,
+    "engine_reported_total_ns": 17527271200,
+    "manifest_map_ns": 8039000,
     "mapped_source_bytes": 3248488448,
     "packed_weight_bytes": 2098112512,
-    "shape_plan_ns": 11044160500,
-    "shape_plan_share": 0.8634224396994304,
-    "total_ns": 12791143700,
-    "unaccounted_ns": 11214000,
+    "shape_plan_ns": 15739576700,
+    "shape_plan_share": 0.8980039943767006,
+    "total_ns": 17527290300,
+    "unaccounted_ns": 11041900,
     "weight_objects": 161,
-    "weight_pack_ns": 1606665300
+    "weight_pack_ns": 1622323300
   },
   "prefill": {
     "points": [
       {
-        "ns": 244943900,
+        "ns": 193367500,
         "padded_rows": 1,
         "rows": 1,
-        "tokens_per_second": 4.082567477695913,
+        "tokens_per_second": 5.171499864248129,
         "top1_id": 4576,
         "v_bytes": 131072,
-        "v_scatter_ns": 128200
+        "v_scatter_ns": 110600
       },
       {
-        "ns": 150784800,
+        "ns": 89085500,
         "padded_rows": 64,
         "rows": 2,
-        "tokens_per_second": 13.263936417994387,
+        "tokens_per_second": 22.45034264835467,
         "top1_id": 477,
         "v_bytes": 262144,
-        "v_scatter_ns": 149800
+        "v_scatter_ns": 142600
       },
       {
-        "ns": 173546200,
+        "ns": 138325800,
         "padded_rows": 128,
         "rows": 65,
-        "tokens_per_second": 374.5400360249893,
+        "tokens_per_second": 469.90510808540415,
         "top1_id": 9822,
         "v_bytes": 8519680,
-        "v_scatter_ns": 756600
+        "v_scatter_ns": 722300
       },
       {
-        "ns": 191539800,
+        "ns": 173127700,
         "padded_rows": 256,
         "rows": 129,
-        "tokens_per_second": 673.4892695930558,
+        "tokens_per_second": 745.1147332287093,
         "top1_id": 6864,
         "v_bytes": 16908288,
-        "v_scatter_ns": 1183900
+        "v_scatter_ns": 1089700
       },
       {
-        "ns": 229214500,
+        "ns": 226432100,
         "padded_rows": 512,
         "rows": 257,
-        "tokens_per_second": 1121.2205161540828,
+        "tokens_per_second": 1134.9980855187935,
         "top1_id": 200020,
         "v_bytes": 33685504,
-        "v_scatter_ns": 2503200
+        "v_scatter_ns": 2235400
       },
       {
-        "ns": 381402400,
+        "ns": 342404000,
         "padded_rows": 1024,
         "rows": 513,
-        "tokens_per_second": 1345.0361088446218,
+        "tokens_per_second": 1498.2301608626067,
         "top1_id": 200019,
         "v_bytes": 67239936,
-        "v_scatter_ns": 4554300
+        "v_scatter_ns": 3840900
       },
       {
-        "ns": 742269600,
+        "ns": 715917300,
         "padded_rows": 2048,
         "rows": 1025,
-        "tokens_per_second": 1380.8998778880343,
+        "tokens_per_second": 1431.7296145797845,
         "top1_id": 374,
         "v_bytes": 134348800,
-        "v_scatter_ns": 10643600
+        "v_scatter_ns": 11141600
       },
       {
-        "ns": 1181953900,
+        "ns": 1187028800,
         "padded_rows": 3072,
         "rows": 2049,
-        "tokens_per_second": 1733.5701502402082,
+        "tokens_per_second": 1726.1586239525107,
         "top1_id": 44643,
         "v_bytes": 268566528,
-        "v_scatter_ns": 23703500
+        "v_scatter_ns": 23756800
       },
       {
-        "ns": 1750945600,
+        "ns": 1657468300,
         "padded_rows": 4096,
         "rows": 3073,
-        "tokens_per_second": 1755.0516703660012,
+        "tokens_per_second": 1854.0324421287576,
         "top1_id": 791,
         "v_bytes": 402784256,
-        "v_scatter_ns": 37313300
+        "v_scatter_ns": 35728600
       },
       {
-        "ns": 1746148000,
+        "ns": 1699168000,
         "padded_rows": 4096,
         "rows": 4096,
-        "tokens_per_second": 2345.7347258078926,
+        "tokens_per_second": 2410.591536563777,
         "top1_id": 350,
         "v_bytes": 536870912,
-        "v_scatter_ns": 50651700
+        "v_scatter_ns": 47487400
       }
     ]
   },
   "ttft": {
-    "cold_ns": 3251978600,
+    "cold_ns": 3667857200,
     "cold_top1_id": 1715,
     "prompt_id": "ff6a21dcdcff126f",
     "prompt_source": "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\phi4_tokens.json",
     "prompt_token_count": 19,
     "row_extent": 64,
     "stream_rebuilt_for_warm": false,
-    "warm_ns": 150275900,
+    "warm_ns": 149724200,
     "warm_top1_id": 1715
   },
   "v_scatter": {
-    "bytes": 29434576896,
+    "bytes": 47889514496,
     "counts_are_measured": true,
     "design_18_5_expected_reads": 32,
     "design_18_5_expected_writes": 256,
-    "model_steps": 7117,
-    "nanoseconds": 2765461400,
+    "model_steps": 7227,
+    "nanoseconds": 4355633400,
     "reads_per_model_step": 32,
     "reads_per_model_step_source": "v_read_calls / (synchronize_count / 129)",
-    "total_read_calls": 227744,
-    "total_write_calls": 1821952,
+    "total_read_calls": 231264,
+    "total_write_calls": 1850112,
     "writes_per_model_step": 256
   },
   "determinism": {
@@ -2311,6 +2466,21 @@
           "decode[6]": 1,
           "decode[8]": 1
         },
+        "localisation": {
+          "measured_runs": 2,
+          "by_source": {
+            "model_body": 2
+          },
+          "lm_head_input_differing_elements": [
+            2571,
+            2754
+          ],
+          "lm_head_input_elements": 3072,
+          "steps": [
+            "decode[6]",
+            "decode[8]"
+          ]
+        },
         "is_baseline": true
       },
       "reprefill": {
@@ -2329,6 +2499,13 @@
         },
         "runs_with_gate_failures": 0,
         "first_divergences": {},
+        "localisation": {
+          "measured_runs": 0,
+          "by_source": {},
+          "lm_head_input_differing_elements": [],
+          "lm_head_input_elements": 3072,
+          "steps": []
+        },
         "is_baseline": true
       }
     },
@@ -2339,154 +2516,154 @@
     "gate_failures": 2,
     "is_baseline": false,
     "sources": [
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_append-001.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_append-002.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_append-003.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_append-004.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_append-005.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_append-006.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_append-007.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_append-008.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_append-009.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_append-010.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_append-011.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_append-012.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_append-013.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_append-014.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_append-015.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_append-016.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_append-017.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_append-018.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_append-019.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_append-020.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_append-021.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_append-022.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_append-023.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_append-024.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_append-025.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_append-026.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_append-027.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_append-028.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_append-029.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_append-030.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_append-031.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_append-032.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_append-033.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_append-034.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_append-035.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_append-036.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_append-037.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_append-038.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_append-039.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_append-040.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_append.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-001.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-002.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-003.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-004.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-005.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-006.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-007.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-008.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-009.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-010.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-011.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-012.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-013.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-014.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-015.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-016.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-017.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-018.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-019.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-020.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-021.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-022.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-023.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-024.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-025.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-026.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-027.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-028.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-029.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-030.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-031.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-032.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-033.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-034.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-035.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-036.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-037.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-038.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-039.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-040.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill.json"
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_append-001.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_append-002.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_append-003.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_append-004.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_append-005.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_append-006.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_append-007.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_append-008.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_append-009.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_append-010.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_append-011.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_append-012.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_append-013.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_append-014.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_append-015.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_append-016.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_append-017.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_append-018.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_append-019.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_append-020.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_append-021.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_append-022.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_append-023.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_append-024.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_append-025.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_append-026.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_append-027.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_append-028.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_append-029.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_append-030.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_append-031.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_append-032.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_append-033.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_append-034.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_append-035.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_append-036.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_append-037.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_append-038.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_append-039.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_append-040.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_append.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-001.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-002.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-003.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-004.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-005.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-006.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-007.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-008.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-009.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-010.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-011.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-012.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-013.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-014.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-015.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-016.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-017.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-018.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-019.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-020.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-021.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-022.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-023.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-024.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-025.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-026.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-027.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-028.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-029.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-030.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-031.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-032.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-033.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-034.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-035.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-036.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-037.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-038.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-039.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill-040.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T140230Z-11788\\determ1-force_reprefill.json"
     ],
     "excluded_sources": [
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T120919Z-10264\\determ1-force_append-001.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T120919Z-10264\\determ1-force_append-002.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T120919Z-10264\\determ1-force_append-003.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T120919Z-10264\\determ1-force_append-004.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T120919Z-10264\\determ1-force_append-005.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T120919Z-10264\\determ1-force_append-006.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T120919Z-10264\\determ1-force_append-007.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T120919Z-10264\\determ1-force_append-008.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T120919Z-10264\\determ1-force_append-009.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T120919Z-10264\\determ1-force_append-010.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T120919Z-10264\\determ1-force_append-011.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T120919Z-10264\\determ1-force_append-012.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T120919Z-10264\\determ1-force_append-013.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T120919Z-10264\\determ1-force_append-014.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T120919Z-10264\\determ1-force_append-015.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T120919Z-10264\\determ1-force_append-016.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T120919Z-10264\\determ1-force_append-017.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T120919Z-10264\\determ1-force_append-018.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T120919Z-10264\\determ1-force_append-019.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T120919Z-10264\\determ1-force_append-020.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T120919Z-10264\\determ1-force_append.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T120919Z-10264\\determ1-force_reprefill-001.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T120919Z-10264\\determ1-force_reprefill-002.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T120919Z-10264\\determ1-force_reprefill-003.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T120919Z-10264\\determ1-force_reprefill-004.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T120919Z-10264\\determ1-force_reprefill-005.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T120919Z-10264\\determ1-force_reprefill-006.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T120919Z-10264\\determ1-force_reprefill-007.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T120919Z-10264\\determ1-force_reprefill-008.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T120919Z-10264\\determ1-force_reprefill-009.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T120919Z-10264\\determ1-force_reprefill-010.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T120919Z-10264\\determ1-force_reprefill-011.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T120919Z-10264\\determ1-force_reprefill-012.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T120919Z-10264\\determ1-force_reprefill-013.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T120919Z-10264\\determ1-force_reprefill-014.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T120919Z-10264\\determ1-force_reprefill-015.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T120919Z-10264\\determ1-force_reprefill-016.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T120919Z-10264\\determ1-force_reprefill-017.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T120919Z-10264\\determ1-force_reprefill-018.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T120919Z-10264\\determ1-force_reprefill-019.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T120919Z-10264\\determ1-force_reprefill-020.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T120919Z-10264\\determ1-force_reprefill.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T125729Z-14892\\determ1-force_append-001.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T125729Z-14892\\determ1-force_append-002.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T125729Z-14892\\determ1-force_append-003.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T125729Z-14892\\determ1-force_append-004.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T125729Z-14892\\determ1-force_append-005.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T125729Z-14892\\determ1-force_append-006.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T125729Z-14892\\determ1-force_append-007.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T125729Z-14892\\determ1-force_append-008.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T125729Z-14892\\determ1-force_append-009.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T125729Z-14892\\determ1-force_append-010.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T125729Z-14892\\determ1-force_append.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T125729Z-14892\\determ1-force_reprefill-001.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T125729Z-14892\\determ1-force_reprefill-002.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T125729Z-14892\\determ1-force_reprefill-003.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T125729Z-14892\\determ1-force_reprefill-004.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T125729Z-14892\\determ1-force_reprefill-005.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T125729Z-14892\\determ1-force_reprefill-006.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T125729Z-14892\\determ1-force_reprefill-007.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T125729Z-14892\\determ1-force_reprefill-008.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T125729Z-14892\\determ1-force_reprefill-009.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T125729Z-14892\\determ1-force_reprefill-010.json",
-      "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\determinism_records\\20260902T125729Z-14892\\determ1-force_reprefill.json"
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T120919Z-10264\\determ1-force_append-001.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T120919Z-10264\\determ1-force_append-002.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T120919Z-10264\\determ1-force_append-003.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T120919Z-10264\\determ1-force_append-004.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T120919Z-10264\\determ1-force_append-005.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T120919Z-10264\\determ1-force_append-006.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T120919Z-10264\\determ1-force_append-007.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T120919Z-10264\\determ1-force_append-008.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T120919Z-10264\\determ1-force_append-009.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T120919Z-10264\\determ1-force_append-010.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T120919Z-10264\\determ1-force_append-011.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T120919Z-10264\\determ1-force_append-012.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T120919Z-10264\\determ1-force_append-013.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T120919Z-10264\\determ1-force_append-014.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T120919Z-10264\\determ1-force_append-015.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T120919Z-10264\\determ1-force_append-016.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T120919Z-10264\\determ1-force_append-017.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T120919Z-10264\\determ1-force_append-018.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T120919Z-10264\\determ1-force_append-019.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T120919Z-10264\\determ1-force_append-020.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T120919Z-10264\\determ1-force_append.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T120919Z-10264\\determ1-force_reprefill-001.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T120919Z-10264\\determ1-force_reprefill-002.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T120919Z-10264\\determ1-force_reprefill-003.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T120919Z-10264\\determ1-force_reprefill-004.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T120919Z-10264\\determ1-force_reprefill-005.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T120919Z-10264\\determ1-force_reprefill-006.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T120919Z-10264\\determ1-force_reprefill-007.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T120919Z-10264\\determ1-force_reprefill-008.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T120919Z-10264\\determ1-force_reprefill-009.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T120919Z-10264\\determ1-force_reprefill-010.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T120919Z-10264\\determ1-force_reprefill-011.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T120919Z-10264\\determ1-force_reprefill-012.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T120919Z-10264\\determ1-force_reprefill-013.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T120919Z-10264\\determ1-force_reprefill-014.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T120919Z-10264\\determ1-force_reprefill-015.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T120919Z-10264\\determ1-force_reprefill-016.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T120919Z-10264\\determ1-force_reprefill-017.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T120919Z-10264\\determ1-force_reprefill-018.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T120919Z-10264\\determ1-force_reprefill-019.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T120919Z-10264\\determ1-force_reprefill-020.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T120919Z-10264\\determ1-force_reprefill.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T125729Z-14892\\determ1-force_append-001.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T125729Z-14892\\determ1-force_append-002.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T125729Z-14892\\determ1-force_append-003.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T125729Z-14892\\determ1-force_append-004.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T125729Z-14892\\determ1-force_append-005.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T125729Z-14892\\determ1-force_append-006.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T125729Z-14892\\determ1-force_append-007.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T125729Z-14892\\determ1-force_append-008.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T125729Z-14892\\determ1-force_append-009.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T125729Z-14892\\determ1-force_append-010.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T125729Z-14892\\determ1-force_append.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T125729Z-14892\\determ1-force_reprefill-001.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T125729Z-14892\\determ1-force_reprefill-002.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T125729Z-14892\\determ1-force_reprefill-003.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T125729Z-14892\\determ1-force_reprefill-004.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T125729Z-14892\\determ1-force_reprefill-005.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T125729Z-14892\\determ1-force_reprefill-006.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T125729Z-14892\\determ1-force_reprefill-007.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T125729Z-14892\\determ1-force_reprefill-008.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T125729Z-14892\\determ1-force_reprefill-009.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T125729Z-14892\\determ1-force_reprefill-010.json",
+      "src/test/phi4_corelib_aie4/determinism_records\\20260902T125729Z-14892\\determ1-force_reprefill.json"
     ],
     "blocking_problems": [],
     "problems": [

@@ -131,14 +131,36 @@ def _baseline(**overrides) -> dict:
                     "reprefill_wins_from": 12,
                     "crossover_bracket": [8, 12],
                     "bracket_is_tight": False,
-                    "decisions": [],
+                    "decisions": [
+                        {
+                            "suffix": 8,
+                            "decided": True,
+                            "gap_over_uncertainty": 3.9,
+                        },
+                        {
+                            "suffix": 12,
+                            "decided": True,
+                            "gap_over_uncertainty": 19.3,
+                        },
+                    ],
                 },
                 "2048": {
                     "append_wins_up_to": 24,
                     "reprefill_wins_from": 32,
                     "crossover_bracket": [24, 32],
                     "bracket_is_tight": False,
-                    "decisions": [],
+                    "decisions": [
+                        {
+                            "suffix": 24,
+                            "decided": True,
+                            "gap_over_uncertainty": 5.2,
+                        },
+                        {
+                            "suffix": 32,
+                            "decided": False,
+                            "gap_over_uncertainty": 0.4,
+                        },
+                    ],
                 },
             },
             "decision_rule": "gap must exceed the within-route spread",
@@ -827,6 +849,18 @@ class CrossoverRenderingTests(unittest.TestCase):
         self.assertIn("(24, 32]", text)
         # And never the old phrasing, which read as a measured answer.
         self.assertNotIn("Longest suffix at which append beats", text)
+
+    def test_the_bracket_edges_carry_their_margin(self):
+        # "Decisively" is a word until it is a number, and the edges are
+        # exactly where a reader should be able to check the call.
+        text = render_markdown(_baseline())
+        self.assertIn("margin at each bracket edge", text)
+        self.assertIn("8: 3.9x", text)
+        self.assertIn("24: 5.2x", text)
+
+    def test_undecided_points_are_counted_in_the_document(self):
+        text = render_markdown(_baseline())
+        self.assertIn("3 of 4 sweep points were decided; 1 were not", text)
 
     def test_an_unbracketed_crossover_says_so_rather_than_naming_a_number(self):
         document = _baseline()

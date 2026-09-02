@@ -77,12 +77,12 @@ clean:
 
 test: $(BUILD_DIR)/test_hunyuan
 	cp ../../model_list.json $(BUILD_DIR)/model_list.json
-	cd $(BUILD_DIR) && ./test_hunyuan --model hunyuan:1.8b $(BENCH_ARGS)
+	cd $(BUILD_DIR) && ./test_hunyuan --model hy-mt2:1.8b $(BENCH_ARGS)
 
 # prompt-length sweep over the mm prefill path (see bench_prefill.cpp)
 prefill: $(BUILD_DIR)/bench_prefill
 	cp ../../model_list.json $(BUILD_DIR)/model_list.json
-	cd $(BUILD_DIR) && ./bench_prefill --model hunyuan:1.8b --repeat $(REPEAT) --warmup $(PWARMUP)
+	cd $(BUILD_DIR) && ./bench_prefill --model hy-mt2:1.8b --repeat $(REPEAT) --warmup $(PWARMUP)
 
 -include $(DEPS)
 .PHONY: all clean test prefill

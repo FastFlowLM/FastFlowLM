@@ -236,6 +236,30 @@ static stats_t summarize(std::vector<double> v) {
     return s;
 }
 
+/// \brief "  i/n" right-aligned on the width of n, so every header_print tag of
+///        the run is the same width and the message columns line up
+static std::string turn_tag(size_t i, size_t n) {
+    std::ostringstream idx;
+    idx << n;
+    std::ostringstream tag;
+    tag << std::setw(static_cast<int>(idx.str().size())) << (i + 1) << "/" << idx.str();
+    return tag.str();
+}
+
+/// \brief the timing line of a turn: prefill / decode / e2e, tokens, decode speed
+static std::string turn_timings(const turn_result_t& r) {
+    std::ostringstream o;
+    o << std::fixed << std::setprecision(1)
+      << "prefill " << std::setw(8) << r.prefill_ms << " ms | "
+      << "decode " << std::setw(8) << r.decode_ms << " ms | "
+      << "e2e " << std::setw(8) << r.total_ms << " ms | "
+      << std::setw(4) << r.prompt_tokens << " ptok | "
+      << std::setw(4) << r.gen_tokens << " tok | "
+      << std::setprecision(2) << std::setw(6)
+      << (r.decode_ms > 0.0 ? r.gen_tokens * 1000.0 / r.decode_ms : 0.0) << " tok/s";
+    return o.str();
+}
+
 /// \brief print one summarize() result as a table row
 static void print_stats_row(const std::string& name, const stats_t& s, const std::string& unit) {
     std::cout << "  " << std::left << std::setw(22) << (name + " (" + unit + ")")
@@ -261,7 +285,7 @@ int main(int argc, char* argv[]) {
 
     arg_utils::po::options_description desc("Allowed options");
     arg_utils::po::variables_map vm;
-    desc.add_options()("model,m", arg_utils::po::value<std::string>()->default_value("hunyuan:1.8b"), "Model tag");
+    desc.add_options()("model,m", arg_utils::po::value<std::string>()->default_value("hy-mt2:1.8b"), "Model tag");
     desc.add_options()("Preemption,p", arg_utils::po::value<bool>()->default_value(false), "Preemption");
     desc.add_options()("Length,l", arg_utils::po::value<int>()->default_value(512), "Max generated tokens");
     desc.add_options()("warmup,w", arg_utils::po::value<int>()->default_value(kDefaultWarmup), "Discarded warm-up turns run before the measured pass");
@@ -343,9 +367,8 @@ int main(int argc, char* argv[]) {
         const std::string& text = kBenchSamples[static_cast<size_t>(i) % kBenchSamples.size()];
         turn_result_t r = run_turn(chat, text, length_limit, pin_prefix);
         record_breakdown(chat, r, prev_slots);  // keeps the profiler baseline current
-        std::cout << "[warm-up " << std::setw(2) << (i + 1) << "/" << warmup << "]"
-                  << " " << std::fixed << std::setprecision(1) << std::setw(8) << r.total_ms
-                  << " ms  " << std::setw(3) << r.gen_tokens << " tok" << std::endl;
+        std::string tag = "warm " + turn_tag(static_cast<size_t>(i), static_cast<size_t>(warmup));
+        header_print(tag, "time " << turn_timings(r));
     }
     if (warmup > 0) {
         std::cout << std::endl;
@@ -358,11 +381,11 @@ int main(int argc, char* argv[]) {
         record_breakdown(chat, r, prev_slots);
         results.push_back(r);
 
-        std::cout << "[" << std::setw(3) << (i + 1) << "/" << total_turns << "]"
-                  << " " << std::fixed << std::setprecision(1) << std::setw(8) << r.total_ms
-                  << " ms  " << std::setw(3) << r.gen_tokens << " tok  "
-                  << r.source << "  ->  "
-                  << (r.translation.empty() ? "<EMPTY>" : r.translation) << std::endl;
+        // three aligned lines per turn: the source, the translation, the timings
+        std::string tag = turn_tag(i, total_turns);
+        header_print(tag, "in   " << r.source);
+        header_print(tag, "out  " << (r.translation.empty() ? "<EMPTY>" : r.translation));
+        header_print(tag, "time " << turn_timings(r));
     }
     std::cout << std::endl;
 

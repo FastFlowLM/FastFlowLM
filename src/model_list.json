@@ -1,7 +1,7 @@
 {
     "model_path": "models",
     "models": {
-        "hunyuan": {
+        "hy-mt2": {
             "1.8b": {
                 "name": "Hy-MT2-1.8B-NPU2",
                 "url": "https://huggingface.co/FastFlowLM/Hy-MT2-1.8B-NPU2",

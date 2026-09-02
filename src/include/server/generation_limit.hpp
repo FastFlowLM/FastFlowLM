@@ -5,14 +5,42 @@
 #include <array>
 #include <functional>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 
 enum class GenerationEndpoint {
     Generate,
+    OllamaChat,
     OpenAiChatCompletion,
     OpenAiCompletion
 };
+
+// Every route whose handler reaches the causal engine's generate() or
+// generate_with_prompt(), and the field each one reads its limit from.
+//
+// This table exists because /api/chat was missed. Three of the four
+// endpoints were wired to ParseGenerationLimit by inspection, and
+// inspection is what let the fourth keep its own private limit path --
+// bypassing explicit-limit detection, the admission rule, the HTTP 400
+// path and session_cleared reporting on the AIE4 tag.
+struct GenerationRoute {
+    std::string_view method;
+    std::string_view path;
+    GenerationEndpoint endpoint;
+};
+
+std::span<const GenerationRoute> GenerationRoutes() noexcept;
+
+std::optional<GenerationEndpoint> GenerationEndpointForRoute(
+    std::string_view method,
+    std::string_view path) noexcept;
+
+// Throws when the route is absent from the table, so a generation route
+// cannot reach the engine without declaring how its limit is parsed.
+GenerationEndpoint RequireGenerationEndpoint(
+    std::string_view method,
+    std::string_view path);
 
 struct ParsedGenerationLimit {
     bool explicit_limit;

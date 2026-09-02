@@ -1,9 +1,20 @@
 #include <server/generation_limit.hpp>
 
+#include <stdexcept>
+
 namespace {
 
 constexpr int kLegacyDefaultGenerationLimit = 4096;
 constexpr int kNoExplicitGenerationLimit = -1;
+
+constexpr std::array<GenerationRoute, 4> kGenerationRoutes{{
+    {"POST", "/api/generate", GenerationEndpoint::Generate},
+    {"POST", "/api/chat", GenerationEndpoint::OllamaChat},
+    {"POST",
+     "/v1/chat/completions",
+     GenerationEndpoint::OpenAiChatCompletion},
+    {"POST", "/v1/completions", GenerationEndpoint::OpenAiCompletion},
+}};
 
 ParsedGenerationLimit ParseField(
     const nlohmann::ordered_json& request,
@@ -16,6 +27,35 @@ ParsedGenerationLimit ParseField(
 
 }  // namespace
 
+std::span<const GenerationRoute> GenerationRoutes() noexcept {
+    return kGenerationRoutes;
+}
+
+std::optional<GenerationEndpoint> GenerationEndpointForRoute(
+    std::string_view method,
+    std::string_view path) noexcept {
+    for (const GenerationRoute& route : kGenerationRoutes) {
+        if (route.method == method && route.path == path) {
+            return route.endpoint;
+        }
+    }
+    return std::nullopt;
+}
+
+GenerationEndpoint RequireGenerationEndpoint(
+    std::string_view method,
+    std::string_view path) {
+    const auto endpoint = GenerationEndpointForRoute(method, path);
+    if (!endpoint.has_value()) {
+        throw std::logic_error(
+            "generation route " + std::string(method) + " " +
+            std::string(path) +
+            " is missing from GenerationRoutes(); add it there so its "
+            "limit field and admission rule are declared");
+    }
+    return *endpoint;
+}
+
 ParsedGenerationLimit ParseGenerationLimit(
     const nlohmann::ordered_json& request,
     GenerationEndpoint endpoint) {
@@ -23,6 +63,15 @@ ParsedGenerationLimit ParseGenerationLimit(
         case GenerationEndpoint::Generate:
         case GenerationEndpoint::OpenAiCompletion:
             return ParseField(request, "max_tokens");
+        case GenerationEndpoint::OllamaChat: {
+            // Ollama nests the limit, and reads it with the same
+            // presence/absence rule as the flat endpoints.
+            const nlohmann::ordered_json options =
+                request.value(
+                    "options",
+                    nlohmann::ordered_json::object());
+            return ParseField(options, "num_predict");
+        }
         case GenerationEndpoint::OpenAiChatCompletion: {
             const ParsedGenerationLimit max_tokens =
                 ParseField(request, "max_tokens");
@@ -56,13 +105,11 @@ std::optional<int> RequestedMaxNewTokens(
 
 int OllamaChatGenerationLoopLimit(
     const nlohmann::ordered_json& request) {
-    const nlohmann::ordered_json options =
-        request.value(
-            "options",
-            nlohmann::ordered_json::object());
-    return options.value(
-        "num_predict",
-        kLegacyDefaultGenerationLimit);
+    // Retained as the legacy (non-AIE4) spelling, and defined in terms of
+    // the shared rule so the two cannot drift apart.
+    return GenerationLoopLimit(
+        ParseGenerationLimit(request, GenerationEndpoint::OllamaChat),
+        false);
 }
 
 nlohmann::ordered_json ModelErrorResponse(

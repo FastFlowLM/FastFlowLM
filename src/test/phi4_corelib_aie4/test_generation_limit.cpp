@@ -8,10 +8,15 @@
 #include <csignal>
 #include <condition_variable>
 #include <exception>
+#include <filesystem>
+#include <fstream>
 #include <functional>
 #include <iostream>
+#include <map>
 #include <mutex>
 #include <optional>
+#include <set>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -75,8 +80,31 @@ void TestHandlerSpecificPresence() {
         false,
         -1);
 
+    // /api/chat nests its limit, and it is now parsed by the same rule
+    // rather than by a private one.
+    CheckParsed(
+        ParseGenerationLimit(
+            ordered_json{{"options", {{"num_predict", 51}}}},
+            GenerationEndpoint::OllamaChat),
+        true,
+        51);
+    CheckParsed(
+        ParseGenerationLimit(
+            ordered_json{{"options", ordered_json::object()}},
+            GenerationEndpoint::OllamaChat),
+        false,
+        -1);
+    // A flat max_tokens is not the Ollama field and must not be read.
+    CheckParsed(
+        ParseGenerationLimit(
+            ordered_json{{"max_tokens", 52}},
+            GenerationEndpoint::OllamaChat),
+        false,
+        -1);
+
     for (const GenerationEndpoint endpoint : {
              GenerationEndpoint::Generate,
+             GenerationEndpoint::OllamaChat,
              GenerationEndpoint::OpenAiChatCompletion,
              GenerationEndpoint::OpenAiCompletion}) {
         CheckParsed(
@@ -99,16 +127,217 @@ void TestEndpointDefaultsAndPropagation() {
     CHECK(RequestedMaxNewTokens(explicit_limit) == std::optional<int>(73));
 }
 
-void TestOllamaChatLimitStaysSoftOnly() {
+// Legacy behaviour on /api/chat must not change: an omitted num_predict
+// is still the 4096 soft bound, and an explicit one is still honoured.
+void TestOllamaChatLegacyLimitIsUnchanged() {
     const ordered_json default_request = {
         {"options", ordered_json::object()},
     };
     CHECK(OllamaChatGenerationLoopLimit(default_request) == 4096);
+    CHECK(OllamaChatGenerationLoopLimit(ordered_json::object()) == 4096);
 
     const ordered_json explicit_request = {
         {"options", {{"num_predict", 91}}},
     };
     CHECK(OllamaChatGenerationLoopLimit(explicit_request) == 91);
+
+    // The legacy spelling and the shared rule are the same function.
+    for (const ordered_json& request :
+         {default_request, explicit_request, ordered_json::object()}) {
+        const ParsedGenerationLimit parsed =
+            ParseGenerationLimit(
+                request,
+                GenerationEndpoint::OllamaChat);
+        CHECK(
+            GenerationLoopLimit(parsed, false) ==
+            OllamaChatGenerationLoopLimit(request));
+    }
+}
+
+// On AIE4 an omitted /api/chat limit must mean "until the context cap",
+// not the legacy 4096, and an explicit one must reach the admission rule
+// through requested_max_new_tokens. Both were bypassed before.
+void TestOllamaChatAie4LimitAndAdmission() {
+    const ordered_json omitted = {{"options", ordered_json::object()}};
+    const ParsedGenerationLimit omitted_parsed =
+        ParseGenerationLimit(omitted, GenerationEndpoint::OllamaChat);
+    CHECK(GenerationLoopLimit(omitted_parsed, true) == -1);
+    CHECK(!RequestedMaxNewTokens(omitted_parsed).has_value());
+
+    const ordered_json over_limit = {
+        {"options", {{"num_predict", 8192}}},
+    };
+    const ParsedGenerationLimit over_parsed =
+        ParseGenerationLimit(over_limit, GenerationEndpoint::OllamaChat);
+    CHECK(GenerationLoopLimit(over_parsed, true) == 8192);
+    CHECK(
+        RequestedMaxNewTokens(over_parsed) == std::optional<int>(8192));
+}
+
+// The rule the /api/chat gap was missing. Three of four endpoints were
+// covered by inspection; this derives the set instead of restating it.
+//
+// It reads the two production sources, finds every RestHandler::handle_*
+// whose body reaches the causal engine's generate() or
+// generate_with_prompt(), maps those handlers to the routes server.cpp
+// registers for them, and requires each such route to be declared in
+// GenerationRoutes(). A new generation endpoint fails this test until it
+// is.
+std::string ReadSource(const char* relative) {
+    const std::filesystem::path path =
+        std::filesystem::path(FLM_TEST_SOURCE_DIR) / relative;
+    std::ifstream file(path, std::ios::binary);
+    if (!file) {
+        throw std::runtime_error(
+            "failed to read " + path.string());
+    }
+    std::ostringstream buffer;
+    buffer << file.rdbuf();
+    return buffer.str();
+}
+
+std::set<std::string> GeneratingHandlerNames() {
+    const std::string source = ReadSource("server/rest_handler.cpp");
+    std::set<std::string> generating;
+    constexpr std::string_view kDefinition = "void RestHandler::handle_";
+    for (std::size_t at = source.find(kDefinition);
+         at != std::string::npos;
+         at = source.find(kDefinition, at + 1)) {
+        const std::size_t name_start = at + std::string("void RestHandler::").size();
+        const std::size_t name_end = source.find('(', name_start);
+        if (name_end == std::string::npos) {
+            continue;
+        }
+        const std::string name =
+            source.substr(name_start, name_end - name_start);
+        const std::size_t body_end =
+            source.find(kDefinition, at + 1);
+        const std::string body = source.substr(
+            at,
+            body_end == std::string::npos
+                ? std::string::npos
+                : body_end - at);
+        if (
+            body.find("auto_chat_engine->generate(") !=
+                std::string::npos ||
+            body.find("auto_chat_engine->generate_with_prompt(") !=
+                std::string::npos) {
+            generating.insert(name);
+        }
+    }
+    return generating;
+}
+
+std::map<std::string, std::pair<std::string, std::string>>
+RegisteredRoutesByHandler() {
+    const std::string source = ReadSource("server/server.cpp");
+    std::map<std::string, std::pair<std::string, std::string>> routes;
+    constexpr std::string_view kRegister = "register_handler(\"";
+    for (std::size_t at = source.find(kRegister);
+         at != std::string::npos;
+         at = source.find(kRegister, at + 1)) {
+        std::size_t cursor = at + kRegister.size();
+        const std::size_t method_end = source.find('"', cursor);
+        if (method_end == std::string::npos) {
+            continue;
+        }
+        const std::string method =
+            source.substr(cursor, method_end - cursor);
+        const std::size_t path_start = source.find('"', method_end + 1);
+        if (path_start == std::string::npos) {
+            continue;
+        }
+        const std::size_t path_end = source.find('"', path_start + 1);
+        if (path_end == std::string::npos) {
+            continue;
+        }
+        const std::string path =
+            source.substr(path_start + 1, path_end - path_start - 1);
+
+        // The handler this route dispatches to, before the next
+        // registration begins.
+        const std::size_t next = source.find(kRegister, at + 1);
+        const std::string block = source.substr(
+            path_end,
+            next == std::string::npos
+                ? std::string::npos
+                : next - path_end);
+        constexpr std::string_view kCall = "rest_handler->";
+        const std::size_t call_at = block.find(kCall);
+        if (call_at == std::string::npos) {
+            continue;
+        }
+        const std::size_t call_start = call_at + kCall.size();
+        const std::size_t call_end = block.find('(', call_start);
+        if (call_end == std::string::npos) {
+            continue;
+        }
+        routes.emplace(
+            block.substr(call_start, call_end - call_start),
+            std::pair<std::string, std::string>(method, path));
+    }
+    return routes;
+}
+
+void TestEveryGenerationRouteIsDeclared() {
+    const auto generating = GeneratingHandlerNames();
+    const auto registered = RegisteredRoutesByHandler();
+    CHECK(!generating.empty());
+    CHECK(!registered.empty());
+
+    std::set<std::string> declared;
+    for (const GenerationRoute& route : GenerationRoutes()) {
+        declared.insert(
+            std::string(route.method) + " " + std::string(route.path));
+        CHECK(
+            GenerationEndpointForRoute(route.method, route.path) ==
+            std::optional<GenerationEndpoint>(route.endpoint));
+        CHECK(
+            requires_npu_access(
+                std::string(route.method),
+                std::string(route.path)));
+    }
+
+    std::set<std::string> discovered;
+    for (const std::string& handler : generating) {
+        const auto found = registered.find(handler);
+        if (found == registered.end()) {
+            throw std::runtime_error(
+                "generation handler " + handler +
+                " is not registered on any route in server.cpp");
+        }
+        const std::string route =
+            found->second.first + " " + found->second.second;
+        discovered.insert(route);
+        if (!declared.contains(route)) {
+            throw std::runtime_error(
+                "route " + route + " reaches the causal engine but is "
+                "missing from GenerationRoutes(); it would bypass the "
+                "AIE4 admission rule");
+        }
+    }
+    // And no declared route is stale.
+    CHECK(discovered == declared);
+    CHECK(declared.size() == 4);
+    CHECK(declared.contains("POST /api/chat"));
+
+    // A route that does not generate has no endpoint, and an unknown one
+    // fails loudly rather than silently defaulting.
+    CHECK(
+        !GenerationEndpointForRoute("POST", "/v1/embeddings")
+             .has_value());
+    CHECK(
+        !GenerationEndpointForRoute("GET", "/api/chat").has_value());
+    bool threw = false;
+    try {
+        (void)RequireGenerationEndpoint("POST", "/api/not-a-route");
+    } catch (const std::logic_error&) {
+        threw = true;
+    }
+    CHECK(threw);
+    CHECK(
+        RequireGenerationEndpoint("POST", "/api/chat") ==
+        GenerationEndpoint::OllamaChat);
 }
 
 void TestNestedModelErrorAndHttpStatus() {
@@ -399,7 +628,9 @@ int main() {
     try {
         TestHandlerSpecificPresence();
         TestEndpointDefaultsAndPropagation();
-        TestOllamaChatLimitStaysSoftOnly();
+        TestOllamaChatLegacyLimitIsUnchanged();
+        TestOllamaChatAie4LimitAndAdmission();
+        TestEveryGenerationRouteIsDeclared();
         TestNestedModelErrorAndHttpStatus();
         TestOpenAiStreamingErrorFramingAndParsing();
         TestCliLimitAndRecoverableNotice();

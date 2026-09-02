@@ -653,7 +653,7 @@ void RestHandler::handle_generate(const json& request,
         const ParsedGenerationLimit parsed_limit =
             ParseGenerationLimit(
                 request,
-                GenerationEndpoint::Generate);
+                RequireGenerationEndpoint("POST", "/api/generate"));
         std::string prompt = request["prompt"];
         bool stream = request.value("stream", true);
         std::string model = request.value("model", current_model_tag);
@@ -806,7 +806,10 @@ void RestHandler::handle_chat(const json& request,
         bool stream = request.value("stream", false);
         std::string model = request.value("model", current_model_tag);
         json options = request.value("options", json::object());
-        int length_limit = OllamaChatGenerationLoopLimit(request);
+        const ParsedGenerationLimit parsed_limit =
+            ParseGenerationLimit(
+                request,
+                RequireGenerationEndpoint("POST", "/api/chat"));
 
         auto load_start_time = time_utils::now();
         if (!ensure_model_loaded(model)) {
@@ -814,16 +817,24 @@ void RestHandler::handle_chat(const json& request,
             send_response(error_response);
             return;
         }
+        // Same rule as the other three generation endpoints. On a legacy
+        // model this is still options.num_predict defaulting to 4096; on
+        // AIE4 an omitted limit means "until the context cap", and an
+        // explicit one takes part in the admission check below.
+        const int length_limit =
+            GenerationLoopLimit(
+                parsed_limit,
+                auto_chat_engine->uses_corelib_aie4());
         auto load_end_time = time_utils::now();
-       
+
         configure_chat_engine_parameters(options, request);
 
         // messages = normalize_messages(messages);
-        
+
         chat_meta_info_t meta_info;
         lm_uniform_input_t uniformed_input;
-        // options.num_predict is a soft loop bound only. It must not reserve
-        // AIE4 context capacity through requested_max_new_tokens.
+        uniformed_input.requested_max_new_tokens =
+            RequestedMaxNewTokens(parsed_limit);
         meta_info.load_duration = (uint64_t)time_utils::duration_ns(load_start_time, load_end_time).first;
         meta_info.max_prefill_len = this->prefill_chunk_len;
         header_print("FLM", "Start generating...");
@@ -1170,7 +1181,9 @@ void RestHandler::handle_openai_chat_completion(const json& request,
         const ParsedGenerationLimit parsed_limit =
             ParseGenerationLimit(
                 request,
-                GenerationEndpoint::OpenAiChatCompletion);
+                RequireGenerationEndpoint(
+                    "POST",
+                    "/v1/chat/completions"));
         json current_messages = request["messages"];
         std::string model = request.value("model", current_model_tag);
         bool stream = request.value("stream", false);
@@ -1495,7 +1508,7 @@ void RestHandler::handle_openai_completion(const json& request,
         const ParsedGenerationLimit parsed_limit =
             ParseGenerationLimit(
                 request,
-                GenerationEndpoint::OpenAiCompletion);
+                RequireGenerationEndpoint("POST", "/v1/completions"));
         std::string prompt = request["prompt"];
         std::string model = request.value("model", current_model_tag);
         std::string reasoning_effort = request.value("reasoning_effort", "medium");

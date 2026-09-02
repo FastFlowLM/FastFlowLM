@@ -186,9 +186,9 @@ Undecided points, which is where the bracket's width comes from: history 2048 at
 | 2026-09-02T15:34:01Z | yes | 11 points | `(12, 16]` | `(4, 8]` | 22/22 |  |
 | 2026-09-02T16:32:18Z | yes | 11 points | `(12, 64]` | `(4, 12]` | 18/22 |  |
 
-> **Read the lower edge as measured and the upper edge as an upper bound.** Across the 2 interleaved runs the lower edge has been **12** at history 2048, **4** at history 512 every time, while the upper edge has taken the values [16, 64] at history 2048; [8, 12] at history 512 on the same binary and the same model. The upper edge moves with how quiet the machine was, because that is what decides how many points near the crossover can be called at all.
+> **Read the lower edge as measured and the upper edge as an upper bound.** Across the 2 interleaved runs the lower edge has been 12 at history 2048; 4 at history 512 every time, while the upper edge has taken 16, 64 at history 2048; 8, 12 at history 512 on the same binary and the same model. The upper edge moves with how quiet the machine was, because that is what decides how many points near the crossover can be called at all.
 
-The 1 non-interleaved run(s) in the table are excluded from that comparison, because they measured the routes in blocks rather than paired in time. They are shown for provenance — and their lower edges agree with the interleaved ones, which is a point in the lower edge's favour that the stability test above deliberately does not count.
+2 of the 4 rows are non-interleaved and are excluded from that comparison, because they measured the routes in blocks rather than paired in time. They are shown for provenance.
 
 Prefix-monotonic: `True`. Decision rule: append and re-prefill samples are INTERLEAVED, so a machine regime shift moves both routes together; a point is decided only when the gap between the two routes' p50 exceeds BOTH the larger within-point p50-to-p95 spread AND the larger drift between a route's first and last sample at that point. The reported figure is a BRACKET, not a threshold..
 

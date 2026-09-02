@@ -282,6 +282,16 @@ def validate(document: dict[str, object]) -> list[str]:
     return problems
 
 
+def _is_number(value: object) -> bool:
+    """An integer that is not a bool.
+
+    `isinstance(True, int)` is True, so a JSON `true` satisfied every
+    `isinstance(..., int)` check in this file -- including the ones added to
+    stop a present-but-unusable field from validating clean.
+    """
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
 def _continuation_problems(continuation: object) -> list[str]:
     """N-3. The interleaving claim has to be attested by the data.
 
@@ -319,7 +329,9 @@ def _continuation_problems(continuation: object) -> list[str]:
         # record with every `sample_starts_ns` set to null validated clean --
         # the same skip-instead-of-fail shape this round closed twice
         # elsewhere, reintroduced in the check added to close it.
-        if not isinstance(point.get("drift_ns"), int):
+        # `isinstance(True, int)` is True in Python, so a JSON `true` passed
+        # a check written to require a number. Excluded explicitly.
+        if not _is_number(point.get("drift_ns")):
             problems.append(
                 f"continuation point "
                 f"{point.get('history_rows')}/{point.get('suffix')}"
@@ -336,7 +348,7 @@ def _continuation_problems(continuation: object) -> list[str]:
                 f"a non-empty list. Without it the interleaving cannot be "
                 f"checked and the published claim is unattested."
             )
-        elif not all(isinstance(value, int) for value in starts):
+        elif not all(_is_number(value) for value in starts):
             problems.append(
                 f"continuation point "
                 f"{point.get('history_rows')}/{point.get('suffix')}"
@@ -367,9 +379,7 @@ def _continuation_problems(continuation: object) -> list[str]:
         # Already reported above as a bad field. Sorting a mixed list of
         # strings and ints raises, which would turn a reportable defect in the
         # record into a crash in the validator.
-        if not all(
-            isinstance(value, int) for value in append + reprefill
-        ):
+        if not all(_is_number(value) for value in append + reprefill):
             continue
         if len(append) != len(reprefill):
             problems.append(
@@ -819,6 +829,95 @@ def crossover_edge_stability(history: list[dict]) -> dict:
     }
 
 
+def crossover_stability_narrative(stability: dict) -> tuple[str, str]:
+    """The lead-in and the guidance for one stability result.
+
+    ONE function returning BOTH, because the defect this replaces was that
+    they were emitted separately: the lead-in "the bracket's upper edge is not
+    stable and its lower edge is" was unconditional, printed whenever more
+    than one run existed, while only the guidance beneath it was conditional.
+    A future run whose LOWER edge moved would have printed that sentence in
+    bold directly above a table showing it moved -- and lost the guidance
+    entirely, because neither branch fired.
+
+    Returning a pair makes that structurally impossible: every case has a
+    lead-in that matches its own data and a guidance paragraph, and adding a
+    case without both is a change to this function rather than an omission
+    somewhere in a render.
+    """
+    runs = stability.get("runs_considered", 0)
+    lower = stability.get("lower_stable") or {}
+    upper = stability.get("upper_observed") or {}
+
+    def edges(mapping: dict) -> str:
+        return "; ".join(
+            f"{', '.join(str(value) for value in values)} at history {key}"
+            for key, values in mapping.items()
+        )
+
+    if runs < 2 or not lower:
+        return (
+            "This table is every render of this document that recorded a "
+            "crossover, from the committed baseline artifacts.",
+            "> **Not enough interleaved runs to say whether either edge is "
+            "stable.** Treat the bracket as a single observation until a "
+            "second interleaved run extends this table.",
+        )
+
+    if stability.get("lower_is_stable") and not stability.get(
+        "upper_is_stable"
+    ):
+        return (
+            "**The bracket's upper edge is not stable and its lower edge "
+            "is.** This table is every render of this document that recorded "
+            "a crossover, from the committed baseline artifacts.",
+            "> **Read the lower edge as measured and the upper edge as an "
+            f"upper bound.** Across the {runs} interleaved runs the lower "
+            "edge has been " + edges(lower) + " every time, while the upper "
+            "edge has taken " + edges(upper) + " on the same binary and the "
+            "same model. The upper edge moves with how quiet the machine "
+            "was, because that is what decides how many points near the "
+            "crossover can be called at all.",
+        )
+
+    if stability.get("lower_is_stable") and stability.get("upper_is_stable"):
+        return (
+            f"**Both edges have held across {runs} interleaved runs.** This "
+            "table is every render of this document that recorded a "
+            "crossover, from the committed baseline artifacts.",
+            f"> Both edges have held across the {runs} interleaved runs: "
+            + edges(lower) + " below, " + edges(upper) + " above. That is a "
+            "small number of runs on a machine measured moving by a factor "
+            "of 1.8, so it is agreement rather than proof.",
+        )
+
+    if not stability.get("lower_is_stable") and stability.get(
+        "upper_is_stable"
+    ):
+        return (
+            "**The bracket's LOWER edge has moved between runs.** This table "
+            "is every render of this document that recorded a crossover, "
+            "from the committed baseline artifacts.",
+            "> **Do not read the lower edge as measured.** It has taken "
+            + edges(lower) + f" across {runs} interleaved runs of the same "
+            "binary on the same model. The upper edge has held at "
+            + edges(upper) + ", but with the lower edge moving the bracket "
+            "is not a stable interval and should be treated as a single "
+            "observation.",
+        )
+
+    return (
+        "**Neither edge of the bracket is stable between runs.** This table "
+        "is every render of this document that recorded a crossover, from "
+        "the committed baseline artifacts.",
+        "> **Neither edge can be read as measured.** Across "
+        f"{runs} interleaved runs of the same binary the lower edge has "
+        "taken " + edges(lower) + " and the upper edge " + edges(upper) +
+        ". Whatever a single run reports is one observation on an unstable "
+        "machine, and the crossover is not resolved by this data.",
+    )
+
+
 def load_determinism_records(pattern: str) -> list[dict]:
     records = []
     for path in sorted(globlib.glob(pattern)):
@@ -1130,14 +1229,10 @@ def render_markdown(document: dict) -> str:
             history = document.get("crossover_history") or []
             if len(history) > 1:
                 stability = crossover_edge_stability(history)
+                lead_in, guidance = crossover_stability_narrative(stability)
                 add("##### The same measurement, run to run")
                 add("")
-                add(
-                    "**The bracket's upper edge is not stable and its lower "
-                    "edge is.** This table is every render of this document "
-                    "that recorded a crossover, from the committed baseline "
-                    "artifacts."
-                )
+                add(lead_in)
                 add("")
                 add(
                     "| measured (UTC) | interleaved | grid | "
@@ -1193,63 +1288,31 @@ def render_markdown(document: dict) -> str:
                         + f" | {decided} | {note} |"
                     )
                 add("")
-                if stability["lower_is_stable"] and not stability[
-                    "upper_is_stable"
-                ]:
-                    add(
-                        "> **Read the lower edge as measured and the upper "
-                        "edge as an upper bound.** Across the "
-                        f"{stability['runs_considered']} interleaved runs the "
-                        "lower edge has been "
-                        + ", ".join(
-                            f"**{values[0]}** at history {key}"
-                            for key, values in stability[
-                                "lower_stable"
-                            ].items()
-                        )
-                        + " every time, while the upper edge has taken the "
-                        "values "
-                        + "; ".join(
-                            f"{values} at history {key}"
-                            for key, values in stability[
-                                "upper_observed"
-                            ].items()
-                        )
-                        + " on the same binary and the same model. The upper "
-                        "edge moves with how quiet the machine was, because "
-                        "that is what decides how many points near the "
-                        "crossover can be called at all."
-                    )
-                    add("")
+                # ALWAYS emitted, whatever the stability result. The
+                # guidance used to live in two `if` branches with no `else`,
+                # so the one case nobody had rendered -- a lower edge that
+                # moved -- printed a false lead-in and no guidance at all.
+                add(guidance)
+                add("")
+                if True:
+                    # Every non-interleaved ROW, because that is what the
+                    # table above shows. The filter used to also require a
+                    # bracket, which silently dropped the sparse-grid row and
+                    # made the sentence say "1" under a table with two `no`s.
                     older = [
                         item
                         for item in history
                         if not item.get("samples_interleaved")
-                        and any(
-                            isinstance(edge, list) and edge[1] is not None
-                            for edge in (item.get("edges") or {}).values()
-                        )
                     ]
                     if older:
                         add(
-                            f"The {len(older)} non-interleaved run(s) in the "
-                            "table are excluded from that comparison, because "
-                            "they measured the routes in blocks rather than "
-                            "paired in time. They are shown for provenance — "
-                            "and their lower edges agree with the interleaved "
-                            "ones, which is a point in the lower edge's favour "
-                            "that the stability test above deliberately does "
-                            "not count."
+                            f"{len(older)} of the {len(history)} rows are "
+                            "non-interleaved and are excluded from that "
+                            "comparison, because they measured the routes in "
+                            "blocks rather than paired in time. They are "
+                            "shown for provenance."
                         )
                         add("")
-                elif stability["lower_is_stable"] and stability[
-                    "upper_is_stable"
-                ]:
-                    add(
-                        f"> Both edges have held across the "
-                        f"{stability['runs_considered']} interleaved runs."
-                    )
-                    add("")
             add(
                 f"Prefix-monotonic: "
                 f"`{continuation.get('prefix_monotonic')}`. Decision rule: "
@@ -1594,16 +1657,22 @@ def main(argv: list[str] | None = None) -> int:
     document = json.loads(Path(args.input).read_text(encoding="utf-8"))
     problems = validate(document)
 
+    # Merged in memory now, persisted only if the document is actually
+    # rendered.
+    #
+    # It used to be written straight away, so a baseline that FAILED
+    # validation still appended a row to the committed history -- a run whose
+    # numbers were never published becoming a permanent observation that
+    # later runs are compared against.
     history: list[dict] = []
-    if args.crossover_history:
-        history_path = Path(args.crossover_history)
+    history_path = (
+        Path(args.crossover_history) if args.crossover_history else None
+    )
+    if history_path is not None:
         if history_path.exists():
             history = json.loads(history_path.read_text(encoding="utf-8"))
         history = merge_crossover_history(
             history, crossover_entry(document, source=str(args.input))
-        )
-        history_path.write_text(
-            json.dumps(history, indent=2), encoding="utf-8"
         )
         document["crossover_history"] = history
 
@@ -1641,6 +1710,10 @@ def main(argv: list[str] | None = None) -> int:
     ) or (determinism_incomplete and not args.allow_incomplete_determinism)
 
     if not render_blocked:
+        if history_path is not None:
+            history_path.write_text(
+                json.dumps(history, indent=2), encoding="utf-8"
+            )
         target = Path(args.markdown)
         existing = target.read_text(encoding="utf-8") if target.exists() else ""
         target.write_text(

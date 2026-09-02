@@ -41,6 +41,7 @@ from tools.report_phi4_corelib_baseline import (
     MIN_DETERMINISM_RUNS_PER_ROUTE,
     crossover_edge_stability,
     crossover_entry,
+    crossover_stability_narrative,
     merge_crossover_history,
     ROUTE_DEPENDENCE_ALPHA,
     _fisher_exact_two_sided,
@@ -51,6 +52,9 @@ from tools.report_phi4_corelib_baseline import (
     render_markdown,
     validate,
 )
+
+
+_MARKDOWN_STUB = "---\ntitle: Phi4\n---\n\n## Existing content\n"
 
 
 def _identity() -> dict:
@@ -1380,7 +1384,10 @@ class CrossoverHistoryTests(unittest.TestCase):
         self.assertIn("2026-09-02T15:34:01Z", text)
         self.assertIn("Read the lower edge as measured", text)
         self.assertIn("upper edge as an upper bound", text)
-        self.assertIn("[16, 64]", text)
+        # Prose, not a Python list repr. The document used to print
+        # "has taken the values [16, 64] at history 2048".
+        self.assertIn("16, 64 at history 2048", text)
+        self.assertNotIn("[16, 64]", text)
 
     def test_a_single_run_publishes_no_stability_claim(self):
         document = _baseline()
@@ -1426,6 +1433,257 @@ class InstrumentCaveatWordingTests(unittest.TestCase):
         self.assertIn("instrument perturbs what it measures", text)
         self.assertNotIn("rate consistent with the uninstrumented", text)
         self.assertIn("with the same coarse signature", text)
+
+
+class CrossoverNarrativeTests(unittest.TestCase):
+    """EVERY stability case, driven by the test rather than assumed.
+
+    The defect this covers: the bold lead-in "the bracket's upper edge is not
+    stable and its lower edge is" was emitted whenever more than one run
+    existed, independent of the stability computation, while only the guidance
+    beneath it was conditional. A future run whose LOWER edge moved would have
+    printed that sentence above a table showing it moved, AND lost the
+    guidance entirely because neither branch fired.
+
+    The reviewer's note is the one that matters: the tests kept agreeing with
+    the generator about which case exists. That is the third time in this
+    task. So this class enumerates all four cases and asserts both halves --
+    the lead-in matching the data, and a guidance paragraph being present --
+    for each of them.
+    """
+
+    def _stability(self, lower, upper, runs=2):
+        return {
+            "runs_considered": runs,
+            "lower_stable": lower,
+            "upper_observed": upper,
+            "lower_is_stable": all(len(v) == 1 for v in lower.values())
+            and bool(lower),
+            "upper_is_stable": all(len(v) == 1 for v in upper.values())
+            and bool(upper),
+        }
+
+    def test_every_case_produces_a_lead_in_and_a_guidance(self):
+        cases = [
+            ("lower stable, upper not", {"512": [4]}, {"512": [8, 12]}, 2),
+            ("both stable", {"512": [4]}, {"512": [8]}, 2),
+            ("lower moved, upper stable", {"512": [4, 8]}, {"512": [12]}, 2),
+            ("neither stable", {"512": [4, 8]}, {"512": [12, 64]}, 2),
+            ("too few runs", {}, {}, 1),
+        ]
+        for label, lower, upper, runs in cases:
+            lead, guidance = crossover_stability_narrative(
+                self._stability(lower, upper, runs)
+            )
+            self.assertTrue(lead.strip(), label)
+            self.assertTrue(guidance.strip(), label)
+            self.assertTrue(
+                guidance.lstrip().startswith(">"),
+                f"{label}: guidance is not a blockquote: {guidance!r}",
+            )
+
+    def test_a_moving_lower_edge_is_never_called_stable(self):
+        lead, guidance = crossover_stability_narrative(
+            self._stability({"512": [4, 8]}, {"512": [12]})
+        )
+        self.assertIn("LOWER edge has moved", lead)
+        self.assertNotIn("lower edge is.**", lead)
+        self.assertIn("Do not read the lower edge as measured", guidance)
+
+    def test_both_stable_does_not_say_the_upper_is_unstable(self):
+        lead, guidance = crossover_stability_narrative(
+            self._stability({"512": [4]}, {"512": [8]})
+        )
+        self.assertIn("Both edges have held", lead)
+        self.assertNotIn("not stable", lead)
+        self.assertIn("agreement rather than proof", guidance)
+
+    def test_neither_stable_refuses_the_bracket(self):
+        lead, guidance = crossover_stability_narrative(
+            self._stability({"512": [4, 8]}, {"512": [12, 64]})
+        )
+        self.assertIn("Neither edge", lead)
+        self.assertIn("not resolved by this data", guidance)
+
+    def test_one_run_says_so_rather_than_claiming_stability(self):
+        lead, guidance = crossover_stability_narrative(
+            self._stability({}, {}, runs=1)
+        )
+        self.assertNotIn("stable", lead)
+        self.assertIn("Not enough interleaved runs", guidance)
+
+
+class CrossoverNarrativeRenderTests(unittest.TestCase):
+    """The same four cases, through the real renderer.
+
+    Testing the pure function is not enough: the defect was that the renderer
+    emitted its own unconditional sentence beside it.
+    """
+
+    def _document(self, edges_per_run):
+        document = _baseline()
+        history = []
+        for index, edges in enumerate(edges_per_run):
+            history.append(
+                {
+                    "utc": f"2026-09-02T1{index}:00:00Z",
+                    "samples_interleaved": True,
+                    "suffix_grid": [1, 2, 4],
+                    "edges": edges,
+                    "points_decided": 3,
+                    "points_total": 3,
+                    "undecided_suffixes": {},
+                }
+            )
+        document["crossover_history"] = history
+        return document
+
+    def test_a_moving_lower_edge_renders_honestly(self):
+        # THE CASE THAT WOULD HAVE SHIPPED A FALSE CLAIM: the lower edge moves
+        # on a future hardware run, which run_hardware_suite.ps1 now appends
+        # to this history automatically.
+        # The lower edge moves and the upper HOLDS: 4 -> 8 with 12 both
+        # times. Writing this fixture the obvious way -- (4, 8] then (8, 12]
+        # -- moves both edges and lands in the "neither is stable" case, which
+        # is a different sentence. The first draft of this test did exactly
+        # that and failed, which is the test doing its job rather than
+        # agreeing with the generator.
+        text = render_markdown(
+            self._document([{"512": [4, 12]}, {"512": [8, 12]}])
+        )
+        self.assertIn("LOWER edge has moved", text)
+        self.assertNotIn(
+            "upper edge is not stable and its lower edge is", text
+        )
+        # And the guidance must NOT vanish, which is what used to happen.
+        self.assertIn("Do not read the lower edge as measured", text)
+
+    def test_both_stable_renders_without_contradiction(self):
+        text = render_markdown(
+            self._document([{"512": [4, 8]}, {"512": [4, 8]}])
+        )
+        self.assertIn("Both edges have held", text)
+        self.assertNotIn(
+            "upper edge is not stable and its lower edge is", text
+        )
+
+    def test_neither_stable_renders_honestly(self):
+        text = render_markdown(
+            self._document([{"512": [4, 8]}, {"512": [8, 64]}])
+        )
+        self.assertIn("Neither edge of the bracket is stable", text)
+        self.assertIn("not resolved by this data", text)
+
+    def test_the_todays_case_still_renders_the_guidance(self):
+        text = render_markdown(
+            self._document([{"512": [4, 8]}, {"512": [4, 12]}])
+        )
+        self.assertIn(
+            "upper edge is not stable and its lower edge is", text
+        )
+        self.assertIn("Read the lower edge as measured", text)
+
+
+class BooleanIsNotANumberTests(unittest.TestCase):
+    """`isinstance(True, int)` is True, so a JSON `true` satisfied every
+    numeric check added to stop unusable fields validating clean."""
+
+    def test_a_true_drift_is_rejected(self):
+        document = _baseline()
+        document["continuation"]["points"][0]["drift_ns"] = True
+        self.assertTrue(
+            any("drift_ns" in p for p in validate(document)),
+            validate(document),
+        )
+
+    def test_a_true_sample_start_is_rejected(self):
+        document = _baseline()
+        document["continuation"]["points"][0]["sample_starts_ns"] = [
+            0,
+            True,
+            400,
+            600,
+            800,
+        ]
+        self.assertTrue(
+            any("non-integer" in p for p in validate(document))
+        )
+
+
+class HistoryPersistenceTests(unittest.TestCase):
+    """A run whose document was never published must not become a permanent
+    observation that later runs are compared against."""
+
+    def _fixture(self, directory: Path, valid: bool):
+        baseline = directory / "phi4_aie4_baseline.json"
+        document = _baseline()
+        document["continuation"]["crossover"] = {
+            "512": {
+                "append_wins_up_to": 4,
+                "reprefill_wins_from": 8,
+                "decisions": [{"suffix": 4, "decided": True}],
+            }
+        }
+        if not valid:
+            document["memory"]["private_bytes_slope_per_token"] = 400 * 1024
+        baseline.write_text(json.dumps(document), encoding="utf-8")
+        artifacts = directory / "artifacts"
+        for index in range(20):
+            run_dir = artifacts / f"20260902T00{index:04d}Z-1"
+            run_dir.mkdir(parents=True)
+            for route in ("append", "reprefill"):
+                name = "force_append" if route == "append" else "force_reprefill"
+                (run_dir / f"determ1-{name}.json").write_text(
+                    json.dumps(_determ(route, 17, 17, 0.0)), encoding="utf-8"
+                )
+        markdown = directory / "phi4_results.md"
+        markdown.write_text(_MARKDOWN_STUB, encoding="utf-8")
+        return baseline, str(artifacts / "*" / "determ1-*.json"), markdown
+
+    def _run(self, argv):
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            code = report.main(argv)
+        return code, out.getvalue() + err.getvalue()
+
+    def test_a_failing_document_does_not_append_to_the_history(self):
+        with tempfile.TemporaryDirectory() as raw:
+            directory = Path(raw)
+            baseline, glob, markdown = self._fixture(directory, valid=False)
+            history = directory / "history.json"
+            code, _ = self._run(
+                [
+                    "--input", str(baseline),
+                    "--determinism-glob", glob,
+                    "--markdown", str(markdown),
+                    "--crossover-history", str(history),
+                ]
+            )
+            self.assertNotEqual(code, 0)
+            self.assertFalse(
+                history.exists(),
+                "a document that failed validation appended to the history",
+            )
+
+    def test_a_passing_document_appends_once(self):
+        with tempfile.TemporaryDirectory() as raw:
+            directory = Path(raw)
+            baseline, glob, markdown = self._fixture(directory, valid=True)
+            history = directory / "history.json"
+            argv = [
+                "--input", str(baseline),
+                "--determinism-glob", glob,
+                "--markdown", str(markdown),
+                "--crossover-history", str(history),
+            ]
+            self.assertEqual(self._run(argv)[0], 0)
+            self.assertEqual(
+                len(json.loads(history.read_text(encoding="utf-8"))), 1
+            )
+            self.assertEqual(self._run(argv)[0], 0)
+            self.assertEqual(
+                len(json.loads(history.read_text(encoding="utf-8"))), 1
+            )
 
 
 if __name__ == "__main__":

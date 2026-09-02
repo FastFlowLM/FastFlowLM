@@ -128,21 +128,38 @@ else()
         set(XRT_INCLUDE_DIR C:/dev/XRT/src/runtime_src/core/include CACHE PATH "Where XRT headers live")
         set(XRT_LIB_DIR     C:/dev/xrtNPUfromDLL                    CACHE PATH "Where XRT libs live")
 
-        # Fail at CONFIGURE, not at compile.
+        # Diagnose at CONFIGURE rather than hundreds of lines into compilation.
         #
         # These defaults describe one historical machine and exist on neither
-        # box in use here. CMake happily accepts a nonexistent include
-        # directory and the build then dies hundreds of lines into compilation
-        # with C1083 on an XRT header, which reads as a missing dependency
-        # rather than as a mis-set cache variable. Checking here names the
-        # variable and the value it was given.
+        # box in use here. CMake accepts a nonexistent include directory and
+        # the build then dies on C1083 for an XRT header, which reads as a
+        # missing dependency rather than as a mis-set cache variable.
+        #
+        # Both are load-bearing for every Windows XRT build -- every TU reaches
+        # XRT's headers, and `xrt_coreutil` resolves from XRT_LIB_DIR, not from
+        # lib/xrt, which ships the engine libraries and aiebu_static but no
+        # xrt_coreutil.lib. So a wrong value fails either way.
+        #
+        # It is FATAL only with the AIE4 feature on, and a warning otherwise.
+        # That is a deliberate limit of scope: turning a late failure into an
+        # early one for the feature-OFF product build is a change to a
+        # configuration this task has no evidence about and which Task 15
+        # depends on. The message names the variable in both cases, which is
+        # the part that was actually missing.
         foreach(_flm_xrt_dir IN ITEMS XRT_INCLUDE_DIR XRT_LIB_DIR)
             if(NOT IS_DIRECTORY "${${_flm_xrt_dir}}")
-                message(FATAL_ERROR
+                set(_flm_xrt_hint
                     "${_flm_xrt_dir} does not name a directory: "
                     "'${${_flm_xrt_dir}}'. Pass -D${_flm_xrt_dir}=<path> "
                     "pointing at your XRT package; the built-in default is a "
                     "development-box path and is not present here.")
+                if(FLM_ENABLE_CORELIB_AIE4)
+                    message(FATAL_ERROR ${_flm_xrt_hint})
+                else()
+                    message(WARNING ${_flm_xrt_hint}
+                        " The build will fail later on an XRT header or on "
+                        "xrt_coreutil.")
+                endif()
             endif()
         endforeach()
 
@@ -443,6 +460,15 @@ if(WIN32 AND NOT VCPKG_TOOLCHAIN)
             "headers; add the prefix that provides them to CMAKE_PREFIX_PATH "
             "or configure with a vcpkg toolchain.")
     endif()
+    # fftw3.h is VENDORED at src/include/fftw3.h, and src/include is already
+    # first on flm's include path, so the vendored header is what the compiler
+    # reads whatever this finds. Searching the tree first keeps the reported
+    # value honest instead of naming a header that is being shadowed.
+    find_path(FLM_FFTW_INCLUDE_DIR
+              NAMES fftw3.h
+              PATHS "${CMAKE_SOURCE_DIR}/include"
+              NO_DEFAULT_PATH
+              DOC "Directory containing fftw3.h")
     find_path(FLM_FFTW_INCLUDE_DIR
               NAMES fftw3.h
               DOC "Directory containing fftw3.h")
@@ -684,6 +710,27 @@ elseif(WIN32)
         list(GET _flm_dep_parts 0 _flm_dep_need)
         list(GET _flm_dep_parts 1 _flm_dep_key)
         list(GET _flm_dep_parts 2 _flm_dep_names)
+        # The TREE's own libraries first, and not merely as a HINTS entry.
+        #
+        # This repository vendors libfftw3-3.lib, libfftw3f-3.lib and
+        # libfftw3l-3.lib in src/lib, and src/lib is already on flm's link
+        # path. Searching only external prefixes therefore did two wrong
+        # things: it failed outright without one (fftw3l is absent from Windows
+        # conda-forge, which is why that FATAL_ERROR fired), and where one WAS
+        # supplied it silently paired conda's import library with the vendored
+        # src/include/fftw3.h, because src/include is unconditionally first on
+        # the include path and always wins. A configure line reporting a conda
+        # .lib while the compiler reads the vendored header describes a build
+        # that is not happening.
+        #
+        # HINTS is not enough: CMAKE_PREFIX_PATH is searched BEFORE HINTS, so
+        # an external prefix would still take precedence. NO_DEFAULT_PATH makes
+        # the in-tree pass authoritative, with an ordinary search as fallback.
+        find_library(FLM_LIB_${_flm_dep_key}
+                     NAMES ${_flm_dep_names}
+                     PATHS "${CMAKE_SOURCE_DIR}/lib"
+                     NO_DEFAULT_PATH
+                     DOC "Import library for ${_flm_dep_key}")
         find_library(FLM_LIB_${_flm_dep_key}
                      NAMES ${_flm_dep_names}
                      DOC "Import library for ${_flm_dep_key}")

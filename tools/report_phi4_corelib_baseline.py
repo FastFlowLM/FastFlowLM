@@ -444,6 +444,23 @@ def render_markdown(document: dict) -> str:
         "defended."
     )
     add("")
+    # A caveat that is always present, because it applies to every latency
+    # figure below and a reader who does not know it will read ordinary
+    # machine noise as a regression.
+    add(
+        "> **Every latency and throughput figure here comes from ONE run on a "
+        "shared lab machine.** Task 13 ran this same benchmark three times "
+        "against the same binary and the same model within two hours and "
+        "measured decode throughput of 22.5, 22.4 and 12.4 tokens/s at "
+        "context 128 — a factor of 1.8, with no code change. Within a single "
+        "run, per-token append latency stepped from 76 ms to 46 ms partway "
+        "through the continuation sweep and stayed there. The machine runs "
+        "corporate endpoint agents whose scans are not under this project's "
+        "control, and the host share of a decode token is large enough for "
+        "CPU contention to show. Treat a difference below roughly 2x as "
+        "unresolved unless it is reproduced across runs."
+    )
+    add("")
     add("### Identity")
     add("")
     add("| | |")

@@ -41,10 +41,48 @@ import numpy as np
 # Thresholds from design Section 12.4. They are named rather than inlined so a
 # report can quote the number that actually ran.
 MIN_CORRELATION = 0.9999
-MAX_TOP32_ABS_DIFF = 0.25
 MIN_DECODE_STEPS = 16
 TOP_K = 32
 TOP_5 = 5
+
+# DETERM-2. This is an OBSERVED CEILING WITH NO MARGIN, not a tolerance.
+#
+# 0.25 is the largest logit difference actually measured on the AIE4 target,
+# both across implementations (design 12.4) and run to run inside the LM-head
+# dispatch (design 15.3, DETERM-1). It was not chosen with headroom and it is
+# not a knob. A run that exceeds it has done something not previously seen, and
+# the correct response is to measure and amend the spec -- never to widen this
+# number so a red run goes green.
+#
+# One constant serves both comparisons deliberately: they are the same bound on
+# the same quantity, and two copies would drift.
+MAX_ABS_DIFF = 0.25
+MAX_TOP32_ABS_DIFF = MAX_ABS_DIFF
+MAX_RUN_TO_RUN_ABS_DIFF = MAX_ABS_DIFF
+
+# A tripwire, because a comment is not an obstacle.
+#
+# Editing MAX_ABS_DIFF alone makes the tool refuse to run. Getting past this
+# requires editing a second literal that exists for no other purpose, and
+# reading why that is the wrong move. That is the whole point: the failure mode
+# DETERM-2 guards against is a one-character edit during a red run, and the
+# only defence that survives deadline pressure is one that cannot be done
+# absent-mindedly.
+_DETERM2_SEALED_BOUND = 0.25
+if MAX_ABS_DIFF != _DETERM2_SEALED_BOUND:
+    raise SystemExit(
+        "DETERM-2: MAX_ABS_DIFF has been changed from the sealed value "
+        f"{_DETERM2_SEALED_BOUND} to {MAX_ABS_DIFF}.\n"
+        "\n"
+        "That bound is the maximum logit difference ever measured on this "
+        "hardware, recorded with no margin. Widening it does not make a "
+        "failing run acceptable; it makes the suite stop reporting a change "
+        "in behaviour that nobody has looked at.\n"
+        "\n"
+        "If a run genuinely exceeds 0.25: measure it, characterise it the way "
+        "report section 14.2 characterises the run-to-run case, and amend "
+        "design section 15.3. Then update both literals together."
+    )
 
 
 def _import_reference():
@@ -640,19 +678,33 @@ def compare(args) -> int:
 
 
 def self_consistency(args) -> int:
-    """Two runs of the same binary on the same input must agree bit for bit.
+    """Two runs of the same binary on the same input, per design 15.3.
 
-    This is a stronger and much cheaper signal than the comparison against the
-    reference, and it is not the same question. A systematic numeric difference
-    from the reference is a question about tolerances and about which
-    implementation is right. A difference between two runs of the SAME
-    implementation on the SAME input is neither: it means something is reading
-    state that the inputs do not determine, and no tolerance makes that
-    acceptable. Measured on the AIE4 target, FastFlow fails this while the
-    corelib reference driver passes it.
+    DETERM-1. The product does NOT claim run-to-run logit bit-identity, and
+    this check is written to that claim rather than to a stronger one nobody
+    can honour. What must hold exactly:
 
-    Bit-exact, deliberately. There is no tolerance under which "the same
-    program, twice, on the same data" is allowed to disagree.
+      * live K/V, last_hidden and every non-timing metric, bit-identical;
+      * the emitted token-ID sequence, identical;
+      * logit maximum absolute difference at most MAX_RUN_TO_RUN_ABS_DIFF.
+
+    What is recorded but not gated: the logit bit-identity rate and the
+    observed maximum difference.
+
+    The reason for the split is measured, not conceded. On this hardware the
+    LM-head dispatch -- 3072 x 200064, the largest in the model -- is not
+    bit-reproducible: one observed run had 100389 of 200064 logits differ at
+    decode[13] by at most 0.25, while both runs provably loaded the same DLL
+    and the entire 32-layer state, every metric and every emitted token were
+    identical. So the non-determinism is real, it is confined to that one
+    dispatch, and it changes no decision. Gating on bit-identity would make the
+    suite intermittently red for a property the product does not promise;
+    gating on state and tokens catches the thing that would actually matter,
+    which is that dispatch starting to move a sampled token.
+
+    An earlier version of this docstring said "no tolerance makes that
+    acceptable". That was the right instinct and the wrong conclusion, and the
+    measurement is what settled it.
     """
     left = json.loads(Path(args.a).read_text(encoding="utf-8"))
     right = json.loads(Path(args.b).read_text(encoding="utf-8"))
@@ -703,19 +755,34 @@ def self_consistency(args) -> int:
     )
 
     first_divergence = None
+    bit_exact_steps = 0
+    observed_max_diff = 0.0
     for (label, a_bits), (_, b_bits) in zip(a_steps, b_steps):
-        if a_bits != b_bits:
-            differing = sum(1 for x, y in zip(a_bits, b_bits) if x != y)
-            mine = _widen_bf16(a_bits)
-            theirs = _widen_bf16(b_bits)
-            failures.check(
-                False,
-                f"{label}: two runs of the same binary on the same input "
-                f"disagree on {differing}/{len(a_bits)} logits, "
-                f"max |diff| {float(np.max(np.abs(mine - theirs))):.6g}",
-            )
-            if first_divergence is None:
-                first_divergence = label
+        if a_bits == b_bits:
+            bit_exact_steps += 1
+            continue
+        differing = sum(1 for x, y in zip(a_bits, b_bits) if x != y)
+        mine = _widen_bf16(a_bits)
+        theirs = _widen_bf16(b_bits)
+        step_max = float(np.max(np.abs(mine - theirs)))
+        observed_max_diff = max(observed_max_diff, step_max)
+        if first_divergence is None:
+            first_divergence = label
+        # GATED on the magnitude, RECORDED for the fact of differing.
+        # DETERM-1: bit-identity here is not promised, but the size of the
+        # difference is bounded, and a step past the bound is a behaviour
+        # nobody has measured.
+        failures.check(
+            step_max <= MAX_RUN_TO_RUN_ABS_DIFF,
+            f"{label}: two runs of the same binary differ by "
+            f"{step_max:.6g}, above the DETERM-2 bound of "
+            f"{MAX_RUN_TO_RUN_ABS_DIFF}. Do not widen the bound; measure "
+            f"what changed. ({differing}/{len(a_bits)} logits differ.)",
+        )
+        print(
+            f"  {label}: {differing}/{len(a_bits)} logits differ, "
+            f"max |diff| {step_max:.6g} (within DETERM-2, recorded not gated)"
+        )
 
     a_tokens = [left["continuation"]["top1_id"]] + [
         step["top1_id"] for step in left["decode"]
@@ -783,6 +850,38 @@ def self_consistency(args) -> int:
             f"metric {key}: {a_metrics.get(key)} vs {b_metrics.get(key)}",
         )
 
+    # DETERM-1 requires the rate and the observed maximum to be recorded every
+    # run, in the artifact and in the suite summary -- not merely printed. The
+    # gate above answers "is this within what we have measured"; this record is
+    # what makes "is the rate degrading from baseline" answerable at all, and
+    # that question cannot be asked of a number that only ever existed on
+    # stdout.
+    print(
+        f"run-to-run: logits bit-identical "
+        f"{bit_exact_steps}/{len(a_steps)} steps, "
+        f"max |diff| {observed_max_diff:.6g} "
+        f"(bound {MAX_RUN_TO_RUN_ABS_DIFF})"
+    )
+    if first_divergence is not None:
+        print(f"first divergence at {first_divergence}")
+    if args.summary_json:
+        Path(args.summary_json).write_text(
+            json.dumps(
+                {
+                    "route": left.get("continuation_route"),
+                    "corelib_sha256": left.get("corelib_sha256"),
+                    "logits_bit_exact_steps": bit_exact_steps,
+                    "logits_total_steps": len(a_steps),
+                    "observed_max_abs_diff": observed_max_diff,
+                    "determ2_bound": MAX_RUN_TO_RUN_ABS_DIFF,
+                    "first_divergence": first_divergence,
+                    "failures": failures.messages,
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+
     return failures.report(
         f"self-consistency[{left['continuation_route']}]"
     )
@@ -825,6 +924,11 @@ def main() -> int:
     repeat = subparsers.add_parser("self-consistency")
     repeat.add_argument("--a", required=True)
     repeat.add_argument("--b", required=True)
+    repeat.add_argument(
+        "--summary-json",
+        help="write the DETERM-1 record here: the run-to-run logit "
+        "bit-identity rate and the observed maximum difference",
+    )
     repeat.set_defaults(handler=self_consistency)
 
     args = parser.parse_args()

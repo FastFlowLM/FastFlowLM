@@ -81,7 +81,16 @@ function Invoke-Endpoint {
         [string]$Path,
         [string]$Body,
         [int]$Expect,
-        [string]$MustContain = ''
+        # Mandatory, with no default.
+        #
+        # It defaulted to '' , which meant a case added later without it would
+        # silently revert to the status-only assertion that review finding 4
+        # rejected -- any 400 passing, including one from a typo in this file.
+        # An omission has to be a parameter-binding error, not a quiet
+        # downgrade.
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$MustContain
     )
     if (-not $script:server -or $script:server.HasExited) {
         Say '  (server not running -- restarting)'
@@ -105,7 +114,7 @@ function Invoke-Endpoint {
     $body = ($body -replace '\s+', ' ').Trim()
     $died = $script:server.HasExited
     $exitCode = if ($died) { '0x{0:X}' -f $script:server.ExitCode } else { '' }
-    $bodyOk = ($MustContain -eq '') -or ($body -like "*$MustContain*")
+    $bodyOk = $body -like "*$MustContain*"
     $ok = ($code -eq "$Expect") -and (-not $died) -and $bodyOk
     Say ("{0,-56} expect {1} got {2}  {3}{4}" -f `
         $Name, $Expect, $code, $(if ($ok) { 'PASS' } else { 'FAIL' }), `

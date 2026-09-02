@@ -49,6 +49,12 @@ param(
     # rather than quietly omitted.
     [string]$FlmExe,
 
+    # Must match the build's FLM_RUNTIME_NAME. The engine DLLs flm.exe imports
+    # live in lib/<backend>, and getting this wrong produces a
+    # STATUS_DLL_NOT_FOUND with no output at all.
+    [ValidateSet('xrt', 'hrx')]
+    [string]$BackendName = 'xrt',
+
     [string]$BuildDir,
     [string]$Cmake,
     [string]$Python = "python",
@@ -412,6 +418,7 @@ if (-not $ModelDir) {
         #    so this comparison is bit-exact.
         $repeatJson = Join-Path $artifacts "fastflow-$route-repeat.json"
         $summaryJson = Join-Path $artifacts "compare-summary-$route.json"
+        $determJson = Join-Path $artifacts "determ1-$route.json"
         $repeatArgs = @(
             '--model-dir', $ModelDir,
             '--token-ids-json', $tokenPlan,
@@ -427,9 +434,23 @@ if (-not $ModelDir) {
             Invoke-Checked "self-consistency ($route)" $Python @(
                 $comparator, 'self-consistency',
                 '--a', $fastflowJson,
-                '--b', $repeatJson
+                '--b', $repeatJson,
+                '--summary-json', $determJson
             )
             $ran += "self-consistency $route"
+            # DETERM-1 requires the run-to-run rate and the observed
+            # maximum to be recorded every run, not merely printed.
+            if (-not (Test-Path $determJson)) {
+                throw "self-consistency ($route) exited 0 but wrote " +
+                      "no DETERM-1 record at $determJson"
+            }
+            $d = Get-Content $determJson -Raw | ConvertFrom-Json
+            $dnote = ("run-to-run [$route]: logits bit-identical " +
+                "$($d.logits_bit_exact_steps)/$($d.logits_total_steps), " +
+                "max |diff| $($d.observed_max_abs_diff) " +
+                "(DETERM-2 bound $($d.determ2_bound))")
+            $ran += $dnote
+            $bitExactNotes += $dnote
         } catch {
             Write-Output "SELF-CONSISTENCY FAILED ($route)"
             $failures += "self-consistency $route"
@@ -465,7 +486,14 @@ if (-not $ModelDir) {
             # identically at 17/17 and 16/17, so a rising rate of LM-head
             # divergence was undetectable. It is a reported property, so it has
             # to survive the run.
-            if (Test-Path $summaryJson) {
+            # compare has just exited 0 with --summary-json passed, so an
+            # absent file means it did not do what it reported. Skipping
+            # here is the optional-guard shape again.
+            if (-not (Test-Path $summaryJson)) {
+                throw "compare ($route) exited 0 but wrote no " +
+                      "--summary-json at $summaryJson"
+            }
+            if ($true) {
                 $s = Get-Content $summaryJson -Raw | ConvertFrom-Json
                 $note = ("bit-exact vs reference [$route]: logits " +
                     "$($s.logits_bit_exact_steps)/$($s.logits_total_steps), " +
@@ -535,9 +563,17 @@ if ($FlmExe -and (Test-Path $FlmExe)) {
     # "flm serve exited during startup" with no diagnostic at all -- observed
     # exactly once, the first time the FFTW linkage was corrected to use the
     # in-tree import library its header already matched.
+    # lib/<backend>, resolved rather than hard-coded: src/lib/hrx exists
+    # too, and an HRX build would die with the same no-diagnostic
+    # STATUS_DLL_NOT_FOUND this block was added to prevent.
+    $backendLib = Join-Path $sourceDir "lib/$BackendName"
+    if (-not (Test-Path $backendLib)) {
+        throw "no engine library directory at $backendLib; pass " +
+              "-BackendName to match the build's FLM_RUNTIME_NAME"
+    }
     $env:PATH = (
         (Join-Path $sourceDir 'lib'),
-        (Join-Path $sourceDir 'lib/xrt'),
+        $backendLib,
         $env:PATH
     ) -join ';'
     try {

@@ -526,6 +526,20 @@ if (-not $ModelDir) {
 
 Write-Section 'CLI and server endpoints (Step 7)'
 if ($FlmExe -and (Test-Path $FlmExe)) {
+    # The product's OWN runtime libraries, on PATH.
+    #
+    # flm.exe imports the per-backend engine DLLs from lib/<backend> and the
+    # vendored libfftw3f-3.dll from lib/. Neither is beside the executable in a
+    # build tree. Missing them makes the process die with STATUS_DLL_NOT_FOUND
+    # before it writes a single byte to stdout or stderr, which presents as
+    # "flm serve exited during startup" with no diagnostic at all -- observed
+    # exactly once, the first time the FFTW linkage was corrected to use the
+    # in-tree import library its header already matched.
+    $env:PATH = (
+        (Join-Path $sourceDir 'lib'),
+        (Join-Path $sourceDir 'lib/xrt'),
+        $env:PATH
+    ) -join ';'
     try {
         Invoke-Checked 'server endpoints' $PSHOME\powershell.exe @(
             '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',

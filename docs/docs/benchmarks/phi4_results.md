@@ -241,3 +241,97 @@ The two routes' observed rates differ, but **the n does not support calling the 
 - route 'append': 2 run(s) recorded a DETERM-2 gate failure. They ARE counted in the rate above -- dropping them would bias it upward -- but a baseline should not be declared over a window containing a hard-gate failure.
 
 <!-- END phi4-aie4-baseline -->
+
+<!-- BEGIN phi4-continuation-threshold -->
+
+## Phi-4 continuation routing — the release-fixed threshold
+
+Design Section 10.7 fixes ONE integer for the release and applies it at every history length: append when the suffix is at most the threshold, clear and re-prefill when it is larger. It is a FastFlow backend constant — not model-package data, not a runtime calibration — so route choice does not drift with thermal state or load.
+
+```cpp
+inline constexpr std::uint32_t kContinuationAppendThreshold = 4;
+```
+
+**Selected: 4.** Suffix lengths [1, 2, 4] are the sampled lengths whose append p95 is lower than re-prefill p95 at BOTH measured history lengths, and they form a prefix of the sampled set [1, 2, 4, 8, 12, 16, 24, 32, 64, 128, 256], so the largest of them is the threshold.
+
+### Which sampled lengths append wins, per history
+
+| history rows | append p95 wins at | last winning length |
+| ---: | :--- | ---: |
+| 512 | [1, 2, 4] | 4 |
+| 2048 | [1, 2, 4, 8, 12] | 12 |
+
+The rule is a conjunction, so the constant is the smaller of those ceilings. It is NOT a per-history policy: Section 10.7 specifies one integer, and one integer cannot be optimal at two history lengths whose crossovers differ.
+
+### What the single constant gives up
+
+| history rows | suffixes append would have won and now loses | widest such suffix | append p95 there | re-prefill p95 there | route taken |
+| ---: | :--- | ---: | ---: | ---: | :--- |
+| 512 | none | — | — | — | — |
+| 2048 | [8, 12] | 12 | 589.4 ms | 1,156.0 ms | re-prefill |
+
+Those are measured losses taken deliberately. The alternative — a threshold above the smaller ceiling — is optimal for the longer history and WRONG for the shorter one, where it would append past the point at which append has already lost. Conceding measured throughput at one history is the cheaper error than routing against the measurement at the other.
+
+There is a second reason to prefer the smaller ceiling, and it is about confidence rather than cost. Task 13 measured this crossover three times and found the bracket's LOWER edge stable across runs and its UPPER edge not: the upper edge moves with how quiet the machine was, because that is what decides how many points near the crossover can be called at all. The threshold selected here sits at or below the lower edge at every measured history, so it is inside the append-wins region on every run. A threshold chosen from the upper edge would be supported by some runs and not others.
+
+### The measurement behind it
+
+| history rows | suffix | append p50 | append p95 | re-prefill p50 | re-prefill p95 | append p95 wins |
+| ---: | ---: | ---: | ---: | ---: | ---: | :---: |
+| 512 | 1 | 48.9 ms | 52.9 ms | 315.7 ms | 365.7 ms | yes |
+| 512 | 2 | 93.9 ms | 100.9 ms | 332.0 ms | 343.5 ms | yes |
+| 512 | 4 | 182.5 ms | 192.3 ms | 311.1 ms | 350.1 ms | yes |
+| 512 | 8 | 352.6 ms | 381.9 ms | 334.1 ms | 336.2 ms | no |
+| 512 | 12 | 513.2 ms | 530.7 ms | 298.6 ms | 335.6 ms | no |
+| 512 | 16 | 702.2 ms | 727.5 ms | 318.0 ms | 391.0 ms | no |
+| 512 | 24 | 1,006.9 ms | 1,048.9 ms | 296.9 ms | 340.6 ms | no |
+| 512 | 32 | 1,429.6 ms | 1,509.0 ms | 308.3 ms | 335.4 ms | no |
+| 512 | 64 | 2,671.5 ms | 2,750.8 ms | 300.7 ms | 342.8 ms | no |
+| 512 | 128 | 5,301.3 ms | 5,356.2 ms | 311.2 ms | 344.9 ms | no |
+| 512 | 256 | 10,624.5 ms | 10,841.4 ms | 294.8 ms | 344.2 ms | no |
+| 2048 | 1 | 54.7 ms | 61.7 ms | 1,161.0 ms | 1,176.0 ms | yes |
+| 2048 | 2 | 104.8 ms | 113.8 ms | 1,152.3 ms | 1,173.2 ms | yes |
+| 2048 | 4 | 196.4 ms | 203.7 ms | 1,156.1 ms | 1,162.1 ms | yes |
+| 2048 | 8 | 370.5 ms | 386.5 ms | 1,152.1 ms | 1,157.7 ms | yes |
+| 2048 | 12 | 547.3 ms | 589.4 ms | 1,148.7 ms | 1,156.0 ms | yes |
+| 2048 | 16 | 783.4 ms | 1,536.1 ms | 1,158.3 ms | 1,190.8 ms | no |
+| 2048 | 24 | 1,229.6 ms | 2,382.6 ms | 1,147.3 ms | 1,160.7 ms | no |
+| 2048 | 32 | 1,545.3 ms | 2,234.5 ms | 1,146.1 ms | 1,173.4 ms | no |
+| 2048 | 64 | 4,158.2 ms | 4,624.3 ms | 1,156.3 ms | 1,175.9 ms | no |
+| 2048 | 128 | 5,775.1 ms | 6,003.7 ms | 1,150.6 ms | 1,180.5 ms | no |
+| 2048 | 256 | 11,376.5 ms | 13,055.3 ms | 1,160.7 ms | 1,245.2 ms | no |
+
+At least 5 warm samples per route per point, append and re-prefill interleaved WITHIN each point. p50 and p95 are nearest-rank and were recomputed from the raw samples by the calibrator, not copied.
+
+### Would earlier runs have chosen the same constant?
+
+Each recorded crossover run carries, per history, the bracket `[lower, upper]`. The lower edge IS that run's per-history winner ceiling, so the constant is recomputable from every recorded run. Task 13 measured the lower edges to be stable and the upper edges not; this derivation touches only the lower edges, which is why an unstable upper edge does not move the answer.
+
+| measured (UTC) | interleaved | would select | agrees with 4 |
+| --- | :---: | ---: | :---: |
+| 2026-09-02T13:12:13Z | no | (2) | excluded — routes not measured against the same machine state |
+| 2026-09-02T14:55:44Z | no | (4) | excluded — routes not measured against the same machine state |
+| 2026-09-02T15:34:01Z | yes | 4 | yes |
+| 2026-09-02T16:32:18Z | yes | 4 | yes |
+
+Every interleaved run on record would have selected 4.
+
+The non-interleaved rows are shown for provenance and excluded from the verdict, because their two routes were measured in separate blocks and a machine regime shift there lands on one route and not the other. The first of them derives a smaller constant for a reason that has nothing to do with the machine: it swept only the five suffix lengths Section 10.7 names, and on `{1, 2, 32, 128, 256}` the last winning sampled length is 2 whether the true crossover is at 3 or at 31. **Two earlier answers are withdrawn and must not be reused: the threshold `2` from that sparse grid, and the extrapolated figures `≈9 at history 512, ≈26 at history 2048` from a contended non-interleaved run.** The calibrator therefore treats the five named lengths as a floor and uses every additional measured length.
+
+### Identity of the run this constant came from
+
+| | |
+| --- | --- |
+| machine | `xcomedusad-43` |
+| CPU | `AMD Eng Sample: 100-000001713-33_N` |
+| NPU | `AMD XDNA(TM) NPU` |
+| NPU driver | `32.0.20214.4161` |
+| corelib SHA-256 | `a523b23837c9bea3b06f8f8ae74e1e8292092eb73aaa93791022c448b865ecdb` |
+| corelib source revision | `e5258d29b5cb979d4a538994409b90ceff6e6e7a-untracked-only` |
+| model SHA-256 | `d6f503a9ea142c8b6320313d6ae341a88049b1b8ef01e641b2313fe42cdc7309` |
+| FastFlow revision | `a02a2cf7e6cda62ab21e1383de2674b933ed2b74-untracked-only` |
+| measured (UTC) | `2026-09-02T16:32:18Z` |
+
+The timing table above is published here and is NOT shipped in the model package: Section 10.7 carries the threshold and no cost table.
+
+<!-- END phi4-continuation-threshold -->

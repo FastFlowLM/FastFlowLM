@@ -28,6 +28,54 @@ set(XRT_LIB_DIR
     "C:/dev/xrtNPUfromDLL"
     CACHE PATH "Where XRT libraries live")
 
+# FLM_VERSION and NPU_VERSION are compiled into several tests, and this file
+# never declared either of them.
+#
+# That is not a harmless omission. test_model_catalog asserts
+# `__FLM_VERSION__ >= the version packaged in the AIE4 overlay`, so an empty
+# string makes its sscanf return EOF and the test fail. It went unnoticed
+# because the one machine the suite had ever been configured on carried
+# `FLM_VERSION:UNINITIALIZED=1.0.4` in its cache from a hand-typed -D, so the
+# suite passed there and failed on the first fresh configure anywhere else --
+# which is exactly what happened on the AIE4 target.
+#
+# The values are read from the product's own CMakePresets.json rather than
+# retyped here, so the standalone suite cannot drift away from the version the
+# product actually ships.
+if(NOT DEFINED FLM_VERSION OR NOT DEFINED NPU_VERSION)
+    set(_flm_presets "${FASTFLOW_SOURCE_DIR}/CMakePresets.json")
+    if(NOT EXISTS "${_flm_presets}")
+        message(FATAL_ERROR
+            "Cannot default FLM_VERSION/NPU_VERSION: ${_flm_presets} is "
+            "missing. Pass -DFLM_VERSION= and -DNPU_VERSION= explicitly.")
+    endif()
+    file(READ "${_flm_presets}" _flm_presets_text)
+    string(JSON _flm_common GET "${_flm_presets_text}"
+           "configurePresets" 0 "cacheVariables")
+    if(NOT DEFINED FLM_VERSION)
+        string(JSON FLM_VERSION GET "${_flm_common}" "FLM_VERSION")
+    endif()
+    if(NOT DEFINED NPU_VERSION)
+        string(JSON NPU_VERSION GET "${_flm_common}" "NPU_VERSION")
+    endif()
+    unset(_flm_presets_text)
+    unset(_flm_common)
+endif()
+# Validated rather than trusted: an empty or malformed version reaches the
+# tests as a compile definition and fails them at run time with a message that
+# says nothing about where the value came from.
+if(NOT FLM_VERSION MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$")
+    message(FATAL_ERROR
+        "FLM_VERSION must be MAJOR.MINOR.PATCH, got '${FLM_VERSION}'")
+endif()
+if(NOT NPU_VERSION MATCHES "^[0-9]+(\\.[0-9]+)+$")
+    message(FATAL_ERROR
+        "NPU_VERSION must be dotted numeric, got '${NPU_VERSION}'")
+endif()
+message(STATUS
+    "Phi-4 AIE4 test suite: FLM_VERSION=${FLM_VERSION} "
+    "NPU_VERSION=${NPU_VERSION}")
+
 include("${FASTFLOW_SOURCE_DIR}/common/corelib/corelib_sources.cmake")
 add_library(flm_corelib_aie4_testlib STATIC
     ${FLM_CORELIB_AIE4_SOURCES})

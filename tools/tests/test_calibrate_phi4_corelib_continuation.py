@@ -40,6 +40,7 @@ from tools.calibrate_phi4_corelib_continuation import (
     REQUIRED_HISTORIES,
     REQUIRED_SUFFIXES,
     Selection,
+    apply_section_to_document,
     apply_threshold_to_header,
     build_document_section,
     history_agreement,
@@ -682,6 +683,49 @@ class DocumentSectionTest(unittest.TestCase):
         section = build_document_section(loaded, selection, agreement)
         self.assertIn("gives up", section.lower())
         self.assertIn("2048", section)
+
+    def test_the_baseline_block_is_left_alone(self):
+        """Two generators write into `phi4_results.md`; neither owns the file.
+
+        `report_phi4_corelib_baseline.py` replaces everything between its
+        `phi4-aie4-baseline` markers and this script replaces everything
+        between its own. If the sections ever nested or overlapped, one tool
+        would silently eat the other's evidence the next time it ran.
+        """
+        loaded, selection, agreement = self._section_inputs()
+        section = build_document_section(loaded, selection, agreement)
+        original = _DOCUMENT.read_text(encoding="utf-8")
+        baseline_begin = original.index("<!-- BEGIN phi4-aie4-baseline -->")
+        baseline_end = original.index("<!-- END phi4-aie4-baseline -->")
+        baseline_block = original[
+            baseline_begin : baseline_end + len("<!-- END phi4-aie4-baseline -->")
+        ]
+
+        rewritten = apply_section_to_document(original, section)
+        self.assertIn(baseline_block, rewritten)
+        self.assertEqual(rewritten.count("<!-- BEGIN phi4-aie4-baseline -->"), 1)
+        self.assertEqual(
+            rewritten.count("<!-- BEGIN phi4-continuation-threshold -->"), 1
+        )
+        self.assertGreater(
+            rewritten.index("<!-- BEGIN phi4-continuation-threshold -->"),
+            rewritten.index("<!-- END phi4-aie4-baseline -->"),
+        )
+        self.assertEqual(rewritten, apply_section_to_document(rewritten, section))
+
+    def test_appending_to_a_document_without_the_section_is_idempotent(self):
+        loaded, selection, agreement = self._section_inputs()
+        section = build_document_section(loaded, selection, agreement)
+        once = apply_section_to_document("# heading\n", section)
+        self.assertEqual(once, apply_section_to_document(once, section))
+
+    def test_an_unterminated_section_is_refused(self):
+        loaded, selection, agreement = self._section_inputs()
+        section = build_document_section(loaded, selection, agreement)
+        with self.assertRaises(CalibrationError):
+            apply_section_to_document(
+                "# heading\n<!-- BEGIN phi4-continuation-threshold -->\n", section
+            )
 
     def test_the_section_is_deterministic(self):
         loaded, selection, agreement = self._section_inputs()

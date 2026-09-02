@@ -824,6 +824,11 @@ def self_consistency(args) -> int:
     for field, label in (
         ("corelib_sha256", "corelib SHA-256"),
         ("corelib_loaded_path", "loaded corelib path"),
+        # I-7. The corelib DLL was pinned and the FastFlow binary that drove
+        # it was not, so two records could describe different FastFlow builds
+        # with nothing able to tell. A determinism record pooled across a
+        # build tree needs both halves of "the same binary twice".
+        ("harness_sha256", "harness SHA-256"),
     ):
         a_value = left.get(field)
         b_value = right.get(field)
@@ -861,10 +866,24 @@ def self_consistency(args) -> int:
         f"step counts differ: {len(a_steps)} vs {len(b_steps)}",
     )
 
+    # THE LOCALISATION, MEASURED. Same step index as logit_steps, so the two
+    # lists line up.
+    def lm_head_inputs(document):
+        rows = [document["continuation"].get("lm_head_input_bf16")]
+        for step in document["decode"]:
+            rows.append(step.get("lm_head_input_bf16"))
+        return rows
+
+    a_inputs = lm_head_inputs(left)
+    b_inputs = lm_head_inputs(right)
+
     first_divergence = None
+    first_divergence_index = None
     bit_exact_steps = 0
     observed_max_diff = 0.0
-    for (label, a_bits), (_, b_bits) in zip(a_steps, b_steps):
+    for index, ((label, a_bits), (_, b_bits)) in enumerate(
+        zip(a_steps, b_steps)
+    ):
         if a_bits == b_bits:
             bit_exact_steps += 1
             continue
@@ -883,6 +902,7 @@ def self_consistency(args) -> int:
         observed_max_diff = max(observed_max_diff, step_max)
         if first_divergence is None:
             first_divergence = label
+            first_divergence_index = index
 
         # GATED in ULP, RECORDED for the fact of differing.
         #
@@ -995,18 +1015,73 @@ def self_consistency(args) -> int:
     )
     if first_divergence is not None:
         print(f"first divergence at {first_divergence}")
+    # WHERE THE DIVERGENCE ENTERED, asked of the recorded LM-head input at the
+    # step that actually diverged rather than inferred from end-of-run state.
+    #
+    # DETERM-1's argument was "identical LM-head input with non-identical
+    # LM-head output localises this to the 3072 x 200064 dispatch". The input
+    # half of that was never observed. This computes it: if the two runs fed
+    # the LM head the same 3072-element row and still produced different
+    # logits, the LM head is the source; if the rows differ, the divergence
+    # entered the model body and the LM head is faithfully transforming
+    # different inputs.
+    localisation = {
+        "measured": False,
+        "reason": "the runs recorded no per-step LM-head input",
+    }
+    if first_divergence_index is not None:
+        a_row = a_inputs[first_divergence_index]
+        b_row = b_inputs[first_divergence_index]
+        if a_row is None or b_row is None:
+            localisation["reason"] = (
+                "a run predates the per-step LM-head input capture; rebuild "
+                "test_phi4_e2e with DEV_BUILD and re-run"
+            )
+        elif len(a_row) != len(b_row):
+            localisation["reason"] = (
+                f"LM-head input lengths differ, {len(a_row)} vs {len(b_row)}"
+            )
+        else:
+            differing = sum(1 for x, y in zip(a_row, b_row) if x != y)
+            localisation = {
+                "measured": True,
+                "step": first_divergence,
+                "lm_head_input_elements": len(a_row),
+                "lm_head_input_differing_elements": differing,
+                "source": "lm_head" if differing == 0 else "model_body",
+                "reason": (
+                    "the two runs fed the LM head an identical row and it "
+                    "produced different logits"
+                    if differing == 0
+                    else (
+                        "the two runs fed the LM head DIFFERENT rows, so the "
+                        "divergence entered before the LM head; DETERM-1's "
+                        "localisation to the 3072 x 200064 dispatch does not "
+                        "hold for this event"
+                    )
+                ),
+            }
+        print(
+            "localisation at "
+            f"{first_divergence}: {localisation.get('source', 'unmeasured')}"
+            f" -- {localisation['reason']}"
+        )
     if args.summary_json:
         Path(args.summary_json).write_text(
             json.dumps(
                 {
                     "route": left.get("continuation_route"),
                     "corelib_sha256": left.get("corelib_sha256"),
+                    "harness_sha256": left.get("harness_sha256"),
+                    "a": str(args.a),
+                    "b": str(args.b),
                     "logits_bit_exact_steps": bit_exact_steps,
                     "logits_total_steps": len(a_steps),
                     "observed_max_abs_diff": observed_max_diff,
                     "determ2_bound_ulps": RUN_TO_RUN_MAX_ULPS,
                     "determ2_bound_kind": "relative_bf16_ulp",
                     "first_divergence": first_divergence,
+                    "localisation": localisation,
                     "failures": failures.messages,
                 },
                 indent=2,

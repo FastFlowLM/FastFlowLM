@@ -464,6 +464,13 @@ struct phi4_corelib_aie4::Impl final {
         last_hidden_staging.resize(
             static_cast<std::size_t>(constants::kHiddenSize));
 
+        // Everything from here to the end of load is device-object
+        // construction and the RoPE upload. It was the only unlabelled part
+        // of the load timeline, and 138 ms of a 12.8 s load went unexplained
+        // in the first baseline. A breakdown that does not add up invites the
+        // reader to assume the missing time is somewhere it is not.
+        const auto device_setup_started =
+            std::chrono::steady_clock::now();
         stream = CreateStream();
         hidden_tensors[0] = CreateTensor(
             ryzenai_corelib_data_type_bf16,
@@ -564,6 +571,8 @@ struct phi4_corelib_aie4::Impl final {
         next_hidden = &hidden_tensors[1];
         current_residual = &residual_tensor;
         next_skip_sum = &skip_sum_tensor;
+        metrics.device_setup_ns =
+            ElapsedNanoseconds(device_setup_started);
         metrics.model_load_ns =
             ElapsedNanoseconds(model_load_started);
     }
@@ -1279,6 +1288,22 @@ struct phi4_corelib_aie4::Impl final {
             0);
         return snapshot;
     }
+
+    // See the header: this is what makes the LM-head localisation a
+    // measurement rather than an inference. One 3072-element BF16 row, read
+    // from the exact tensor the LM-head MatMul was given.
+    std::vector<std::uint16_t> DebugLmHeadInput() const {
+        auto execution = runtime->AcquireExecution();
+        std::vector<std::uint16_t> row(
+            static_cast<std::size_t>(constants::kHiddenSize));
+        api->ReadElements(
+            lm_input_tensor.get(),
+            ryzenai_corelib_data_type_bf16,
+            row.data(),
+            row.size(),
+            0);
+        return row;
+    }
 #endif
 
     std::shared_ptr<corelib::CorelibRuntime> runtime;
@@ -1459,6 +1484,11 @@ phi4_corelib_aie4::metrics() const noexcept {
 #ifdef DEV_BUILD
 Phi4DebugSnapshot phi4_corelib_aie4::debug_snapshot() const {
     return impl_->DebugSnapshot();
+}
+
+std::vector<std::uint16_t>
+phi4_corelib_aie4::debug_lm_head_input() const {
+    return impl_->DebugLmHeadInput();
 }
 #endif
 

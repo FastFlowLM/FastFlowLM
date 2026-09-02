@@ -97,6 +97,16 @@ struct LoadedModule {
     std::string sha256;
 };
 
+std::string Sha256Of(const std::filesystem::path& path) {
+    std::ifstream stream(path, std::ios::binary);
+    if (!stream) {
+        throw std::runtime_error("cannot open for hashing: " + path.string());
+    }
+    std::vector<unsigned char> digest(picosha2::k_digest_size);
+    picosha2::hash256(stream, digest.begin(), digest.end());
+    return picosha2::bytes_to_hex_string(digest.begin(), digest.end());
+}
+
 LoadedModule DescribeLoadedCorelib(const flm::corelib::CorelibApi& api) {
     HMODULE module = nullptr;
     if (GetModuleHandleExW(
@@ -342,6 +352,7 @@ Ranking TopK(const std::vector<std::uint16_t>& bits, std::size_t k) {
 }
 
 json StepRecord(
+    const phi4_corelib_aie4& engine,
     const buffer<bf16>& logits,
     const flm::phi4::Phi4Aie4Metrics& before,
     const flm::phi4::Phi4Aie4Metrics& after,
@@ -367,6 +378,20 @@ json StepRecord(
     record["top32_ids"] = top32.ids;
     record["top32_values"] = top32.values;
     record["logits_bf16"] = bits;
+    // THE LM-HEAD INPUT FOR THIS STEP, captured rather than inferred.
+    //
+    // DETERM-1 localised the run-to-run divergence to the 3072 x 200064
+    // dispatch on the argument "identical LM-head input, non-identical
+    // LM-head output". The input half of that was never observed: it was
+    // inferred from END-OF-RUN state being identical, at a step that is not
+    // the end of the run. With this field the comparator can ask the question
+    // directly at the step that actually diverged, and Task 13 measured the
+    // answer to be the opposite of the inference.
+#ifdef DEV_BUILD
+    record["lm_head_input_bf16"] = engine.debug_lm_head_input();
+#else
+    (void)engine;
+#endif
     record["dispatch_delta"] =
         after.dispatch_count - before.dispatch_count;
     record["synchronize_delta"] =
@@ -602,6 +627,15 @@ int main(int argc, char** argv) {
         document["model_dir"] = options.model_dir.string();
         document["corelib_loaded_path"] = loaded.path;
         document["corelib_sha256"] = loaded.sha256;
+        // I-7: WHICH FASTFLOW BINARY. The artifacts recorded the corelib
+        // DLL's hash and nothing at all about the harness that drove it, so
+        // two records could describe different FastFlow builds and no check
+        // could tell. A determinism baseline pooled across a build tree needs
+        // both halves.
+        document["harness_path"] =
+            std::filesystem::absolute(argv[0]).string();
+        document["harness_sha256"] =
+            Sha256Of(std::filesystem::absolute(argv[0]));
         document["corelib_library"] =
             runtime->api()->library_path().string();
         document["corelib_version"] =
@@ -641,6 +675,7 @@ int main(int argc, char** argv) {
                 RunForcedRoute(engine, plan, options.route);
             const auto after_route = engine.metrics();
             document["continuation"] = StepRecord(
+                engine,
                 route_result.logits,
                 before_route,
                 after_route,
@@ -655,7 +690,8 @@ int main(int argc, char** argv) {
                 const auto before = engine.metrics();
                 const auto logits = engine.forward(token);
                 const auto after = engine.metrics();
-                json record = StepRecord(logits, before, after, 1u);
+                json record =
+                    StepRecord(engine, logits, before, after, 1u);
                 record["input_id"] = token;
                 token = record["top1_id"].get<int>();
                 decode.push_back(std::move(record));

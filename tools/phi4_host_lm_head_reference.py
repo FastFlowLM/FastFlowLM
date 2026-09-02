@@ -133,6 +133,9 @@ def dequantise_rows(
     qzeros: np.ndarray,
     first: int,
     count: int,
+    k: int = HIDDEN,
+    n: int = VOCAB,
+    group_size: int = GROUP_SIZE,
 ) -> np.ndarray:
     """Dequantise output rows [first, first + count) of the LM head.
 
@@ -142,37 +145,34 @@ def dequantise_rows(
     integer and `scale` is an FP16 value, so the product has at most 4 + 11
     significant bits.
     """
-    groups = HIDDEN // GROUP_SIZE
-    bytes_per_group = GROUP_SIZE // 2
-    zero_bytes_per_row = groups // 2
+    groups = k // group_size
+    bytes_per_group = group_size // 2
+    zero_bytes_per_row = -(-groups // 2)
 
-    block = qweight.reshape(VOCAB, groups, bytes_per_group)[
-        first : first + count
-    ]
+    block = qweight.reshape(n, groups, bytes_per_group)[first : first + count]
     low = (block & 0x0F).astype(np.int16)
     high = (block >> 4).astype(np.int16)
     # Interleave so element j of the group comes from nibble j: even j in the
     # low nibble, odd j in the high nibble.
-    quantised = np.empty((count, groups, GROUP_SIZE), dtype=np.int16)
+    quantised = np.empty((count, groups, group_size), dtype=np.int16)
     quantised[:, :, 0::2] = low
     quantised[:, :, 1::2] = high
 
-    zero_block = qzeros.reshape(VOCAB, zero_bytes_per_row)[
-        first : first + count
-    ]
+    zero_block = qzeros.reshape(n, zero_bytes_per_row)[first : first + count]
     zero_low = (zero_block & 0x0F).astype(np.int16)
     zero_high = (zero_block >> 4).astype(np.int16)
-    zeros = np.empty((count, groups), dtype=np.int16)
+    zeros = np.empty((count, zero_bytes_per_row * 2), dtype=np.int16)
     zeros[:, 0::2] = zero_low
     zeros[:, 1::2] = zero_high
+    zeros = zeros[:, :groups]
 
     scale_block = (
-        scales.reshape(VOCAB, groups)[first : first + count]
+        scales.reshape(n, groups)[first : first + count]
     ).astype(np.float32)
 
     centred = (quantised - zeros[:, :, None]).astype(np.float32)
     weights = centred * scale_block[:, :, None]
-    return weights.reshape(count, HIDDEN)
+    return weights.reshape(count, k)
 
 
 def host_lm_head(model_dir: Path, hidden: np.ndarray) -> np.ndarray:
@@ -207,6 +207,35 @@ def host_lm_head(model_dir: Path, hidden: np.ndarray) -> np.ndarray:
         weights = dequantise_rows(qweight, scales, qzeros, first, count)
         logits[first : first + count] = weights.astype(np.float64) @ x
     return logits
+
+
+def step_labels(document: dict) -> list[str]:
+    return ["continuation"] + [
+        f"decode[{index}]" for index in range(len(document["decode"]))
+    ]
+
+
+def step_logits(document: dict, index: int) -> list[int]:
+    if index == 0:
+        return document["continuation"]["logits_bf16"]
+    return document["decode"][index - 1]["logits_bf16"]
+
+
+def lm_head_input(document: dict, index: int):
+    if index == 0:
+        return document["continuation"].get("lm_head_input_bf16")
+    return document["decode"][index - 1].get("lm_head_input_bf16")
+
+
+def first_diverging_step(documents: list[dict]):
+    """Index of the first step whose logits are not identical across runs."""
+    if len(documents) < 2:
+        return None
+    for index in range(len(step_labels(documents[0]))):
+        rows = [step_logits(document, index) for document in documents]
+        if any(row != rows[0] for row in rows):
+            return index
+    return None
 
 
 def bin_counts(indices: np.ndarray, bins: int = 32) -> list[int]:
@@ -342,6 +371,10 @@ def classify(runs: list[dict], straddle: dict | None) -> tuple[str, list[str]]:
             )
             return "one_run_further", notes
 
+    if straddle is not None and straddle.get("applicable") is False:
+        notes.append(straddle["reason"])
+        return "model_body_divergence", notes
+
     if straddle is not None and straddle["differing_logits"] == 0:
         notes.append(
             "the two runs produced bit-identical logits for this step, so "
@@ -351,7 +384,7 @@ def classify(runs: list[dict], straddle: dict | None) -> tuple[str, list[str]]:
         )
         return "benign_no_divergence_in_sample", notes
 
-    if straddle is not None:
+    if straddle is not None and straddle.get("applicable"):
         notes.append(
             f"{straddle['reference_between']}/{straddle['differing_logits']} "
             f"of the logits where the two runs disagree have the true value "
@@ -392,49 +425,72 @@ def main(argv: list[str] | None = None) -> int:
         print("no run documents supplied", file=sys.stderr)
         return 2
 
-    # Every document must describe the same LM-head input, or the reference
-    # computed from the first would be truth for a different question.
-    hidden_bits = documents[0]["final_snapshot"]["last_hidden"]
-    for path, document in zip(args.run_json[1:], documents[1:]):
-        if document["final_snapshot"]["last_hidden"] != hidden_bits:
+    for field, label in (
+        ("corelib_sha256", "corelib DLL"),
+        ("harness_sha256", "FastFlow harness"),
+    ):
+        values = {document.get(field) for document in documents}
+        if len(values) != 1 or None in values:
             print(
-                f"{path} has a different LM-head input from the first "
-                f"document. DETERM-1's whole claim is IDENTICAL input with "
-                f"non-identical output; comparing these two would answer a "
-                f"different question.",
+                f"the run documents do not agree on one {label} ({values}); "
+                f"the result would not be about one binary",
                 file=sys.stderr,
             )
             return 2
-    hashes = {document.get("corelib_sha256") for document in documents}
-    if len(hashes) != 1:
-        print(
-            f"the run documents loaded different corelib DLLs {hashes}; the "
-            f"result would not be about one binary",
-            file=sys.stderr,
-        )
-        return 2
 
-    hidden = widen_bf16(hidden_bits)
-    if hidden.size != HIDDEN:
-        raise RuntimeError(
-            f"last_hidden holds {hidden.size} values, expected {HIDDEN}"
-        )
+    # THE STEP THAT ACTUALLY DIVERGED, not the last one.
+    #
+    # The first version of this tool always analysed the final decode step.
+    # For a divergent pair that is the WRONG step: once the two runs have
+    # emitted different tokens they are computing different continuations, so
+    # their final hidden states legitimately differ and comparing them answers
+    # nothing. The question DETERM-1 poses lives at the FIRST step whose
+    # logits differ, and it is answerable only because the harness now records
+    # the LM-head input at every step.
+    steps = step_labels(documents[0])
+    index = first_diverging_step(documents)
+    if index is None:
+        index = len(steps) - 1
+    label = steps[index]
 
+    inputs = [lm_head_input(document, index) for document in documents]
+    for path, row in zip(args.run_json, inputs):
+        if row is None:
+            print(
+                f"{path} carries no lm_head_input_bf16 at {label}. Rebuild "
+                f"test_phi4_e2e with DEV_BUILD and re-run: without the "
+                f"recorded input this tool would have to infer it, which is "
+                f"the inference DETERM-1 got wrong.",
+                file=sys.stderr,
+            )
+            return 2
+        if len(row) != HIDDEN:
+            raise RuntimeError(
+                f"lm_head_input_bf16 holds {len(row)} values, expected "
+                f"{HIDDEN}"
+            )
+
+    inputs_identical = all(row == inputs[0] for row in inputs)
     model_dir = Path(args.model_dir)
-    reference = host_lm_head(model_dir, hidden)
 
-    # The last decode step's logits ARE the contents of lm_output_tensor at
-    # the moment final_snapshot was taken, which is what makes them the output
-    # of the dispatch whose input is last_hidden.
     npu_runs = [
-        widen_bf16(document["decode"][-1]["logits_bf16"])
-        for document in documents
+        widen_bf16(step_logits(document, index)) for document in documents
     ]
     for values in npu_runs:
         if values.size != VOCAB:
             raise RuntimeError(
                 f"logits hold {values.size} values, expected {VOCAB}"
             )
+
+    # One reference per DISTINCT input. When the two runs fed the LM head the
+    # same row there is one truth and the straddle question is meaningful;
+    # when they did not, each run is judged against ITS OWN truth and the
+    # straddle question does not arise -- which is itself the answer.
+    references = [
+        host_lm_head(model_dir, widen_bf16(row)) for row in inputs
+    ]
+    reference = references[0]
+    hidden = widen_bf16(inputs[0])
 
     reference_order = np.argsort(-reference, kind="stable")[:32]
     union_top32 = set(int(index) for index in reference_order)
@@ -445,12 +501,31 @@ def main(argv: list[str] | None = None) -> int:
     top32 = np.array(sorted(union_top32), dtype=np.int64)
 
     runs = [
-        describe_run(f"run{index}", values, reference, top32)
-        for index, values in enumerate(npu_runs)
+        describe_run(f"run{position}", values, references[position], top32)
+        for position, values in enumerate(npu_runs)
     ]
+    for position, run in enumerate(runs):
+        run["reference"] = (
+            "shared" if inputs_identical else f"own input at {label}"
+        )
+        run["source"] = args.run_json[position]
 
     straddle = None
-    if len(npu_runs) == 2:
+    if len(npu_runs) == 2 and not inputs_identical:
+        differing_input = sum(
+            1 for x, y in zip(inputs[0], inputs[1]) if x != y
+        )
+        straddle = {
+            "applicable": False,
+            "lm_head_input_differing_elements": differing_input,
+            "reason": (
+                f"the two runs fed the LM head DIFFERENT rows at {label} "
+                f"({differing_input}/{HIDDEN} elements differ), so their "
+                f"logits are supposed to differ and there is no straddle "
+                f"question. The divergence entered before the LM head."
+            ),
+        }
+    elif len(npu_runs) == 2:
         left, right = npu_runs
         differing = np.flatnonzero(left != right)
         if differing.size:
@@ -479,6 +554,7 @@ def main(argv: list[str] | None = None) -> int:
             between = 0
             both_close = 0
         straddle = {
+            "applicable": True,
             "differing_logits": int(differing.size),
             "reference_between": between,
             "both_within_half_ulp": both_close,
@@ -497,10 +573,18 @@ def main(argv: list[str] | None = None) -> int:
         "corelib_sha256": documents[0].get("corelib_sha256"),
         "corelib_loaded_path": documents[0].get("corelib_loaded_path"),
         "continuation_route": documents[0].get("continuation_route"),
+        "harness_sha256": documents[0].get("harness_sha256"),
+        "analysed_step": label,
+        "analysed_step_index": index,
+        "step_selected_because": (
+            "first step whose logits differ between the two runs"
+            if first_diverging_step(documents) is not None
+            else "no logit divergence; the last step was analysed"
+        ),
+        "lm_head_inputs_identical": inputs_identical,
         "prefix_ids": documents[0].get("prefix_ids"),
         "suffix_ids": documents[0].get("suffix_ids"),
-        "decode_step_index": len(documents[0]["decode"]) - 1,
-        "decode_input_id": documents[0]["decode"][-1].get("input_id"),
+
         "reference": {
             "implementation": (
                 "FP64 dense matmul over lm_head.MatMulNBits dequantised as "
@@ -539,12 +623,14 @@ def main(argv: list[str] | None = None) -> int:
             f"{run['within_half_ulp']}/{run['total']}, signed mean "
             f"{run['mean_signed_deviation_ulp']:+.4f} ULP"
         )
-    if straddle is not None:
+    if straddle is not None and straddle.get("applicable"):
         print(
             f"run-to-run: {straddle['differing_logits']} logits differ; "
             f"truth between the two in {straddle['reference_between']}, "
             f"both within half a ULP in {straddle['both_within_half_ulp']}"
         )
+    elif straddle is not None:
+        print(f"run-to-run: {straddle['reason']}")
     for note in notes:
         print(f"note: {note}")
     print(f"verdict: {verdict}")
@@ -556,6 +642,15 @@ def main(argv: list[str] | None = None) -> int:
         print(
             "STOP AND REPORT: this is not the benign accumulation-order "
             "nondeterminism DETERM-1 accepts.",
+            file=sys.stderr,
+        )
+        return 1
+    if verdict == "model_body_divergence":
+        print(
+            "STOP AND REPORT: the two runs fed the LM head different inputs, "
+            "so the divergence entered the model body. DETERM-1's "
+            "localisation to the LM-head dispatch does not hold for this "
+            "event.",
             file=sys.stderr,
         )
         return 1

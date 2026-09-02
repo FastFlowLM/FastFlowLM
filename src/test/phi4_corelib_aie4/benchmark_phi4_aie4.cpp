@@ -847,6 +847,16 @@ int main(int argc, char** argv) {
             model_load["manifest_map_ns"] = load_metrics.manifest_map_ns;
             model_load["shape_plan_ns"] = load_metrics.shape_plan_ns;
             model_load["weight_pack_ns"] = load_metrics.weight_pack_ns;
+            model_load["device_setup_ns"] = load_metrics.device_setup_ns;
+            // The remainder, stated rather than left for the reader to
+            // subtract. If this is not small, a phase is missing a timer.
+            model_load["unaccounted_ns"] =
+                wall_load_ns - load_metrics.manifest_map_ns -
+                load_metrics.shape_plan_ns - load_metrics.weight_pack_ns -
+                load_metrics.device_setup_ns;
+            model_load["shape_plan_share"] =
+                static_cast<double>(load_metrics.shape_plan_ns) /
+                static_cast<double>(wall_load_ns);
             model_load["engine_reported_total_ns"] =
                 load_metrics.model_load_ns;
             model_load["total_ns"] = wall_load_ns;
@@ -884,8 +894,15 @@ int main(int argc, char** argv) {
             // but does not rebuild the Stream". The engine is deliberately not
             // rebuilt between them.
             // ---------------------------------------------------------------
+            // A SECOND helper interrogation, and it is not free: the
+            // engine's own is 86% of model load. It is timed and labelled
+            // here so it can never be mistaken for part of the load
+            // timeline above, and so the cost of asking twice is visible.
+            const auto benchmark_plan_started = Clock::now();
             const auto shape_plan =
                 flm::phi4::Phi4ShapePlan::Build(api);
+            document["model_load"]["benchmark_second_shape_plan_ns"] =
+                ElapsedNs(benchmark_plan_started);
             const std::int64_t prompt_extent = shape_plan.RowsFor(
                 flm::phi4::RowUse::Attention,
                 static_cast<std::int64_t>(prompt.size()));
@@ -997,14 +1014,33 @@ int main(int argc, char** argv) {
             // not the route.
             // ---------------------------------------------------------------
             const std::vector<std::size_t> histories{512, 2048};
-            const std::vector<std::size_t> suffixes{1, 2, 32, 128, 256};
+            // DENSE ENOUGH TO BRACKET THE CROSSOVER, not just the design's
+            // five reporting points.
+            //
+            // Design 15.6 names 1, 2, 32, 128 and 256 as the lengths to
+            // REPORT, and the first version of this benchmark measured only
+            // those. On that grid append last won at 2 and first lost at 32,
+            // and the report published "the threshold is 2" as a measured
+            // answer. It is not. It is the largest point in a sparse grid
+            // where append still won, and the true crossover was afterwards
+            // bracketed near 9 and 26. Task 14 exists to choose that
+            // constant, so publishing a grid artifact as a measurement would
+            // have enshrined a value off by a factor of four to thirteen.
+            //
+            // The design's five points are all still here; the extra ones
+            // exist so the answer comes from the data rather than from where
+            // the grid happened to stop.
+            const std::vector<std::size_t> suffixes{
+                1, 2, 4, 8, 12, 16, 24, 32, 64, 128, 256};
             json continuation_points = json::array();
-            json append_wins = json::object();
+            json crossover = json::object();
             bool prefix_monotonic = true;
 
             for (const std::size_t history : histories) {
                 std::vector<std::uint64_t> append_p50;
+                std::vector<std::uint64_t> append_p95;
                 std::vector<std::uint64_t> reprefill_p50;
+                std::vector<std::uint64_t> reprefill_p95;
 
                 for (const std::size_t suffix : suffixes) {
                     const std::vector<int> suffix_tokens =
@@ -1053,6 +1089,8 @@ int main(int argc, char** argv) {
                             append_point["p50_ns"].get<std::uint64_t>());
                     append_p50.push_back(
                         append_point["p50_ns"].get<std::uint64_t>());
+                    append_p95.push_back(
+                        append_point["p95_ns"].get<std::uint64_t>());
                     continuation_points.push_back(std::move(append_point));
 
                     // ---- re-prefill ----
@@ -1090,6 +1128,8 @@ int main(int argc, char** argv) {
                             reprefill_point["p50_ns"].get<std::uint64_t>());
                     reprefill_p50.push_back(
                         reprefill_point["p50_ns"].get<std::uint64_t>());
+                    reprefill_p95.push_back(
+                        reprefill_point["p95_ns"].get<std::uint64_t>());
                     continuation_points.push_back(std::move(reprefill_point));
 
                     note_peak(SampleMemory());
@@ -1101,40 +1141,104 @@ int main(int argc, char** argv) {
                 }
 
                 // Design 15.6: "assert the append-winning lengths are
-                // prefix-monotonic or select threshold zero". Append is
-                // expected to win at short suffixes and lose at long ones, so
-                // the set of winning lengths should be a prefix of the sweep.
-                // If it is not -- if append loses at 32 and wins again at 128
-                // -- there is no single threshold that describes the policy,
-                // and the honest answer is zero rather than the largest
-                // winning length.
-                std::size_t winning_prefix = 0;
+                // prefix-monotonic or select threshold zero".
+                //
+                // A point is only DECIDED when the gap between the two routes
+                // exceeds the spread WITHIN a route at that same point. That
+                // rule is derived from the data rather than chosen: this
+                // machine has been measured moving by a factor of 1.8 between
+                // runs, and a route difference smaller than the p50-to-p95
+                // spread of the samples that produced it is not a difference
+                // anyone can act on. An undecided point widens the crossover
+                // bracket instead of silently picking a side.
+                //
+                // What is reported is a BRACKET, never a single threshold:
+                // the largest suffix at which append decisively wins, and the
+                // smallest at which it decisively loses. Anything between is
+                // unmeasured, and saying so is the point -- Task 14 has to
+                // choose the constant and must be able to see how much room
+                // the measurement actually leaves it.
+                std::size_t append_wins_up_to = 0;
+                std::size_t reprefill_wins_from = 0;
                 bool still_winning = true;
                 bool any_win_after_loss = false;
+                json decisions = json::array();
                 for (std::size_t index = 0; index < suffixes.size(); ++index) {
-                    const bool append_wins_here =
-                        append_p50[index] < reprefill_p50[index];
-                    if (append_wins_here && still_winning) {
-                        winning_prefix = suffixes[index];
-                    } else if (!append_wins_here) {
+                    const std::uint64_t pa = append_p50[index];
+                    const std::uint64_t pr = reprefill_p50[index];
+                    const std::uint64_t gap = pa > pr ? pa - pr : pr - pa;
+                    const std::uint64_t noise = std::max(
+                        append_p95[index] - append_p50[index],
+                        reprefill_p95[index] - reprefill_p50[index]);
+                    const bool decided = gap > noise;
+                    const bool append_wins_here = pa < pr;
+
+                    json decision;
+                    decision["suffix"] = suffixes[index];
+                    decision["append_p50_ns"] = pa;
+                    decision["reprefill_p50_ns"] = pr;
+                    decision["gap_ns"] = gap;
+                    decision["within_route_spread_ns"] = noise;
+                    decision["decided"] = decided;
+                    decision["winner"] =
+                        !decided ? "undecided"
+                                 : (append_wins_here ? "append" : "reprefill");
+                    decisions.push_back(std::move(decision));
+
+                    if (!decided) {
                         still_winning = false;
+                        continue;
+                    }
+                    if (append_wins_here) {
+                        if (still_winning) {
+                            append_wins_up_to = suffixes[index];
+                        } else {
+                            any_win_after_loss = true;
+                        }
                     } else {
-                        any_win_after_loss = true;
+                        still_winning = false;
+                        if (reprefill_wins_from == 0) {
+                            reprefill_wins_from = suffixes[index];
+                        }
                     }
                 }
                 if (any_win_after_loss) {
+                    // No single threshold describes the policy. Design 15.6
+                    // says select zero rather than the largest winning
+                    // length, and that is what an unusable measurement should
+                    // produce.
                     prefix_monotonic = false;
-                    winning_prefix = 0;
+                    append_wins_up_to = 0;
+                    reprefill_wins_from = 0;
                 }
-                append_wins[std::to_string(history)] = winning_prefix;
+                json entry;
+                entry["append_wins_up_to"] = append_wins_up_to;
+                entry["reprefill_wins_from"] = reprefill_wins_from;
+                entry["crossover_bracket"] =
+                    json::array({append_wins_up_to, reprefill_wins_from});
+                entry["bracket_is_tight"] =
+                    reprefill_wins_from != 0 &&
+                    reprefill_wins_from - append_wins_up_to <= 1;
+                entry["decisions"] = std::move(decisions);
+                crossover[std::to_string(history)] = std::move(entry);
+                std::cout << "  crossover at history " << history
+                          << ": append decisively wins to "
+                          << append_wins_up_to
+                          << ", reprefill decisively wins from "
+                          << reprefill_wins_from << "\n";
             }
             document["continuation"] = json{
                 {"points", continuation_points},
-                {"append_wins", append_wins},
+                {"crossover", crossover},
                 {"prefix_monotonic", prefix_monotonic},
                 {"warm_samples_per_point", options.continuation_samples},
                 {"histories", histories},
-                {"suffixes", suffixes}};
+                {"suffixes", suffixes},
+                {"decision_rule",
+                 "a point is decided only when the gap between the two "
+                 "routes' p50 exceeds the larger of the two routes' own "
+                 "p50-to-p95 spread at that point; the reported figure is a "
+                 "BRACKET, not a threshold"}};
 
             // ---------------------------------------------------------------
             // Step 7 and Step 8: decode, with the 128-token memory window
@@ -1279,8 +1383,35 @@ int main(int argc, char** argv) {
             note_peak(final_memory);
 
             json v_scatter;
-            v_scatter["reads_per_model_step"] = kVReadsPerStep;
-            v_scatter["writes_per_model_step"] = kVWritesPerStep;
+            // MEASURED QUOTIENTS, not the compile-time constants.
+            //
+            // These two fields used to be assigned kVReadsPerStep and
+            // kVWritesPerStep and then CHECKed against the same constants --
+            // a gate that cannot fail, rendered into the benchmark document
+            // as though it were a measurement. That is this project's
+            // recurring pattern for the eighth time, in the row a reader is
+            // most likely to take at face value.
+            //
+            // They are now the observed totals divided by the observed model
+            // step count, and the design contract is asserted against those.
+            const std::uint64_t measured_steps =
+                final_metrics.synchronize_count / kSynchronizesPerStep;
+            CHECK(measured_steps > 0);
+            CHECK(final_metrics.v_read_calls % measured_steps == 0);
+            CHECK(final_metrics.v_write_calls % measured_steps == 0);
+            const std::uint64_t measured_reads_per_step =
+                final_metrics.v_read_calls / measured_steps;
+            const std::uint64_t measured_writes_per_step =
+                final_metrics.v_write_calls / measured_steps;
+            v_scatter["reads_per_model_step"] = measured_reads_per_step;
+            v_scatter["writes_per_model_step"] = measured_writes_per_step;
+            v_scatter["counts_are_measured"] = true;
+            v_scatter["reads_per_model_step_source"] =
+                "v_read_calls / (synchronize_count / 129)";
+            v_scatter["design_18_5_expected_reads"] = kVReadsPerStep;
+            v_scatter["design_18_5_expected_writes"] = kVWritesPerStep;
+            CHECK(measured_reads_per_step == kVReadsPerStep);
+            CHECK(measured_writes_per_step == kVWritesPerStep);
             v_scatter["total_read_calls"] = final_metrics.v_read_calls;
             v_scatter["total_write_calls"] = final_metrics.v_write_calls;
             v_scatter["bytes"] = final_metrics.v_bytes;

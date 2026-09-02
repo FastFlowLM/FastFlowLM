@@ -37,6 +37,7 @@ from __future__ import annotations
 import argparse
 import glob as globlib
 import json
+import math
 import statistics
 import sys
 from pathlib import Path
@@ -89,6 +90,12 @@ V_WRITES_PER_MODEL_STEP = 256
 # Design `DETERM-3`: "it requires at least 20 runs per route".
 MIN_DETERMINISM_RUNS_PER_ROUTE = 20
 
+# I-6. The significance level for the route-dependence claim. 0.05 is the
+# conventional value and is named here rather than inlined, because the claim
+# it gates -- "the rate is route-dependent" -- was previously published in
+# bold from a float inequality on 1-vs-2 divergent runs of 33.
+ROUTE_DEPENDENCE_ALPHA = 0.05
+
 # The routes `DETERM-3` requires separately. Append and re-prefill drive
 # different row extents through the same LM-head shape, so a difference
 # between them is informative about the mechanism and must not be averaged
@@ -97,6 +104,50 @@ DETERMINISM_ROUTES = ("append", "reprefill")
 
 _MARKDOWN_BEGIN = "<!-- BEGIN phi4-aie4-baseline -->"
 _MARKDOWN_END = "<!-- END phi4-aie4-baseline -->"
+
+
+def _fisher_exact_two_sided(
+    left: tuple[int, int],
+    right: tuple[int, int],
+) -> float:
+    """Two-sided Fisher exact p for a 2x2 table of counts.
+
+    Exact and dependency-free: `math.comb` is all this needs, and pulling in
+    SciPy for one hypothesis test would add a dependency to a validator that
+    otherwise runs anywhere Python does.
+
+    Sums the hypergeometric probability of every table at least as extreme as
+    the observed one, which is the standard two-sided construction.
+    """
+    a, b = left
+    c, d = right
+    row1, row2 = a + b, c + d
+    col1 = a + c
+    total = row1 + row2
+    if total == 0 or row1 == 0 or row2 == 0 or col1 == 0 or col1 == total:
+        return 1.0
+
+    def probability(value: int) -> float:
+        return (
+            math.comb(row1, value)
+            * math.comb(row2, col1 - value)
+            / math.comb(total, col1)
+        )
+
+    observed = probability(a)
+    low = max(0, col1 - row2)
+    high = min(col1, row1)
+    # 1e-9 relative slack: the equal-probability tables belong in the tail, and
+    # floating-point evaluation of equal binomial ratios does not reproduce
+    # bit-identical values.
+    return min(
+        1.0,
+        sum(
+            probability(value)
+            for value in range(low, high + 1)
+            if probability(value) <= observed * (1 + 1e-9)
+        ),
+    )
 
 
 def memory_is_stable(record: dict[str, object]) -> bool:
@@ -188,6 +239,20 @@ def validate(document: dict[str, object]) -> list[str]:
         for field in ("bytes", "nanoseconds"):
             if field not in scatter:
                 problems.append(f"v_scatter.{field} is absent")
+        # I-4. The two counts above are only worth reading if they were
+        # DIVIDED OUT of the observed totals rather than copied from the same
+        # constants they are checked against. A benchmark that restates the
+        # constants produces a row that cannot fail and reads as measured, so
+        # the document refuses to render a record that does not assert the
+        # provenance.
+        if scatter.get("counts_are_measured") is not True:
+            problems.append(
+                "v_scatter.counts_are_measured is not true: the per-step "
+                "read and write counts must be the observed totals divided "
+                "by the observed model-step count, not the design constants "
+                "restated. A gate that compares a constant against itself "
+                "cannot fail and must not be rendered as a measurement."
+            )
 
     decode = document.get("decode")
     if isinstance(decode, dict):
@@ -250,6 +315,11 @@ def determinism_baseline(records: list[dict]) -> dict:
     problems: list[str] = []
     blocking: list[str] = []
     routes: dict[str, dict] = {}
+    # I-7. Which files this baseline was actually built from, so a pooled glob
+    # is auditable rather than trusted.
+    sources = sorted(
+        str(record.get("_source", "<unknown>")) for record in records
+    )
 
     by_route: dict[str, list[dict]] = {}
     for record in records:
@@ -262,18 +332,32 @@ def determinism_baseline(records: list[dict]) -> dict:
             continue
         by_route.setdefault(route, []).append(record)
 
-    hashes = {
-        record.get("corelib_sha256")
-        for record in records
-        if record.get("corelib_sha256")
-    }
-    if len(hashes) > 1:
-        blocking.append(
-            "the records do not all share one corelib SHA-256 "
-            f"({len(hashes)} distinct values), so they do not describe one "
-            "binary and cannot be pooled into a baseline: "
-            + ", ".join(sorted(value[:16] for value in hashes))
-        )
+    # I-7. BOTH halves of "the same binary". The corelib DLL was pinned and
+    # the FastFlow harness that drove it was not, so a glob spanning a build
+    # tree could pool records from two different FastFlow builds with nothing
+    # able to notice. A record that predates the harness-hash field is itself
+    # a reason to refuse: it cannot be shown to belong.
+    for field, label in (
+        ("corelib_sha256", "corelib SHA-256"),
+        ("harness_sha256", "FastFlow harness SHA-256"),
+    ):
+        hashes = {
+            record.get(field) for record in records if record.get(field)
+        }
+        missing = [record for record in records if not record.get(field)]
+        if len(hashes) > 1:
+            blocking.append(
+                f"the records do not all share one {label} "
+                f"({len(hashes)} distinct values), so they do not describe "
+                f"one binary and cannot be pooled into a baseline: "
+                + ", ".join(sorted(value[:16] for value in hashes))
+            )
+        if missing and records:
+            blocking.append(
+                f"{len(missing)} record(s) carry no {label}, so they cannot "
+                f"be shown to describe the same binary as the rest. Re-run "
+                f"them against a current harness rather than pooling them."
+            )
     if not records:
         blocking.append("no DETERM-1 records were supplied")
 
@@ -373,20 +457,64 @@ def determinism_baseline(records: list[dict]) -> dict:
                 f"declared over a window containing a hard-gate failure."
             )
 
-    measured = [
-        entry["step_bit_identity_rate"]
+    # I-6. ROUTE DEPENDENCE IS A CLAIM, AND IT NEEDS A TEST.
+    #
+    # This used to be `len(set(rates)) > 1` -- a float inequality on two
+    # ratios. With 1 divergent run of 33 against 2 of 33 that is true, and the
+    # renderer published "the rate is route-dependent" in bold. It is the same
+    # n-limited overclaim DETERM-3 exists to prevent, made about DETERM-3's own
+    # output.
+    #
+    # A two-sided Fisher exact test on the 2x2 table of (divergent, clean) per
+    # route is the standard answer and introduces no tunable of its own. 1-of-33
+    # against 2-of-33 gives p = 1.0; the observed counts differ and the
+    # difference is not supported. Both facts are reported, separately, because
+    # they are different statements and collapsing them is what went wrong.
+    counts = [
+        (entry["runs"] - entry["bit_identical_runs"], entry["bit_identical_runs"])
         for entry in routes.values()
-        if entry["step_bit_identity_rate"] is not None
+        if entry["runs"] > 0
     ]
-    route_dependent = len(set(measured)) > 1
+    observed_rates_differ = (
+        len(
+            {
+                entry["run_bit_identity_rate"]
+                for entry in routes.values()
+                if entry["run_bit_identity_rate"] is not None
+            }
+        )
+        > 1
+    )
+    route_dependence_p = (
+        _fisher_exact_two_sided(counts[0], counts[1])
+        if len(counts) == 2
+        else None
+    )
+    route_dependent = (
+        route_dependence_p is not None
+        and route_dependence_p < ROUTE_DEPENDENCE_ALPHA
+    )
 
+    gate_failures = sum(
+        entry["runs_with_gate_failures"] for entry in routes.values()
+    )
     return {
         "min_runs_per_route": MIN_DETERMINISM_RUNS_PER_ROUTE,
         "routes": routes,
+        "observed_rates_differ": observed_rates_differ,
+        "route_dependence_p": route_dependence_p,
+        "route_dependence_alpha": ROUTE_DEPENDENCE_ALPHA,
         "route_dependent": route_dependent,
+        "gate_failures": gate_failures,
+        # I-3. A window containing a DETERM-2 hard-gate failure is NOT a
+        # baseline, and this flag used to say it was -- four lines below the
+        # problem text saying it must not. The flag is the machine-readable
+        # form of that sentence, so it has to agree with it.
         "is_baseline": not blocking
         and bool(routes)
+        and gate_failures == 0
         and all(entry["is_baseline"] for entry in routes.values()),
+        "sources": sources,
         "blocking_problems": blocking,
         "problems": blocking + problems,
     }
@@ -395,7 +523,12 @@ def determinism_baseline(records: list[dict]) -> dict:
 def load_determinism_records(pattern: str) -> list[dict]:
     records = []
     for path in sorted(globlib.glob(pattern)):
-        records.append(json.loads(Path(path).read_text(encoding="utf-8")))
+        record = json.loads(Path(path).read_text(encoding="utf-8"))
+        # I-7. Where each record came from, so a pooled glob can be audited
+        # rather than trusted. Prefixed so it cannot collide with a field the
+        # comparator writes.
+        record["_source"] = path
+        records.append(record)
     return records
 
 
@@ -489,11 +622,29 @@ def render_markdown(document: dict) -> str:
     add("")
     add("| | |")
     add("| --- | --- |")
-    add(f"| manifest map and mapping | {_ns(load.get('manifest_map_ns'))} |")
+    add(f"| manifest parse and file mapping | {_ns(load.get('manifest_map_ns'))} |")
+    # I-5. The shape plan is 86% of model load, and the first rendered version
+    # of this table omitted it entirely -- leaving 11.2 s of a 12.8 s load
+    # unexplained in the document while the finding sat only in a task report.
+    # Every phase is listed, and the remainder is stated rather than left for
+    # the reader to subtract.
+    share = load.get("shape_plan_share")
+    share_text = f" — **{share * 100:.0f}% of load**" if isinstance(
+        share, (int, float)
+    ) else ""
+    add(
+        f"| **1..4096 helper interrogation (`Phi4ShapePlan::Build`)** | "
+        f"**{_ns(load.get('shape_plan_ns'))}**{share_text} |"
+    )
     add(
         f"| weight pack/upload ({load.get('weight_objects', 'n/a')} objects) "
         f"| {_ns(load.get('weight_pack_ns'))} |"
     )
+    add(
+        f"| stream, {load.get('device_tensors', 'n/a')} device tensors, RoPE "
+        f"upload | {_ns(load.get('device_setup_ns'))} |"
+    )
+    add(f"| unaccounted | {_ns(load.get('unaccounted_ns'))} |")
     add(f"| total model load | {_ns(load.get('total_ns'))} |")
     add(
         f"| cold TTFT ({ttft.get('prompt_token_count', 'n/a')} prompt tokens, "
@@ -552,14 +703,40 @@ def render_markdown(document: dict) -> str:
                 f"{_ns(point.get('p50_ns'))} | {_ns(point.get('p95_ns'))} |"
             )
         add("")
-        wins = continuation.get("append_wins", {})
-        if wins:
+        crossover = continuation.get("crossover", {})
+        if crossover:
+            add("#### Where append stops winning")
+            add("")
             add(
-                "Longest suffix at which append beats re-prefill, per rendered "
-                "history: "
-                + ", ".join(f"`{key}` → {value}" for key, value in wins.items())
-                + f". Prefix-monotonic: "
-                f"`{continuation.get('prefix_monotonic')}`."
+                "**This is a BRACKET, not a threshold.** A point counts as "
+                "decided only when the gap between the two routes exceeds the "
+                "larger of their own p50-to-p95 spreads at that point; "
+                "anything else widens the bracket. Task 14 has to choose this "
+                "constant, so what it needs to see is how much room the "
+                "measurement leaves — not a number picked because it was the "
+                "last grid point where append happened to win."
+            )
+            add("")
+            add(
+                "| rendered history | append decisively wins up to | "
+                "re-prefill decisively wins from | crossover lies in |"
+            )
+            add("| ---: | ---: | ---: | :--- |")
+            for history, entry in crossover.items():
+                lower = entry.get("append_wins_up_to")
+                upper = entry.get("reprefill_wins_from")
+                if not upper:
+                    span = "**not bracketed by this grid**"
+                elif entry.get("bracket_is_tight"):
+                    span = f"exactly {upper}"
+                else:
+                    span = f"`({lower}, {upper}]` — not resolved further"
+                add(f"| {history} | {lower} | {upper} | {span} |")
+            add("")
+            add(
+                f"Prefix-monotonic: "
+                f"`{continuation.get('prefix_monotonic')}`. Decision rule: "
+                f"{continuation.get('decision_rule', 'n/a')}."
             )
             add("")
 
@@ -656,10 +833,24 @@ def render_markdown(document: dict) -> str:
                 f"as a settled baseline."
             )
             add("")
+        p_value = determinism.get("route_dependence_p")
         if determinism.get("route_dependent"):
             add(
-                "**The rate is route-dependent.** The two routes are reported "
-                "separately above rather than pooled."
+                "**The rate is route-dependent** (Fisher exact "
+                f"p = {p_value:.3g} < "
+                f"{determinism.get('route_dependence_alpha')}). The two "
+                "routes are reported separately above rather than pooled."
+            )
+            add("")
+        elif determinism.get("observed_rates_differ"):
+            add(
+                "The two routes' observed rates differ, but **the n does not "
+                "support calling the rate route-dependent** (Fisher exact "
+                f"p = {p_value:.3g} against "
+                f"{determinism.get('route_dependence_alpha')}). They are "
+                "still reported separately, per `DETERM-3`, because pooling "
+                "them would hide a difference that a larger campaign might "
+                "resolve — not because this one resolved it."
             )
             add("")
         for problem in determinism.get("problems", []):

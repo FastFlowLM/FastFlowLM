@@ -39,6 +39,8 @@ from pathlib import Path
 from tools import report_phi4_corelib_baseline as report
 from tools.report_phi4_corelib_baseline import (
     MIN_DETERMINISM_RUNS_PER_ROUTE,
+    ROUTE_DEPENDENCE_ALPHA,
+    _fisher_exact_two_sided,
     REQUIRED_IDENTITY_FIELDS,
     REQUIRED_SECTIONS,
     determinism_baseline,
@@ -94,9 +96,14 @@ def _baseline(**overrides) -> dict:
         "identity": _identity(),
         "model_load": {
             "manifest_map_ns": 1,
+            "shape_plan_ns": 90,
             "weight_pack_ns": 2,
-            "total_ns": 3,
+            "device_setup_ns": 5,
+            "unaccounted_ns": 2,
+            "shape_plan_share": 0.9,
+            "total_ns": 100,
             "weight_objects": 161,
+            "device_tensors": 76,
         },
         "ttft": {
             "cold_ns": 10,
@@ -118,7 +125,23 @@ def _baseline(**overrides) -> dict:
                     "p95_ns": 5,
                 }
             ],
-            "append_wins": {"512": 32, "2048": 0},
+            "crossover": {
+                "512": {
+                    "append_wins_up_to": 8,
+                    "reprefill_wins_from": 12,
+                    "crossover_bracket": [8, 12],
+                    "bracket_is_tight": False,
+                    "decisions": [],
+                },
+                "2048": {
+                    "append_wins_up_to": 24,
+                    "reprefill_wins_from": 32,
+                    "crossover_bracket": [24, 32],
+                    "bracket_is_tight": False,
+                    "decisions": [],
+                },
+            },
+            "decision_rule": "gap must exceed the within-route spread",
             "prefix_monotonic": True,
         },
         "decode": {
@@ -138,6 +161,7 @@ def _baseline(**overrides) -> dict:
         "v_scatter": {
             "reads_per_model_step": 32,
             "writes_per_model_step": 256,
+            "counts_are_measured": True,
             "bytes": 1024,
             "nanoseconds": 2048,
         },
@@ -150,6 +174,7 @@ def _determ(route: str, bit_exact: int, total: int, max_diff: float) -> dict:
     return {
         "route": route,
         "corelib_sha256": "a523b238" + "0" * 56,
+        "harness_sha256": "beefcafe" + "0" * 56,
         "logits_bit_exact_steps": bit_exact,
         "logits_total_steps": total,
         "observed_max_abs_diff": max_diff,
@@ -655,6 +680,174 @@ class MainTests(unittest.TestCase):
             self.assertEqual(
                 document["determinism"]["routes"]["append"]["runs"], 20
             )
+
+
+class RouteDependenceTests(unittest.TestCase):
+    """I-6. "The rate is route-dependent" is a claim, and it needs a test.
+
+    It was previously a float inequality on two ratios, published in bold from
+    1 divergent run of 33 against 2 of 33 -- the same n-limited overclaim
+    DETERM-3 exists to prevent, made about DETERM-3's own output.
+    """
+
+    def test_fisher_matches_known_values(self):
+        # Symmetric table: nothing to distinguish, p is exactly 1.
+        self.assertEqual(_fisher_exact_two_sided((2, 31), (2, 31)), 1.0)
+        # A table with an empty margin cannot be extreme.
+        self.assertEqual(_fisher_exact_two_sided((0, 5), (0, 5)), 1.0)
+        # Textbook 2x2: ((1,9),(8,2)) has two-sided p = 0.0055 to 2 s.f.
+        self.assertAlmostEqual(
+            _fisher_exact_two_sided((1, 9), (8, 2)), 0.005477, places=5
+        )
+        self.assertLessEqual(_fisher_exact_two_sided((3, 30), (0, 33)), 1.0)
+
+    def test_one_versus_two_divergent_runs_of_33_is_not_route_dependence(self):
+        records = _determ_runs("append", 32) + [_determ("append", 0, 17, 48.3)]
+        records += _determ_runs("reprefill", 31) + [
+            _determ("reprefill", 15, 17, 0.3125),
+            _determ("reprefill", 9, 17, 0.25),
+        ]
+        baseline = determinism_baseline(records)
+        self.assertTrue(baseline["observed_rates_differ"])
+        self.assertFalse(baseline["route_dependent"])
+        self.assertGreaterEqual(
+            baseline["route_dependence_p"], ROUTE_DEPENDENCE_ALPHA
+        )
+
+    def test_a_large_separation_is_route_dependence(self):
+        records = _determ_runs("append", 33)
+        records += _determ_runs("reprefill", 21) + [
+            _determ("reprefill", 9, 17, 0.25) for _ in range(12)
+        ]
+        baseline = determinism_baseline(records)
+        self.assertTrue(baseline["route_dependent"])
+        self.assertLess(
+            baseline["route_dependence_p"], ROUTE_DEPENDENCE_ALPHA
+        )
+
+    def test_the_document_says_the_n_does_not_support_the_claim(self):
+        document = _baseline()
+        records = _determ_runs("append", 32) + [_determ("append", 0, 17, 48.3)]
+        records += _determ_runs("reprefill", 33)
+        document["determinism"] = determinism_baseline(records)
+        text = render_markdown(document)
+        self.assertIn("does not support", text)
+        self.assertNotIn("**The rate is route-dependent**", text)
+
+
+class BaselineFlagTests(unittest.TestCase):
+    """I-3. `is_baseline` is the machine-readable form of the sentence four
+    lines below it, and it used to contradict it."""
+
+    def test_a_gate_failure_makes_is_baseline_false(self):
+        broken = _determ("append", 0, 17, 48.34375)
+        broken["failures"] = ["decode[7]: emitted token sequences differ"]
+        records = [broken] + _determ_runs("append", 32) + _determ_runs(
+            "reprefill", 33
+        )
+        baseline = determinism_baseline(records)
+        self.assertEqual(baseline["gate_failures"], 1)
+        self.assertFalse(baseline["is_baseline"])
+        # Per-route run counts are still met, so the ROUTE flag stays true;
+        # it answers "does this route have enough runs", not "is this a
+        # settled baseline".
+        self.assertTrue(baseline["routes"]["append"]["is_baseline"])
+
+    def test_a_clean_window_is_a_baseline(self):
+        records = _determ_runs("append", 33) + _determ_runs("reprefill", 33)
+        baseline = determinism_baseline(records)
+        self.assertEqual(baseline["gate_failures"], 0)
+        self.assertTrue(baseline["is_baseline"])
+
+
+class BinaryIdentityTests(unittest.TestCase):
+    """I-7. Both halves of "the same binary", and an auditable source list."""
+
+    def test_a_differing_harness_hash_blocks_the_baseline(self):
+        odd = _determ("append", 17, 17, 0.0)
+        odd["harness_sha256"] = "deadbeef" + "0" * 56
+        records = [odd] + _determ_runs("append", 32) + _determ_runs(
+            "reprefill", 33
+        )
+        baseline = determinism_baseline(records)
+        self.assertTrue(
+            any(
+                "harness" in problem.lower()
+                for problem in baseline["blocking_problems"]
+            ),
+            baseline["blocking_problems"],
+        )
+
+    def test_a_record_with_no_harness_hash_blocks_the_baseline(self):
+        # A record predating the field cannot be shown to belong to the pool,
+        # and silently including it is how a glob over a build tree turns into
+        # a baseline nobody can reproduce.
+        stale = _determ("append", 17, 17, 0.0)
+        del stale["harness_sha256"]
+        records = [stale] + _determ_runs("append", 32) + _determ_runs(
+            "reprefill", 33
+        )
+        baseline = determinism_baseline(records)
+        self.assertTrue(
+            any(
+                "harness" in problem.lower()
+                for problem in baseline["blocking_problems"]
+            ),
+            baseline["blocking_problems"],
+        )
+
+    def test_the_sources_are_recorded(self):
+        records = _determ_runs("append", 33) + _determ_runs("reprefill", 33)
+        for index, record in enumerate(records):
+            record["_source"] = f"artifacts/run/determ1-{index}.json"
+        baseline = determinism_baseline(records)
+        self.assertEqual(len(baseline["sources"]), 66)
+        self.assertIn("artifacts/run/determ1-0.json", baseline["sources"])
+
+
+class CrossoverRenderingTests(unittest.TestCase):
+    """C-1. The document published a grid artifact as a measured threshold."""
+
+    def test_the_document_publishes_a_bracket_and_says_so(self):
+        text = render_markdown(_baseline())
+        self.assertIn("BRACKET, not a threshold", text)
+        self.assertIn("(8, 12]", text)
+        self.assertIn("(24, 32]", text)
+        # And never the old phrasing, which read as a measured answer.
+        self.assertNotIn("Longest suffix at which append beats", text)
+
+    def test_an_unbracketed_crossover_says_so_rather_than_naming_a_number(self):
+        document = _baseline()
+        document["continuation"]["crossover"]["512"][
+            "reprefill_wins_from"
+        ] = 0
+        text = render_markdown(document)
+        self.assertIn("not bracketed by this grid", text)
+
+    def test_the_load_breakdown_names_the_shape_plan(self):
+        text = render_markdown(_baseline())
+        self.assertIn("Phi4ShapePlan::Build", text)
+        self.assertIn("90% of load", text)
+        self.assertIn("unaccounted", text)
+
+
+class VScatterProvenanceTests(unittest.TestCase):
+    """I-4. The per-step counts must be measured, not restated constants."""
+
+    def test_a_record_that_does_not_claim_measurement_is_rejected(self):
+        document = _baseline()
+        del document["v_scatter"]["counts_are_measured"]
+        self.assertTrue(
+            any("counts_are_measured" in p for p in validate(document)),
+            validate(document),
+        )
+
+    def test_a_record_that_claims_measurement_falsely_is_rejected(self):
+        document = _baseline()
+        document["v_scatter"]["counts_are_measured"] = False
+        self.assertTrue(
+            any("counts_are_measured" in p for p in validate(document))
+        )
 
 
 if __name__ == "__main__":

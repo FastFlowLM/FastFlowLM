@@ -35,6 +35,10 @@ struct Phi4Aie4Metrics {
     std::uint64_t manifest_map_ns = 0;
     std::uint64_t shape_plan_ns = 0;
     std::uint64_t weight_pack_ns = 0;
+    // Stream creation, the 76 device tensors, and the RoPE table upload.
+    // Named so the load timeline adds up: an unlabelled remainder is an
+    // invitation to assume the missing time is somewhere it is not.
+    std::uint64_t device_setup_ns = 0;
     std::uint64_t packed_weight_bytes = 0;
     std::uint64_t mapped_source_bytes = 0;
     std::uint64_t kv_bytes = 0;
@@ -80,6 +84,23 @@ public:
     const Phi4Aie4Metrics& metrics() const noexcept;
 #ifdef DEV_BUILD
     Phi4DebugSnapshot debug_snapshot() const;
+
+    // The one row that was fed to the LM-head MatMul on the most recent
+    // model step, in BF16, straight out of `lm_input_tensor`.
+    //
+    // `DETERM-1` localised the run-to-run divergence to the LM-head dispatch
+    // by INFERENCE -- end-of-run state was identical, so the LM-head input
+    // was assumed identical at the step where the logits differed. That step
+    // is not the end of the run, and the assumption was never observed.
+    // Capturing this after every step turns the localisation into a
+    // measurement: at the first diverging logit vector, either the two runs
+    // fed the LM head the same row or they did not, and there is nothing left
+    // to infer.
+    //
+    // Deliberately narrower than debug_snapshot(), which also reads four live
+    // K/V caches. This is called after every step, so it has to be cheap
+    // enough not to change what it is measuring.
+    std::vector<std::uint16_t> debug_lm_head_input() const;
 #endif
 
 private:

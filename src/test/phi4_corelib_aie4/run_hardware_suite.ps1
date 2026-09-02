@@ -146,6 +146,28 @@ function Remove-ConsumedArtifact {
     }
 }
 
+# DETERM-4. Evidence for a determinism result must OUTLIVE the build tree.
+#
+# The build directory is gitignored, so every determ1 record this project has
+# ever produced has lived only on one machine until it was overwritten or
+# cleaned. That has now cost this effort its divergence evidence twice: once
+# when a fixed artifact directory overwrote the 16/17 event, and once when a
+# finding that overturned a design position was written up from records that
+# no longer existed by the time anyone tried to check it.
+#
+# Every record is copied out to a committed directory, not just the breaching
+# ones: a rate is only auditable if the clean runs it rests on are there too.
+function Save-DeterminismRecord {
+    param([string]$Path, [string]$Destination)
+    if (-not (Test-Path $Path)) { return $null }
+    if (-not (Test-Path $Destination)) {
+        New-Item -ItemType Directory -Force -Path $Destination | Out-Null
+    }
+    $target = Join-Path $Destination (Split-Path -Leaf $Path)
+    Copy-Item -LiteralPath $Path -Destination $target -Force
+    return $target
+}
+
 # ---------------------------------------------------------------------------
 # Preconditions
 # ---------------------------------------------------------------------------
@@ -400,6 +422,16 @@ if (-not $ModelDir) {
     Write-Output ("  DETERM-3 baseline input: " +
         (Join-Path (Join-Path $BuildDir 'artifacts') '*/determ1-*.json'))
 
+    # DETERM-4: the committed home for this run's determinism evidence. Inside
+    # the source tree, NOT the build tree, because the build tree is
+    # gitignored and the whole point is that these survive.
+    $recordDir = Join-Path (Join-Path $suiteDir 'determinism_records') $runStamp
+    New-Item -ItemType Directory -Force -Path $recordDir | Out-Null
+    Write-Output "DETERM-4 records (COMMIT THESE): $recordDir"
+    $lmHeadTool = Join-Path (Split-Path -Parent $sourceDir) `
+        'tools/phi4_host_lm_head_reference.py'
+    $lmHeadRuns = 0
+
     if (-not (Test-Path (Join-Path $ModelDir 'corelib_phi4_manifest.json'))) {
         $overlayDir = Join-Path $sourceDir 'model_overlays/phi4-mini-it-aie4'
         $composed = Join-Path $BuildDir 'model'
@@ -514,6 +546,7 @@ if (-not $ModelDir) {
                       "no DETERM-1 record at $determJson"
             }
             $d = Get-Content $determJson -Raw | ConvertFrom-Json
+            Save-DeterminismRecord $determJson $recordDir | Out-Null
             $routeDiverged =
                 ($d.logits_bit_exact_steps -lt $d.logits_total_steps)
             $dnote = ("run-to-run [$route]: logits bit-identical " +
@@ -532,6 +565,7 @@ if (-not $ModelDir) {
             # summary line did not.
             if (Test-Path $determJson) {
                 $d = Get-Content $determJson -Raw | ConvertFrom-Json
+                Save-DeterminismRecord $determJson $recordDir | Out-Null
                 $routeDiverged = $true
                 $bitExactNotes += ("run-to-run [$route] (FAILED): logits " +
                     "bit-identical " +
@@ -726,9 +760,15 @@ if (-not $ModelDir) {
                 }
                 $determCompleted[$route]++
                 $d = Get-Content $recordJson -Raw | ConvertFrom-Json
+                Save-DeterminismRecord $recordJson $recordDir | Out-Null
                 Write-Output ("  ${tag}: logits bit-identical " +
                     "$($d.logits_bit_exact_steps)/$($d.logits_total_steps), " +
                     "max |diff| $($d.observed_max_abs_diff)")
+                if ($d.localisation -and $d.localisation.measured) {
+                    Write-Output ("    localisation: " +
+                        "$($d.localisation.source) at " +
+                        "$($d.localisation.step)")
+                }
                 # Keep the raw pair whenever the two runs were NOT
                 # bit-identical, not only when a gate failed.
                 #
@@ -743,6 +783,51 @@ if (-not $ModelDir) {
                     Write-Output ("  keeping ${tag}'s two run documents: " +
                         "the runs were not bit-identical, which is the " +
                         "sample worth reading")
+                    # STEP 9b, RUN AUTOMATICALLY ON THE EVENT THAT NEEDS IT.
+                    #
+                    # This used to be a script somebody could remember to run
+                    # by hand, which meant the one campaign that produced a
+                    # divergence had no host-reference analysis of it until
+                    # long afterwards, from artifacts that were nearly gone.
+                    # A divergent pair is exactly and only when this question
+                    # is answerable, so the suite asks it there and then.
+                    $lmHeadJson = Join-Path $recordDir "lmhead-$tag.json"
+                    try {
+                        Invoke-Checked "host LM-head reference ($tag)" `
+                            $Python @(
+                                $lmHeadTool,
+                                '--model-dir', $ModelDir,
+                                '--run-json', $aJson,
+                                '--run-json', $bJson,
+                                '--output-json', $lmHeadJson)
+                        $lmHeadRuns++
+                    } catch {
+                        # A non-zero exit is the tool REPORTING a finding --
+                        # a model-body divergence, a bias, or a gross
+                        # disagreement -- not a tooling failure. The record
+                        # is what matters and it is written before the exit.
+                        if (Test-Path $lmHeadJson) {
+                            $lm = Get-Content $lmHeadJson -Raw |
+                                ConvertFrom-Json
+                            Write-Output ("  Step 9b verdict [$tag]: " +
+                                "$($lm.verdict)")
+                            $bitExactNotes += ("Step 9b [$tag]: " +
+                                "$($lm.verdict); LM-head inputs identical: " +
+                                "$($lm.lm_head_inputs_identical)")
+                            $lmHeadRuns++
+                        } else {
+                            Write-Output ("STEP 9b FAILED TO PRODUCE A " +
+                                "RECORD ($tag): $($_.Exception.Message)")
+                            $failures += "Step 9b produced no record for $tag"
+                        }
+                    }
+                    if (Test-Path $lmHeadJson) {
+                        $lm = Get-Content $lmHeadJson -Raw | ConvertFrom-Json
+                        Write-Output ("  Step 9b [$tag]: verdict " +
+                            "$($lm.verdict), LM-head inputs identical " +
+                            "$($lm.lm_head_inputs_identical) at " +
+                            "$($lm.analysed_step)")
+                    }
                 } else {
                     Remove-ConsumedArtifact @($aJson, $bJson)
                 }
@@ -755,6 +840,18 @@ if (-not $ModelDir) {
         foreach ($route in @('force_reprefill', 'force_append')) {
             $ran += ("DETERM-3 samples [$route]: " +
                 "$($determCompleted[$route])/$DeterminismRuns completed")
+        }
+        $ran += ("DETERM-4 records written to $recordDir " +
+            "(commit them; the build tree is gitignored)")
+        if ($lmHeadRuns -gt 0) {
+            $ran += ("Step 9b host LM-head reference: $lmHeadRuns " +
+                "divergent pair(s) analysed")
+        } else {
+            # NOT a skip to be quiet about, and not a failure either: with no
+            # divergent pair there is nothing for Step 9b to analyse. Saying
+            # so keeps "it did not fire" distinguishable from "nobody ran it".
+            $ran += ('Step 9b host LM-head reference: no divergent pair ' +
+                'occurred in this campaign, so there was nothing to analyse')
         }
     } else {
         $skipped += ('DETERM-3 determinism campaign (-DeterminismRuns not ' +

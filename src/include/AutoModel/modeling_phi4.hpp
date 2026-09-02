@@ -33,6 +33,12 @@ private:
         bool require_aie4_eos);
 
 #if defined(FLM_ENABLE_CORELIB_AIE4)
+    // The largest total the AIE4 path can actually reach: MAX_L capped by the
+    // token attention kernel's window, which is one below the prefill path's.
+    // Admission and the decode loop both use this, never MAX_L, because the
+    // step MAX_L would allow fails past the irrevocable boundary and takes the
+    // process with it.
+    size_t aie4_active_cap() const;
     void validate_aie4_capacity(
         size_t rendered_tokens,
         std::optional<int> requested_max_new_tokens) const;

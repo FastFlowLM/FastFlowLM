@@ -704,6 +704,27 @@ struct phi4_corelib_aie4::Impl final {
         }
     }
 
+    // Refused BEFORE anything is submitted, which is what makes it survivable.
+    //
+    // The same condition detected one dispatch later -- inside flat_mha, after
+    // q/k/v have been submitted for this step -- is past the irrevocable
+    // boundary, and the failure policy correctly terminates the process. So
+    // this is not a duplicate of a check corelib already performs; it is the
+    // difference between a recoverable std::out_of_range and a dead server.
+    void EnsureDecodeWindow(std::size_t token_count) const {
+        const auto window =
+            static_cast<std::int64_t>(position) +
+            static_cast<std::int64_t>(token_count);
+        if (window > constants::kMaxDecodeWindow) {
+            throw std::out_of_range(
+                "Phi-4 AIE4 decode would need a " +
+                std::to_string(window) +
+                "-token attention window; the token attention kernel ships "
+                "no window above " +
+                std::to_string(constants::kMaxDecodeWindow));
+        }
+    }
+
     void EnsureCapacity(std::size_t token_count) const {
         if (token_count == 0) {
             throw std::invalid_argument(
@@ -1310,6 +1331,7 @@ buffer<bf16> phi4_corelib_aie4::forward(int id) {
     const std::array<int, 1> token{id};
     impl_->ValidateTokens(token);
     impl_->EnsureCapacity(token.size());
+    impl_->EnsureDecodeWindow(token.size());
     return impl_->RunRows(token);
 }
 
@@ -1320,13 +1342,21 @@ buffer<bf16> phi4_corelib_aie4::prefill(
     const std::span<const int> token_ids(ids);
     impl_->ValidateTokens(token_ids);
     impl_->EnsureCapacity(token_ids.size());
-    if (impl_->position == 0 || token_ids.size() == 1) {
+    // A prefill from position zero uses the PREFILL attention path, whose
+    // window goes to the full kMaxSequenceLength. Everything else here is a
+    // rows=1 step on the token path, which stops one short of that.
+    if (impl_->position == 0 && token_ids.size() != 1) {
+        return impl_->RunRows(token_ids);
+    }
+    if (token_ids.size() == 1) {
+        impl_->EnsureDecodeWindow(token_ids.size());
         return impl_->RunRows(token_ids);
     }
 
     buffer<bf16> logits;
     for (const int token_id : token_ids) {
         const std::array<int, 1> token{token_id};
+        impl_->EnsureDecodeWindow(token.size());
         logits = impl_->RunRows(token);
     }
     return logits;

@@ -395,6 +395,24 @@ std::string Phi4::apply_chat_template(nlohmann::ordered_json& messages, nlohmann
 }
 
 #if defined(FLM_ENABLE_CORELIB_AIE4)
+// The largest total the AIE4 path can actually reach.
+//
+// MAX_L alone is wrong here. Every generation ends in decode steps, and the
+// token attention kernel supports no window above kMaxDecodeWindow -- one
+// below kMaxSequenceLength. Admitting a request against MAX_L therefore
+// admits one that cannot finish, and the step that cannot finish fails inside
+// flat_mha after q/k/v have been submitted, which terminates the process.
+//
+// Design 11.2 / SEQ-4 require an unbounded request to stop before the
+// user-visible total would exceed the cap. That bound existed for the explicit
+// -limit path and not for this one; only running the product's own generation
+// loop could have shown it, which is why Steps 1-6 never did.
+size_t Phi4::aie4_active_cap() const {
+    return std::min<size_t>(
+        this->MAX_L,
+        static_cast<size_t>(flm::phi4::constants::kMaxDecodeWindow));
+}
+
 void Phi4::validate_aie4_capacity(
     size_t rendered_tokens,
     std::optional<int> requested_max_new_tokens) const {
@@ -407,7 +425,7 @@ void Phi4::validate_aie4_capacity(
             "Phi-4 AIE4 requested_max_new_tokens cannot be negative");
     }
 
-    const size_t active_cap = this->MAX_L;
+    const size_t active_cap = this->aie4_active_cap();
     const size_t requested =
         requested_max_new_tokens.has_value()
             ? static_cast<size_t>(*requested_max_new_tokens)
@@ -460,7 +478,12 @@ std::string Phi4::generate_aie4(
 
     while (
         this->last_token != -1 &&
-        this->total_tokens < this->MAX_L) {
+        // aie4_active_cap(), not MAX_L: the last position MAX_L would
+        // allow is one the token attention kernel cannot serve, and the
+        // resulting failure lands past the irrevocable boundary and kills
+        // the process. Stopping one step earlier turns that into an
+        // ordinary MAX_LENGTH_REACHED truncation.
+        this->total_tokens < this->aie4_active_cap()) {
         if (is_cancelled()) {
             reason = CANCEL_DETECTED;
             buffer_.clear();
@@ -501,7 +524,7 @@ std::string Phi4::generate_aie4(
             reason = MAX_LENGTH_REACHED;
             break;
         }
-        if (this->total_tokens >= this->MAX_L) {
+        if (this->total_tokens >= this->aie4_active_cap()) {
             this->last_token = -1;
             reason = MAX_LENGTH_REACHED;
             break;
@@ -512,7 +535,7 @@ std::string Phi4::generate_aie4(
         this->profiler_list[SAMPLING_TIME].stop(1);
     }
 
-    if (this->total_tokens >= this->MAX_L) {
+    if (this->total_tokens >= this->aie4_active_cap()) {
         this->last_token = -1;
         reason = MAX_LENGTH_REACHED;
         header_print(

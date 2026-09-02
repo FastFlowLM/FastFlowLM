@@ -5,6 +5,7 @@
 #if defined(FLM_ENABLE_CORELIB_AIE4)
 #include <corelib/corelib_runtime.hpp>
 #include <models/phi4/phi4_corelib_aie4.hpp>
+#include <models/phi4/phi4_corelib_constants.hpp>
 #endif
 
 #define FLM_PHI4_FRONTEND_TEST_SUPPORT
@@ -974,6 +975,107 @@ void TestEosStopCommitsTokenBeforeCapUpdateAndAppend() {
     CheckAligned(*model, *engine, {10, 101, 200020, 11});
 }
 
+// The decode loop must stop one step BEFORE the declared context length.
+//
+// Measured on the AIE4 target 2026-09-02: a default /api/chat request with no
+// limit field ran the decode loop to position 4095, where the token attention
+// kernel has no 4096-wide window. The refusal arrives from flat_mha after q, k
+// and v have been submitted in the same step, so it is past the irrevocable
+// boundary and the process was TERMINATED, taking the server with it. The
+// fatal record read:
+//
+//   {"status":3,"call":"flat_mha","phase":"flat_mha","layer":0,"rows":1,
+//    "position":4095,
+//    "detail":"no token attention kernel ships for a 4096-token window"}
+//
+// Design 11.2 and SEQ-4 require an unbounded request to stop before the
+// user-visible total would exceed the cap. That bound existed for the
+// explicit-limit path and not for the AIE4 no-limit path, where
+// GenerationLoopLimit returns kNoExplicitGenerationLimit and the loop was
+// bounded only by MAX_L -- one step too many -- and by EOS.
+//
+// This pins the boundary WITHOUT relying on EOS arriving: the sampler here
+// never emits an end token, which is exactly the condition under which the
+// defect fired.
+void TestDecodeStopsBelowTheTokenAttentionWindow() {
+    TempModelPackage package;
+    FactoryScope factory;
+    auto model = Load(
+        package,
+        ModelInfo(4096, "corelib_aie4"),
+        -1,
+        false,
+        nullptr);
+    FakeEngine* engine = g_factory.engine;
+    CHECK(engine->max_length == 4096);
+
+    // One prompt token, then an unending stream of ordinary tokens. Nothing
+    // here will ever stop the loop except the cap.
+    g_encoded_tokens = {1};
+    std::vector<int> samples;
+    samples.reserve(5000);
+    for (int index = 0; index < 5000; ++index) {
+        samples.push_back(500 + (index % 100));
+    }
+    g_sample_tokens.assign(samples.begin(), samples.end());
+
+    auto meta = Meta();
+    auto input = Prompt();
+    CHECK(model->insert(meta, input));
+
+    std::ostringstream output;
+    // A limit far beyond the cap, standing in for the no-limit path: on AIE4
+    // GenerationLoopLimit returns kNoExplicitGenerationLimit when no field is
+    // present, so the cap is the only thing that can stop this.
+    (void)model->generate(meta, 100000, output);
+
+    CHECK(meta.stop_reason == MAX_LENGTH_REACHED);
+    // 4095, not 4096. The last position the engine is asked to run at is
+    // 4094, whose attention window is 4095 -- the largest the token kernel
+    // serves. One more would be the step that killed the server.
+    CHECK(
+        model->get_current_context_length() ==
+        static_cast<int>(flm::phi4::constants::kMaxDecodeWindow));
+    CHECK(engine->position == flm::phi4::constants::kMaxDecodeWindow);
+    CHECK(engine->position < 4096);
+}
+
+// Admission must refuse a request it cannot finish.
+//
+// A rendered prompt plus an explicit output that totals exactly the declared
+// 4096 was previously admitted, because the cap compared against MAX_L. The
+// final decode step of such a request is the unservable one, so admitting it
+// meant accepting a request whose only possible outcome was a dead process.
+void TestAdmissionRefusesTheUnservableFinalStep() {
+    TempModelPackage package;
+    FactoryScope factory;
+    auto model = Load(
+        package,
+        ModelInfo(4096, "corelib_aie4"),
+        -1,
+        false,
+        nullptr);
+    FakeEngine* engine = g_factory.engine;
+
+    g_encoded_tokens.assign(10, 7);
+
+    // 10 + 4086 == 4096 == MAX_L. Refused: the last step cannot be served.
+    auto meta = Meta();
+    auto rejected = Prompt(4086);
+    CheckRequestError(
+        [&] { (void)model->insert(meta, rejected); },
+        400,
+        false,
+        "exceeds the active context cap");
+    CHECK(engine->position == 0);
+
+    // 10 + 4085 == 4095. Admitted, because every step of it can run.
+    SetSamples({101});
+    auto accepted = Prompt(4085);
+    CHECK(model->insert(meta, accepted));
+    CHECK(engine->position == 10);
+}
+
 void TestActiveCapNeverEmitsUncommittedToken() {
     TempModelPackage package;
     FactoryScope factory;
@@ -1391,6 +1493,8 @@ int main() {
         TestEndpointLimitsAtLoweredCap();
         TestLengthStopCommitsTokensBeforeForcedAppend();
         TestEosStopCommitsTokenBeforeCapUpdateAndAppend();
+        TestDecodeStopsBelowTheTokenAttentionWindow();
+        TestAdmissionRefusesTheUnservableFinalStep();
         TestActiveCapNeverEmitsUncommittedToken();
         TestCancellationLeavesOnlyCommittedTokensVisible();
         TestExactRepeatReprefillsAndSamplesFreshToken();

@@ -35,6 +35,7 @@ from __future__ import annotations
 import copy
 import json
 import pathlib
+import re
 import tempfile
 import unittest
 
@@ -70,6 +71,18 @@ _HEADER = (
     / "phi4_corelib_aie4_tuning.hpp"
 )
 _DOCUMENT = _REPO_ROOT / "docs" / "docs" / "benchmarks" / "phi4_results.md"
+
+# The task report is a plan artifact rather than a shipped file, so it sits
+# in the SDD working area beside the repository and is not committed here.
+# The guard reads it when it is present: a retracted claim survived two
+# review rounds in that file precisely because nothing read it back.
+_REPORT = (
+    _REPO_ROOT
+    / ".superpowers"
+    / "sdd"
+    / "2026-08-31-phi4-aie4-corelib-fastflow"
+    / "task-14-report.md"
+)
 
 
 def _flat(append: float, reprefill: float) -> dict:
@@ -1206,17 +1219,36 @@ class CommandLineTest(unittest.TestCase):
         self.assertTrue(payload["winners_downward_closed"])
 
 
+def _markdown_blocks(text):
+    """Split markdown into `(collapsed_text, is_quoted)` blocks.
+
+    A block is a run of consecutive non-blank lines, whitespace-collapsed so a
+    claim broken across a line wrap is still found -- checking line by line
+    would miss exactly the occurrences a text reflow creates.
+
+    `is_quoted` is true when every line of the block is a blockquote, which is
+    how a retracted claim is legitimately cited: inside a marked correction
+    that quotes the old wording in order to say it was wrong.
+    """
+    for raw in re.split(r"\n\s*\n", text):
+        lines = [line for line in raw.splitlines() if line.strip()]
+        if not lines:
+            continue
+        quoted = all(line.lstrip().startswith(">") for line in lines)
+        yield " ".join(raw.split()), quoted
+
+
 class RetractedClaimsTest(unittest.TestCase):
     """Retractions must reach the RENDERED artifacts, not just the code.
 
-    Four times on this branch a claim was retracted in the source and the
-    report while the rendered document went on asserting it, because nothing
-    read the rendered output back. These tests read it back.
+    Four times on this branch a claim was retracted in the source while the
+    rendered document went on asserting it, because nothing read the rendered
+    output back. A fifth time it survived in the task REPORT -- the very file
+    documenting the retraction -- because the guard read the document and not
+    the report. So both are read back here.
 
-    The claims are matched by TEXT against the committed document and against a
-    freshly built section, not by line number: a line number stops meaning
-    anything the moment the generator's prose moves, and would then pass
-    vacuously.
+    The claims are matched by TEXT, not by line number: a line number stops
+    meaning anything the moment the prose moves, and would then pass vacuously.
     """
 
     # Each entry is (substring, why it is wrong). The substrings are the exact
@@ -1224,7 +1256,9 @@ class RetractedClaimsTest(unittest.TestCase):
     # selected", for instance, appears LEGITIMATELY in the corrected prose,
     # which says the bound is not what that run would have selected. A matcher
     # loose enough to catch the retracted claim by keyword would forbid its own
-    # correction.
+    # correction. Likewise "at the widest conceded suffix" rather than "widest
+    # conceded suffix", because the correction has to be able to say that the
+    # widest conceded suffix is the cheapest one.
     _RETRACTED = (
         (
             "the constant is the smaller of those ceilings",
@@ -1239,22 +1273,113 @@ class RetractedClaimsTest(unittest.TestCase):
             "BOUNDS what Section 10.7 would have selected and cannot "
             "reproduce it.",
         ),
+        (
+            "at the widest conceded suffix",
+            "the widest suffix in a conceded band is its CHEAPEST member. The "
+            "penalty is reprefill - append, append grows with suffix length "
+            "and re-prefill does not, so the cost is read off the narrow end.",
+        ),
     )
+
+    @staticmethod
+    def _asserts(claim, text):
+        """Does `text` contain `claim` as a phrase, not inside a longer word?
+
+        Plain `in` was wrong in a way that took a failing run to see: "at the
+        widest conceded suffix" is a substring of "th-AT THE widest conceded
+        suffix", so the matcher flagged the very sentence explaining that the
+        widest conceded suffix is the cheapest. Third variant of the same trap
+        -- a matcher loose enough to catch the claim also catches its
+        correction -- so the left edge is anchored to a word boundary.
+        """
+        return re.search(r"(?<!\w)" + re.escape(claim), text) is not None
 
     def _violations(self, text):
         return [
             f"asserts a retracted claim ({claim!r}): {why}"
             for claim, why in self._RETRACTED
-            if claim in text
+            if self._asserts(claim, text)
         ]
 
     def _assert_clean(self, text, where):
         violations = self._violations(text)
         self.assertEqual(violations, [], f"{where} " + "; ".join(violations))
 
+    # Inline citation: "like this" or `like this`. Bounded so an unbalanced
+    # delimiter cannot swallow the rest of a block and exempt everything after
+    # it -- an exemption that grows without limit is an exemption that hides
+    # what it was built to catch.
+    _INLINE_QUOTE = re.compile(r"\"[^\"]{0,400}\"|`[^`]{0,400}`")
+
+    def _collect_unquoted(self, text):
+        """Retracted claims ASSERTED rather than cited.
+
+        Prose that retracts a claim has to be able to quote it. The rendered
+        document never needs to -- it states conclusions, not their history --
+        so it gets the strict check. The report does, so it gets this one.
+
+        A claim is treated as cited, and allowed, when it sits inside a
+        blockquote (a marked correction) or inside an inline quotation. The
+        inline case is not a nicety: every citation in fix round 3's own prose
+        is inline, and a blockquote-only rule failed on the round that
+        introduced it. Assert the claim in your own unquoted voice and it is
+        still caught.
+        """
+        violations = []
+        for block, quoted in _markdown_blocks(text):
+            if quoted:
+                continue
+            cited = [
+                match.span() for match in self._INLINE_QUOTE.finditer(block)
+            ]
+            for claim, why in self._RETRACTED:
+                for match in re.finditer(
+                    r"(?<!\w)" + re.escape(claim), block
+                ):
+                    if any(
+                        start <= match.start() < end for start, end in cited
+                    ):
+                        continue
+                    violations.append(
+                        f"asserts a retracted claim ({claim!r}) outside a "
+                        f"quotation: {why}"
+                    )
+                    break
+        return violations
+
+    def _assert_clean_unless_quoted(self, text, where):
+        violations = self._collect_unquoted(text)
+        self.assertEqual(violations, [], f"{where} " + "; ".join(violations))
+
+    def _task14_section(self):
+        """Only the block this task owns.
+
+        `phi4_results.md` also carries Task 13's baseline block. Grepping the
+        whole file would let this test go red on prose Task 14 neither wrote
+        nor may edit.
+        """
+        document = _DOCUMENT.read_text(encoding="utf-8")
+        begin = document.find("<!-- BEGIN phi4-continuation-threshold -->")
+        end = document.find("<!-- END phi4-continuation-threshold -->")
+        self.assertNotEqual(begin, -1, "the Task 14 section is missing")
+        self.assertNotEqual(end, -1, "the Task 14 section is unterminated")
+        self.assertLess(begin, end)
+        return document[begin:end]
+
     def test_the_committed_document_asserts_no_retracted_claim(self):
-        self._assert_clean(
-            _DOCUMENT.read_text(encoding="utf-8"), str(_DOCUMENT)
+        self._assert_clean(self._task14_section(), str(_DOCUMENT))
+
+    def test_the_committed_report_asserts_no_retracted_claim(self):
+        """The file that documents the retractions is not exempt from them.
+
+        Two retracted claims sat unmarked in it for two review rounds, in the
+        sections describing the very fixes that retracted them, because the
+        guard read the rendered document and stopped there.
+        """
+        if not _REPORT.exists():  # pragma: no cover - report lives beside the plan
+            self.skipTest(f"{_REPORT} is not present in this checkout")
+        self._assert_clean_unless_quoted(
+            _REPORT.read_text(encoding="utf-8"), str(_REPORT)
         )
 
     def test_a_freshly_rendered_section_asserts_no_retracted_claim(self):
@@ -1285,6 +1410,68 @@ class RetractedClaimsTest(unittest.TestCase):
                         f"prose prose {claim} prose", "a synthetic document"
                     )
 
+    def test_a_claim_inside_a_longer_word_is_not_a_claim(self):
+        """"that the widest conceded suffix is the cheapest" is the
+        CORRECTION, and it contains "at the widest conceded suffix" as a bare
+        substring. The guard found this by failing on it."""
+        correction = (
+            "carries an inline note explaining that the widest conceded "
+            "suffix is the cheapest"
+        )
+        self.assertEqual(self._violations(correction), [])
+        # The same words with a real word boundary in front ARE the claim.
+        self.assertEqual(
+            len(self._violations("the p95 at the widest conceded suffix")), 1
+        )
+
+    def test_the_quotation_exemption_is_not_a_blanket_pass(self):
+        """Otherwise the report check passes for any report at all."""
+        claim = self._RETRACTED[0][0]
+        # Asserted as the author's own prose: caught.
+        self.assertEqual(
+            len(self._collect_unquoted(f"Some prose. {claim}. More prose.\n")), 1
+        )
+        # Quoted inside a marked correction: allowed.
+        self.assertEqual(
+            self._collect_unquoted(
+                f"> **Corrected.** It originally read {claim}.\n"
+            ),
+            [],
+        )
+        # A blockquote glued to unquoted prose does NOT launder it: the block
+        # is mixed, so it is treated as the author speaking.
+        self.assertEqual(
+            len(self._collect_unquoted(f"Prose {claim}.\n> quoted tail\n")), 1
+        )
+        # Cited inline, in the author's own paragraph: allowed. Every citation
+        # in fix round 3's prose takes this form, and a blockquote-only rule
+        # went red on the round that introduced it.
+        self.assertEqual(
+            self._collect_unquoted(f'It originally read "{claim}", which is wrong.\n'),
+            [],
+        )
+        self.assertEqual(
+            self._collect_unquoted(f"It originally read `{claim}`.\n"), []
+        )
+        # A claim in the middle of a longer quoted span is still cited.
+        self.assertEqual(
+            self._collect_unquoted(f'It read "so {claim} without re-measuring".\n'),
+            [],
+        )
+
+    def test_an_unbalanced_quote_cannot_exempt_the_rest_of_a_block(self):
+        """A runaway quoted span would silently disable the guard downstream."""
+        claim = self._RETRACTED[0][0]
+        block = 'He said "' + ("filler " * 90) + f". Then {claim}.\n"
+        self.assertGreater(len(block.split('"')[1]), 400)
+        self.assertEqual(len(self._collect_unquoted(block)), 1)
+
+    def test_a_claim_split_across_a_line_wrap_is_still_found(self):
+        """Line-by-line matching would miss every reflowed occurrence."""
+        claim = self._RETRACTED[1][0]
+        head, tail = claim.split(" ", 1)
+        self.assertEqual(len(self._collect_unquoted(f"Prose {head}\n{tail}.\n")), 1)
+
     def test_the_corrected_wording_is_not_itself_flagged(self):
         """"would have selected" appears in the correction. A matcher that
         forbade it would make the fix unwritable."""
@@ -1298,10 +1485,15 @@ class RetractedClaimsTest(unittest.TestCase):
     def test_the_intersection_is_stated_where_the_reader_meets_it(self):
         """Removing the wrong claim is not enough; the right one must be
         there, and above the paragraph that explains it."""
-        document = _DOCUMENT.read_text(encoding="utf-8")
-        intersection = document.index("INTERSECTION of those winner sets")
-        correction = document.index("only when each winner set is downward-closed")
-        self.assertLess(intersection, correction)
+        section = self._task14_section()
+        # assertIn first: `str.index` on a missing phrase raises ValueError,
+        # which reports as an ERROR and hides which phrase went missing.
+        self.assertIn("INTERSECTION of those winner sets", section)
+        self.assertIn("only when each winner set is downward-closed", section)
+        self.assertLess(
+            section.index("INTERSECTION of those winner sets"),
+            section.index("only when each winner set is downward-closed"),
+        )
 
 
 class CheckedInArtefactsTest(unittest.TestCase):

@@ -304,7 +304,7 @@ endif()
 
 
 add_executable(flm ${SOURCES} ${HEADERS})
-flm_collect_aie4_runtime_files(FLM_AIE4_RUNTIME_FILES)
+flm_aie4_warn_if_unstageable()
 
 if(FLM_ENABLE_CORELIB_AIE4)
     target_compile_definitions(flm PRIVATE
@@ -609,19 +609,9 @@ add_custom_command(TARGET flm POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
         "${CMAKE_SOURCE_DIR}/model_overlays"
         "$<TARGET_FILE_DIR:flm>/model_overlays")
-if(WIN32 AND FLM_ENABLE_CORELIB_AIE4)
-    add_custom_command(TARGET flm POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E make_directory
-            "$<TARGET_FILE_DIR:flm>/aie4"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            ${FLM_AIE4_RUNTIME_FILES}
-            "$<TARGET_FILE_DIR:flm>/aie4"
-        COMMAND ${CMAKE_COMMAND} -E make_directory
-            "${CMAKE_SOURCE_DIR}/out/aie4"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            ${FLM_AIE4_RUNTIME_FILES}
-            "${CMAKE_SOURCE_DIR}/out/aie4")
-endif()
+flm_aie4_stage_for_target(flm
+    "$<TARGET_FILE_DIR:flm>/aie4"
+    "${CMAKE_SOURCE_DIR}/out/aie4")
 
 # Default install location for model_list.json / xclbins (matches the app's
 # relocatable "<exe_dir>/../share/flm" lookup). Overridden to the prefix root for
@@ -759,12 +749,7 @@ if(WIN32)
             "[Pp][Dd][Mm][Uu][Tt][Ii][Ll][Ii][Tt][Ii][Ee][Ss].*"
             "[Ww][Pp][Aa][Xx][Hh][Oo][Ll][Dd][Ee][Rr].*"
         POST_EXCLUDE_REGEXES ".*[Ww]indows[/\\\\][Ss]ystem32[/\\\\].*")
-    if(FLM_ENABLE_CORELIB_AIE4)
-        install(
-            FILES ${FLM_AIE4_RUNTIME_FILES}
-            DESTINATION bin/aie4
-            COMPONENT AIE4)
-    endif()
+    flm_aie4_install_runtime(DESTINATION bin/aie4 COMPONENT AIE4)
 elseif(NOT FLM_USE_HRX AND FLM_PORTABLE_BUILD)
     # Portable XRT: bundle the XRT runtime explicitly. XRT is deliberately
     # handled here instead of via the dependency closure below: flm only lists

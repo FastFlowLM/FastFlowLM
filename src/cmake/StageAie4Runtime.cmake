@@ -1,0 +1,177 @@
+# Derives and stages the optional Phi-4 AIE4 corelib runtime closure.
+#
+# Design `CLOSURE-1`: the closure is defined by what the shipped
+# `ryzenai_corelib.dll` actually imports, enumerated with a dependency walker
+# against that exact binary. It is never transcribed, because different
+# DynamicDispatch linkages and different dependency builds import different
+# sets: the 223 MB dev-box binary statically links DynamicDispatch while the
+# 0.8 MB target binary loads it as separate DLLs, and neither closure
+# validates the other.
+#
+# This file is a standalone script. It runs both under `cmake -P` (developer
+# staging beside `flm.exe`) and under `install(SCRIPT)` (packaging), so the
+# packaged closure and the closure a developer runs against are produced by
+# the same derivation rather than two lists that can drift apart.
+#
+# Inputs:
+#   FLM_AIE4_CORELIB_DIR   directory holding ryzenai_corelib.dll (required)
+#   FLM_AIE4_XRT_DIR       directory holding stageable XRT DLLs (optional)
+#   FLM_AIE4_EXTRA_DIRS    additional dependency search directories
+#   FLM_AIE4_DESTINATION   directory to stage into; relative paths resolve
+#                          against CMAKE_INSTALL_PREFIX
+#   FLM_AIE4_REPORT        optional path for the derived closure report
+
+cmake_minimum_required(VERSION 3.24)
+
+if(NOT WIN32 AND NOT CMAKE_HOST_WIN32)
+    message(FATAL_ERROR
+        "The Phi-4 AIE4 runtime closure is Windows-only.")
+endif()
+
+if(NOT FLM_AIE4_CORELIB_DIR)
+    message(FATAL_ERROR
+        "RYZENAI_CORELIB_RUNTIME_DIR is required to install or package the "
+        "Phi-4 AIE4 feature (FLM_ENABLE_CORELIB_AIE4=ON). Point it at the "
+        "directory holding the ryzenai_corelib.dll you intend to ship, then "
+        "re-run the install step. Building flm.exe does not need it: the "
+        "corelib DLL is resolved at runtime by absolute path and flm.exe "
+        "never links ryzenai_corelib.lib.")
+endif()
+
+if(NOT IS_DIRECTORY "${FLM_AIE4_CORELIB_DIR}")
+    message(FATAL_ERROR
+        "RYZENAI_CORELIB_RUNTIME_DIR does not name a directory: "
+        "${FLM_AIE4_CORELIB_DIR}")
+endif()
+
+set(_flm_aie4_root "${FLM_AIE4_CORELIB_DIR}/ryzenai_corelib.dll")
+if(NOT EXISTS "${_flm_aie4_root}")
+    message(FATAL_ERROR
+        "RYZENAI_CORELIB_RUNTIME_DIR contains no ryzenai_corelib.dll: "
+        "${FLM_AIE4_CORELIB_DIR}")
+endif()
+
+# Search order matters. Directories supplied for this package win over
+# anything the machine happens to provide, so a build box with an ambient
+# conda or toolchain prefix stages the DLLs we chose rather than the ones it
+# stumbled across.
+set(_flm_aie4_search_dirs "${FLM_AIE4_CORELIB_DIR}")
+if(FLM_AIE4_XRT_DIR AND IS_DIRECTORY "${FLM_AIE4_XRT_DIR}")
+    list(APPEND _flm_aie4_search_dirs "${FLM_AIE4_XRT_DIR}")
+elseif(FLM_AIE4_XRT_DIR)
+    message(FATAL_ERROR
+        "XRT_RUNTIME_DIR does not name a directory: ${FLM_AIE4_XRT_DIR}")
+endif()
+foreach(_flm_aie4_dir IN LISTS FLM_AIE4_EXTRA_DIRS)
+    if(_flm_aie4_dir)
+        if(NOT IS_DIRECTORY "${_flm_aie4_dir}")
+            message(FATAL_ERROR
+                "FLM_AIE4_DEPENDENCY_DIRS entry is not a directory: "
+                "${_flm_aie4_dir}")
+        endif()
+        list(APPEND _flm_aie4_search_dirs "${_flm_aie4_dir}")
+    endif()
+endforeach()
+list(REMOVE_DUPLICATES _flm_aie4_search_dirs)
+
+# `dyn_bins.dll` holds DynamicDispatch's precompiled binaries and is opened by
+# name at runtime, so it is never an import and a walker cannot find it. It is
+# staged when the selected linkage ships it and omitted when DynamicDispatch is
+# statically linked, which is why it is discovered by presence rather than
+# demanded unconditionally.
+set(_flm_aie4_runtime_loaded "")
+foreach(_flm_aie4_name IN ITEMS dyn_bins.dll)
+    if(EXISTS "${FLM_AIE4_CORELIB_DIR}/${_flm_aie4_name}")
+        list(APPEND _flm_aie4_runtime_loaded
+            "${FLM_AIE4_CORELIB_DIR}/${_flm_aie4_name}")
+    endif()
+endforeach()
+
+# The Visual C++ runtime is deliberately not staged. `flm.exe` itself imports
+# MSVCP140/VCRUNTIME140, so the redistributable is already a product-wide
+# prerequisite and the AIE4 feature adds no new one. Copying a build machine's
+# conda or toolchain copy beside ryzenai_corelib.dll would ship a second,
+# possibly older, runtime next to the one the rest of the process already
+# loaded.
+set(_flm_aie4_pre_exclude
+    "^api-ms-win-.*"
+    "^ext-ms-.*"
+    "^[Mm][Ss][Vv][Cc][Pp]1[0-9]+.*\\.dll$"
+    "^[Vv][Cc][Rr][Uu][Nn][Tt][Ii][Mm][Ee]1[0-9]+.*\\.dll$"
+    "^[Cc][Oo][Nn][Cc][Rr][Tt]1[0-9]+.*\\.dll$")
+set(_flm_aie4_post_exclude
+    "^[A-Za-z]:[\\\\/][Ww][Ii][Nn][Dd][Oo][Ww][Ss][\\\\/].*"
+    "^.*[\\\\/][Ss][Yy][Ss][Tt][Ee][Mm]32[\\\\/].*"
+    "^.*[\\\\/][Ss][Yy][Ss][Ww][Oo][Ww]64[\\\\/].*")
+
+file(GET_RUNTIME_DEPENDENCIES
+    LIBRARIES
+        "${_flm_aie4_root}"
+        ${_flm_aie4_runtime_loaded}
+    RESOLVED_DEPENDENCIES_VAR _flm_aie4_resolved
+    UNRESOLVED_DEPENDENCIES_VAR _flm_aie4_unresolved
+    CONFLICTING_DEPENDENCIES_PREFIX _flm_aie4_conflicting
+    DIRECTORIES ${_flm_aie4_search_dirs}
+    PRE_EXCLUDE_REGEXES ${_flm_aie4_pre_exclude}
+    POST_EXCLUDE_REGEXES ${_flm_aie4_post_exclude})
+
+if(_flm_aie4_unresolved)
+    list(JOIN _flm_aie4_unresolved "\n  " _flm_aie4_unresolved_text)
+    message(FATAL_ERROR
+        "The Phi-4 AIE4 runtime closure is incomplete. "
+        "${_flm_aie4_root} imports DLLs that were not found in "
+        "RYZENAI_CORELIB_RUNTIME_DIR, XRT_RUNTIME_DIR, "
+        "FLM_AIE4_DEPENDENCY_DIRS, or the approved system directories:\n"
+        "  ${_flm_aie4_unresolved_text}\n"
+        "Add the directory that provides them to FLM_AIE4_DEPENDENCY_DIRS. "
+        "Do not rely on them being on PATH: a closure that only loads "
+        "because a build machine had a conda or toolchain prefix on PATH "
+        "fails on the target with Win32 error 126.")
+endif()
+
+if(_flm_aie4_conflicting_FILENAMES)
+    list(JOIN _flm_aie4_conflicting_FILENAMES ", " _flm_aie4_conflict_text)
+    message(FATAL_ERROR
+        "The Phi-4 AIE4 runtime closure resolved conflicting copies of: "
+        "${_flm_aie4_conflict_text}. Narrow the search directories so each "
+        "DLL has one unambiguous source.")
+endif()
+
+set(_flm_aie4_files ${_flm_aie4_root} ${_flm_aie4_runtime_loaded})
+list(APPEND _flm_aie4_files ${_flm_aie4_resolved})
+list(REMOVE_DUPLICATES _flm_aie4_files)
+list(SORT _flm_aie4_files)
+
+set(_flm_aie4_destination "${FLM_AIE4_DESTINATION}")
+if(NOT _flm_aie4_destination)
+    message(FATAL_ERROR "FLM_AIE4_DESTINATION was not set")
+endif()
+if(NOT IS_ABSOLUTE "${_flm_aie4_destination}")
+    set(_flm_aie4_destination
+        "${CMAKE_INSTALL_PREFIX}/${_flm_aie4_destination}")
+endif()
+
+file(MAKE_DIRECTORY "${_flm_aie4_destination}")
+foreach(_flm_aie4_file IN LISTS _flm_aie4_files)
+    message(STATUS "Staging AIE4 runtime: ${_flm_aie4_file}")
+    file(COPY "${_flm_aie4_file}"
+         DESTINATION "${_flm_aie4_destination}"
+         FOLLOW_SYMLINK_CHAIN)
+endforeach()
+
+# The report records both the derived closure and the directories it was
+# derived from. The source path of every staged DLL is the audit trail: it is
+# what shows, after the fact, that a shipped dependency came from the intended
+# package rather than from whatever the build machine happened to have.
+if(FLM_AIE4_REPORT)
+    set(_flm_aie4_report_text "root\t${_flm_aie4_root}\n")
+    foreach(_flm_aie4_dir IN LISTS _flm_aie4_search_dirs)
+        string(APPEND _flm_aie4_report_text "search\t${_flm_aie4_dir}\n")
+    endforeach()
+    foreach(_flm_aie4_file IN LISTS _flm_aie4_files)
+        get_filename_component(_flm_aie4_leaf "${_flm_aie4_file}" NAME)
+        string(APPEND _flm_aie4_report_text
+            "staged\t${_flm_aie4_leaf}\t${_flm_aie4_file}\n")
+    endforeach()
+    file(WRITE "${FLM_AIE4_REPORT}" "${_flm_aie4_report_text}")
+endif()

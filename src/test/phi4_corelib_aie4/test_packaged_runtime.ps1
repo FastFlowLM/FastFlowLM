@@ -1,3 +1,13 @@
+# Packaging and clean-environment tests for the optional Phi-4 AIE4 feature.
+#
+# `-CorelibRuntimeDir` (with `-DependencyDir`) enables the checks that matter
+# most, and they are the ones that cannot be faked: the closure is derived from
+# the real ryzenai_corelib.dll, loaded from the staged directory with
+# development paths removed, and then re-loaded with one staged DLL at a time
+# hidden. Without the negative control a green result proves nothing, because
+# an ambient conda or toolchain prefix supplies the missing DLL on precisely
+# the machine that built the binary.
+
 param(
     [string]$FlmExe = "",
     [string]$CorelibRuntimeDir = "",
@@ -9,13 +19,21 @@ param(
 $ErrorActionPreference = "Stop"
 $sourceRoot = (Resolve-Path (Join-Path $PSScriptRoot "../..")).Path
 $modulePath = Join-Path $sourceRoot "cmake/ConfigureAie4Runtime.cmake"
+$stageScript = Join-Path $sourceRoot "cmake/StageAie4Runtime.cmake"
 $temporary = Join-Path ([System.IO.Path]::GetTempPath()) (
     "flm-aie4-package-{0}-{1}" -f $PID, [DateTime]::UtcNow.Ticks)
 
-function Write-Bytes {
-    param([string]$Path, [int]$Count)
-    [System.IO.File]::WriteAllBytes($Path, [byte[]]::new($Count))
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public static class FlmAie4Loader {
+    [DllImport("kernel32", CharSet = CharSet.Unicode, SetLastError = true)]
+    public static extern IntPtr LoadLibraryEx(
+        string path, IntPtr file, uint flags);
+    [DllImport("kernel32", SetLastError = true)]
+    public static extern bool FreeLibrary(IntPtr module);
 }
+"@
 
 function Invoke-Configure {
     param(
@@ -48,11 +66,67 @@ function Invoke-Configure {
         Out-String)
     $exitCode = $LASTEXITCODE
     $ErrorActionPreference = $previousPreference
-    $succeeded = $exitCode -eq 0
-    if ($succeeded -ne $ExpectSuccess) {
-        throw "Unexpected CMake result.`n$output"
+    if (($exitCode -eq 0) -ne $ExpectSuccess) {
+        throw "Unexpected CMake configure result.`n$output"
     }
     return $output
+}
+
+function Invoke-Install {
+    param(
+        [string]$Build,
+        [string]$Prefix,
+        [bool]$ExpectSuccess = $true
+    )
+    $previousPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    $output = (& cmake --install $Build --prefix $Prefix 2>&1 |
+        ForEach-Object { $_.ToString() } |
+        Out-String)
+    $exitCode = $LASTEXITCODE
+    $ErrorActionPreference = $previousPreference
+    if (($exitCode -eq 0) -ne $ExpectSuccess) {
+        throw "Unexpected CMake install result.`n$output"
+    }
+    return $output
+}
+
+# Loads the corelib DLL by absolute path from $Dir with development paths
+# removed. LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS
+# resolves dependencies from the staged directory and the approved system
+# directories only; PATH is not consulted at all, which is the product's own
+# search behaviour and the point of design CLOSURE-2.
+function Invoke-CleanEnvironmentLoad {
+    param([string]$Dir)
+    $savedPath = $env:PATH
+    $savedCorelib = $env:RYZENAI_CORELIB_PATH
+    $savedXrt = $env:XILINX_XRT
+    try {
+        $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
+        Remove-Item Env:RYZENAI_CORELIB_PATH -ErrorAction SilentlyContinue
+        Remove-Item Env:XILINX_XRT -ErrorAction SilentlyContinue
+        $module = [FlmAie4Loader]::LoadLibraryEx(
+            (Join-Path $Dir "ryzenai_corelib.dll"),
+            [IntPtr]::Zero,
+            0x00000100 -bor 0x00001000)
+        if ($module -eq [IntPtr]::Zero) {
+            return [Runtime.InteropServices.Marshal]::GetLastWin32Error()
+        }
+        [FlmAie4Loader]::FreeLibrary($module) | Out-Null
+        return 0
+    } finally {
+        $env:PATH = $savedPath
+        if ($null -eq $savedCorelib) {
+            Remove-Item Env:RYZENAI_CORELIB_PATH -ErrorAction SilentlyContinue
+        } else {
+            $env:RYZENAI_CORELIB_PATH = $savedCorelib
+        }
+        if ($null -eq $savedXrt) {
+            Remove-Item Env:XILINX_XRT -ErrorAction SilentlyContinue
+        } else {
+            $env:XILINX_XRT = $savedXrt
+        }
+    }
 }
 
 try {
@@ -60,10 +134,10 @@ try {
     foreach ($required in @(
         'AppVersion=1.0.4',
         'Name: "aie4runtime"',
-        'Source: "aie4\*"',
         'corelib_phi4_manifest.json',
         'tokenizer_config.json',
-        'config.json'
+        'config.json',
+        'provenance.json'
     )) {
         if ($inno -notmatch [regex]::Escape($required)) {
             throw "Inno manifest is missing: $required"
@@ -73,14 +147,25 @@ try {
     foreach ($required in @(
         'Version="1.0.4"',
         'Feature Id="Aie4Feature"',
-        'ComponentGroup Id="Aie4RuntimeComponents"',
         'ComponentGroup Id="Aie4OverlayComponents"',
         'corelib_phi4_manifest.json',
         'tokenizer_config.json',
-        'config.json'
+        'config.json',
+        'provenance.json'
     )) {
         if ($wix -notmatch [regex]::Escape($required)) {
             throw "WiX manifest is missing: $required"
+        }
+    }
+    [xml]$parsedWix = $wix
+
+    # The main installer must still build with no AIE4 closure present.
+    # Hard-failing here would make the AIE4 feature a precondition of shipping
+    # the ordinary NPU2 product, which is the opposite of optional.
+    foreach ($script in @("wix/get_files.bat", "inno/get_files.bat")) {
+        $text = Get-Content (Join-Path $sourceRoot $script) -Raw
+        if ($text -match "exit /b 1") {
+            throw "$script still fails the non-AIE4 package build"
         }
     }
 
@@ -92,157 +177,144 @@ cmake_minimum_required(VERSION 3.24)
 project(flm_aie4_packaging NONE)
 option(FLM_ENABLE_CORELIB_AIE4 "" OFF)
 include("$($modulePath.Replace('\', '/'))")
-flm_collect_aie4_runtime_files(_flm_aie4_files)
-install(FILES `${_flm_aie4_files} DESTINATION bin/aie4)
+flm_aie4_warn_if_unstageable()
+flm_aie4_install_runtime(DESTINATION bin/aie4 COMPONENT AIE4)
 "@ | Set-Content -Path (Join-Path $fixture "CMakeLists.txt") -Encoding utf8
 
+    # Feature OFF: no corelib runtime is required and nothing is staged.
     $offBuild = Join-Path $temporary "off"
     Invoke-Configure -Build $offBuild -Enabled $false | Out-Null
-    & cmake --install $offBuild --prefix (Join-Path $temporary "off-stage")
-    if ($LASTEXITCODE -ne 0) {
-        throw "Feature-OFF install failed"
-    }
+    Invoke-Install -Build $offBuild -Prefix (Join-Path $temporary "off-stage") |
+        Out-Null
     if (Test-Path (Join-Path $temporary "off-stage/bin/aie4")) {
         throw "Feature OFF unexpectedly staged an AIE4 directory"
     }
 
-    $missingOutput = Invoke-Configure `
-        -Build (Join-Path $temporary "missing") `
-        -Enabled $true `
+    # Feature ON without a runtime directory: configuring must SUCCEED, because
+    # flm.exe resolves the corelib DLL at run time by absolute path and never
+    # links its import library. Only the install step needs the runtime.
+    $devBuild = Join-Path $temporary "dev"
+    $devOutput = Invoke-Configure -Build $devBuild -Enabled $true
+    if ($devOutput -notmatch "RYZENAI_CORELIB_RUNTIME_DIR") {
+        throw "Feature-ON configure did not warn about the missing runtime"
+    }
+    $devInstall = Invoke-Install `
+        -Build $devBuild `
+        -Prefix (Join-Path $temporary "dev-stage") `
         -ExpectSuccess $false
-    if ($missingOutput -notmatch "RYZENAI_CORELIB_RUNTIME_DIR") {
-        throw "Missing runtime path failure was not actionable"
+    if ($devInstall -notmatch "RYZENAI_CORELIB_RUNTIME_DIR") {
+        throw "Install-time failure was not actionable.`n$devInstall"
     }
 
-    $corelib = Join-Path $temporary "corelib"
-    $xrt = Join-Path $temporary "xrt"
-    New-Item -ItemType Directory -Path $corelib, $xrt | Out-Null
-    foreach ($name in @(
-        "ryzenai_corelib.dll",
-        "ryzen_mm.dll",
-        "dyn_bins.dll",
-        "spdlog.dll",
-        "libprotobuf.dll",
-        "fmt.dll",
-        "zlib.dll",
-        "zlib1.dll",
-        "libutf8_validity.dll",
-        "abseil_dll.dll"
-    )) {
-        Write-Bytes -Path (Join-Path $corelib $name) -Count 17
-    }
-    foreach ($name in @(
-        "xrt_coreutil.dll",
-        "xrt_core.dll",
-        "xrt_umddml.dll",
-        "xdp_native_plugin.dll"
-    )) {
-        Write-Bytes -Path (Join-Path $xrt $name) -Count 19
-    }
-
-    $onBuild = Join-Path $temporary "on"
+    # A configured but wrong runtime directory must fail at install, loudly.
+    $badBuild = Join-Path $temporary "bad"
     Invoke-Configure `
-        -Build $onBuild `
+        -Build $badBuild `
         -Enabled $true `
-        -Corelib $corelib `
-        -Xrt $xrt | Out-Null
-    $stage = Join-Path $temporary "on-stage"
-    & cmake --install $onBuild --prefix $stage
-    if ($LASTEXITCODE -ne 0) {
-        throw "Feature-ON install failed"
-    }
-    $actual = @(
-        Get-ChildItem (Join-Path $stage "bin/aie4") -File |
-            ForEach-Object Name |
-            Sort-Object
-    )
-    $expected = @(
-        "dyn_bins.dll",
-        "abseil_dll.dll",
-        "fmt.dll",
-        "libprotobuf.dll",
-        "libutf8_validity.dll",
-        "ryzen_mm.dll",
-        "ryzenai_corelib.dll",
-        "spdlog.dll",
-        "xdp_native_plugin.dll",
-        "xrt_core.dll",
-        "xrt_coreutil.dll",
-        "xrt_umddml.dll",
-        "zlib.dll",
-        "zlib1.dll"
-    ) | Sort-Object
-    if (Compare-Object $expected $actual) {
-        throw "Installed AIE4 closure did not match the collected files"
+        -Corelib (Join-Path $temporary "does-not-exist") | Out-Null
+    $badInstall = Invoke-Install `
+        -Build $badBuild `
+        -Prefix (Join-Path $temporary "bad-stage") `
+        -ExpectSuccess $false
+    if ($badInstall -notmatch "RYZENAI_CORELIB_RUNTIME_DIR") {
+        throw "Missing runtime directory was not reported.`n$badInstall"
     }
 
-    if ($CorelibRuntimeDir -or $XrtRuntimeDir -or $DependencyDir) {
-        if (
-            -not $CorelibRuntimeDir -or
-            -not $XrtRuntimeDir -or
-            -not $DependencyDir
-        ) {
-            throw "Real closure check requires all three runtime directories"
-        }
+    # A directory that exists but holds no ryzenai_corelib.dll is the mistake a
+    # packager is most likely to make, so it gets its own named failure rather
+    # than an unresolved-import message later.
+    $emptyCorelib = Join-Path $temporary "empty-corelib"
+    New-Item -ItemType Directory -Path $emptyCorelib | Out-Null
+    $emptyBuild = Join-Path $temporary "empty"
+    Invoke-Configure `
+        -Build $emptyBuild `
+        -Enabled $true `
+        -Corelib $emptyCorelib | Out-Null
+    $emptyInstall = Invoke-Install `
+        -Build $emptyBuild `
+        -Prefix (Join-Path $temporary "empty-stage") `
+        -ExpectSuccess $false
+    if ($emptyInstall -notmatch "no ryzenai_corelib\.dll") {
+        throw "Empty runtime directory was not reported.`n$emptyInstall"
+    }
+
+    if ($CorelibRuntimeDir) {
+        $resolvedCorelib = (Resolve-Path $CorelibRuntimeDir).Path
         $realBuild = Join-Path $temporary "real"
         Invoke-Configure `
             -Build $realBuild `
             -Enabled $true `
-            -Corelib (Resolve-Path $CorelibRuntimeDir).Path `
-            -Xrt (Resolve-Path $XrtRuntimeDir).Path `
-            -Dependency (Resolve-Path $DependencyDir).Path | Out-Null
+            -Corelib $resolvedCorelib `
+            -Xrt $(if ($XrtRuntimeDir) {
+                (Resolve-Path $XrtRuntimeDir).Path } else { "" }) `
+            -Dependency $(if ($DependencyDir) {
+                (Resolve-Path $DependencyDir).Path } else { "" }) | Out-Null
         $realStage = Join-Path $temporary "real-stage"
-        & cmake --install $realBuild --prefix $realStage
-        if ($LASTEXITCODE -ne 0) {
-            throw "Real AIE4 closure staging failed"
+        Invoke-Install -Build $realBuild -Prefix $realStage | Out-Null
+        $stagedDir = Join-Path $realStage "bin/aie4"
+
+        # CLOSURE-1: the staged set is whatever the walker derived from this
+        # exact binary, so the test asserts properties of the derivation rather
+        # than a transcribed list that would silently disagree with the other
+        # DynamicDispatch linkage.
+        $report = Join-Path $stagedDir "aie4-closure.txt"
+        if (-not (Test-Path $report)) {
+            throw "The install did not record a derived closure report"
+        }
+        $derived = @(
+            Get-Content $report |
+                Where-Object { $_ -like "staged`t*" } |
+                ForEach-Object { ($_ -split "`t")[1] }
+        )
+        if ($derived -notcontains "ryzenai_corelib.dll") {
+            throw "The derived closure does not contain ryzenai_corelib.dll"
+        }
+        $staged = @(
+            Get-ChildItem $stagedDir -File |
+                Where-Object { $_.Extension -eq ".dll" } |
+                ForEach-Object Name
+        )
+        if (Compare-Object ($derived | Sort-Object) ($staged | Sort-Object)) {
+            throw "Staged AIE4 files do not match the derived closure"
+        }
+        if ($derived -contains "msvcp140.dll") {
+            throw "The closure staged a build-machine Visual C++ runtime"
         }
 
-        Add-Type @"
-using System;
-using System.Runtime.InteropServices;
-public static class FlmAie4Loader {
-    [DllImport("kernel32", CharSet = CharSet.Unicode, SetLastError = true)]
-    public static extern IntPtr LoadLibraryEx(
-        string path, IntPtr file, uint flags);
-    [DllImport("kernel32", SetLastError = true)]
-    public static extern bool FreeLibrary(IntPtr module);
-}
-"@
-        $savedPathForLoad = $env:PATH
-        $savedCorelibForLoad = $env:RYZENAI_CORELIB_PATH
-        $savedXrtForLoad = $env:XILINX_XRT
-        try {
-            $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
-            Remove-Item Env:RYZENAI_CORELIB_PATH `
-                -ErrorAction SilentlyContinue
-            Remove-Item Env:XILINX_XRT -ErrorAction SilentlyContinue
-            $library = Join-Path `
-                $realStage `
-                "bin/aie4/ryzenai_corelib.dll"
-            $module = [FlmAie4Loader]::LoadLibraryEx(
-                $library,
-                [IntPtr]::Zero,
-                0x00000100 -bor 0x00001000)
-            if ($module -eq [IntPtr]::Zero) {
-                $errorCode = [Runtime.InteropServices.Marshal]::
-                    GetLastWin32Error()
-                throw "Clean-environment corelib load failed: $errorCode"
+        # CLOSURE-2, positive control.
+        $code = Invoke-CleanEnvironmentLoad -Dir $stagedDir
+        if ($code -ne 0) {
+            throw "Clean-environment corelib load failed: Win32 error $code"
+        }
+
+        # CLOSURE-2, negative control. Every derived import must be
+        # load-bearing from the staged directory. If hiding one still loads,
+        # the environment supplied it and the positive control certified
+        # nothing. `dyn_bins.dll` is exempt: it is opened by name at run time
+        # rather than imported, so it is discovered by presence, not by the
+        # walker, and its absence does not break LoadLibrary.
+        $exempt = @("dyn_bins.dll")
+        $proved = 0
+        foreach ($name in $derived) {
+            if ($exempt -contains $name) { continue }
+            $path = Join-Path $stagedDir $name
+            $hidden = "$path.hidden"
+            Rename-Item -Path $path -NewName "$name.hidden"
+            try {
+                $missingCode = Invoke-CleanEnvironmentLoad -Dir $stagedDir
+            } finally {
+                Rename-Item -Path $hidden -NewName $name
             }
-            [FlmAie4Loader]::FreeLibrary($module) | Out-Null
-        } finally {
-            $env:PATH = $savedPathForLoad
-            if ($null -eq $savedCorelibForLoad) {
-                Remove-Item Env:RYZENAI_CORELIB_PATH `
-                    -ErrorAction SilentlyContinue
-            } else {
-                $env:RYZENAI_CORELIB_PATH = $savedCorelibForLoad
+            if ($missingCode -eq 0) {
+                throw (
+                    "Removing $name from the staged closure still loaded. " +
+                    "The load resolved it from outside the staged directory, " +
+                    "so this closure is not proven.")
             }
-            if ($null -eq $savedXrtForLoad) {
-                Remove-Item Env:XILINX_XRT `
-                    -ErrorAction SilentlyContinue
-            } else {
-                $env:XILINX_XRT = $savedXrtForLoad
-            }
+            $proved += 1
+        }
+        if ($proved -lt 1) {
+            throw "No staged dependency was proven load-bearing"
         }
     }
 
@@ -309,6 +381,6 @@ public static class FlmAie4Loader {
     Write-Output "packaged runtime tests passed"
 } finally {
     if (Test-Path $temporary) {
-        Remove-Item $temporary -Recurse -Force
+        Remove-Item $temporary -Recurse -Force -ErrorAction SilentlyContinue
     }
 }

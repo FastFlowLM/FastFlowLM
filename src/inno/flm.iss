@@ -98,8 +98,11 @@ Source: "logo.ico"; DestDir: "{app}"; Flags: ignoreversion
 Source: "model_list.json"; DestDir: "{app}"; Flags: ignoreversion
 Source: "model_info.json"; DestDir: "{app}"; Flags: ignoreversion
 
-; Optional Phi-4 AIE4 runtime and FastFlow-owned model overlays
-Source: "aie4\*"; DestDir: "{app}\aie4"; Flags: ignoreversion recursesubdirs createallsubdirs; Tasks: aie4runtime
+; Optional Phi-4 AIE4 runtime and FastFlow-owned model overlays.
+; skipifsourcedoesntexist keeps the ordinary NPU2 installer buildable on a
+; machine that never staged an AIE4 closure: the feature is optional, so its
+; absence is a skipped entry rather than a build failure.
+Source: "aie4\*"; DestDir: "{app}\aie4"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist; Tasks: aie4runtime
 Source: "..\model_overlays\phi4-mini-it-aie4\config.json"; DestDir: "{app}\share\flm\model_overlays\phi4-mini-it-aie4"; Flags: ignoreversion; Tasks: aie4runtime
 Source: "..\model_overlays\phi4-mini-it-aie4\corelib_phi4_manifest.json"; DestDir: "{app}\share\flm\model_overlays\phi4-mini-it-aie4"; Flags: ignoreversion; Tasks: aie4runtime
 Source: "..\model_overlays\phi4-mini-it-aie4\tokenizer_config.json"; DestDir: "{app}\share\flm\model_overlays\phi4-mini-it-aie4"; Flags: ignoreversion; Tasks: aie4runtime

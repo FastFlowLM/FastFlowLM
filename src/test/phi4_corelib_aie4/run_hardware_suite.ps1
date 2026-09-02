@@ -35,6 +35,15 @@ param(
     # repository is never modified.
     [string]$CorelibSource = $env:RYZENAI_CORELIB_SOURCE,
 
+    # Build inputs. These have no usable defaults on the AIE4 target: the
+    # suite CMakeLists falls back to C:/dev paths that exist on the original
+    # development box and nowhere else, and its find_path calls are REQUIRED,
+    # so a wrong guess fails configure loudly rather than building something
+    # subtly different.
+    [string]$XrtDir,
+    [string]$CorelibIncludeDir,
+    [string]$BoostIncludeDir,
+
     [string]$BuildDir,
     [string]$Cmake,
     [string]$Python = "python",
@@ -132,6 +141,17 @@ $configureArgs = @(
 )
 if ($DependencyDir) {
     $configureArgs += "-DRYZENAI_CORELIB_EXTRA_DLL_DIRS=$DependencyDir"
+}
+if ($XrtDir) {
+    $XrtDir = (Resolve-Path $XrtDir).Path
+    $configureArgs += "-DXRT_INCLUDE_DIR=$XrtDir/include"
+    $configureArgs += "-DXRT_LIB_DIR=$XrtDir/lib"
+}
+if ($CorelibIncludeDir) {
+    $configureArgs += "-DRYZENAI_CORELIB_INCLUDE_DIR=$((Resolve-Path $CorelibIncludeDir).Path)"
+}
+if ($BoostIncludeDir) {
+    $configureArgs += "-DBOOST_INCLUDE_DIR=$((Resolve-Path $BoostIncludeDir).Path)"
 }
 Invoke-Checked 'configure' $Cmake $configureArgs
 Invoke-Checked 'build' $Cmake @('--build', $BuildDir, '--config', 'Release')

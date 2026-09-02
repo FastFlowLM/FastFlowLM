@@ -64,9 +64,38 @@ if(FLM_ENABLE_CORELIB_AIE4)
     include("${CMAKE_SOURCE_DIR}/common/corelib/corelib_sources.cmake")
     add_library(flm_corelib_aie4 STATIC
         ${FLM_CORELIB_AIE4_SOURCES})
+    # Boost headers, for XRT's sake rather than ours.
+    #
+    # `xrt/detail/any.h` picks `boost::any` over `std::any` unless the compiler
+    # reports `__cplusplus >= 201703L`, which MSVC does not do without
+    # `/Zc:__cplusplus`. Every source in this target reaches XRT's headers
+    # transitively, so without a Boost include directory the target fails to
+    # compile with C1083 on `boost/any.hpp`.
+    #
+    # This went undetected through Tasks 1-12 because the AIE4 code had only
+    # ever been compiled by the standalone test project at
+    # test/phi4_corelib_aie4/CMakeLists.txt, which does exactly this discovery.
+    # The product build had no equivalent, and nobody had built the product.
+    #
+    # `flm` itself gets Boost from vcpkg's `find_package` or from a hard-coded
+    # `C:/dev/boost_1_88_0`; neither reaches this target, and the second does
+    # not exist on either machine here. Searching is what makes the same source
+    # tree build on a developer box, the AIE4 target and the CI runner.
+    find_path(FLM_BOOST_INCLUDE_DIR
+              NAMES boost/any.hpp
+              HINTS
+                  "$ENV{BOOST_INCLUDEDIR}"
+                  "$ENV{BOOST_ROOT}"
+                  "$ENV{CONDA_PREFIX}/Library/include"
+                  "$ENV{USERPROFILE}/anaconda3/Library/include"
+                  "C:/dev/boost_1_88_0"
+              DOC "Directory containing boost/any.hpp, needed by XRT's headers"
+              REQUIRED)
+
     target_include_directories(flm_corelib_aie4 PUBLIC
         ${CMAKE_SOURCE_DIR}/include
-        ${RYZENAI_CORELIB_INCLUDE_DIR})
+        ${RYZENAI_CORELIB_INCLUDE_DIR}
+        ${FLM_BOOST_INCLUDE_DIR})
     target_compile_definitions(flm_corelib_aie4 PUBLIC
         FLM_ENABLE_CORELIB_AIE4=1
         WIN32_LEAN_AND_MEAN
@@ -98,6 +127,25 @@ else()
     if(WIN32)
         set(XRT_INCLUDE_DIR C:/dev/XRT/src/runtime_src/core/include CACHE PATH "Where XRT headers live")
         set(XRT_LIB_DIR     C:/dev/xrtNPUfromDLL                    CACHE PATH "Where XRT libs live")
+
+        # Fail at CONFIGURE, not at compile.
+        #
+        # These defaults describe one historical machine and exist on neither
+        # box in use here. CMake happily accepts a nonexistent include
+        # directory and the build then dies hundreds of lines into compilation
+        # with C1083 on an XRT header, which reads as a missing dependency
+        # rather than as a mis-set cache variable. Checking here names the
+        # variable and the value it was given.
+        foreach(_flm_xrt_dir IN ITEMS XRT_INCLUDE_DIR XRT_LIB_DIR)
+            if(NOT IS_DIRECTORY "${${_flm_xrt_dir}}")
+                message(FATAL_ERROR
+                    "${_flm_xrt_dir} does not name a directory: "
+                    "'${${_flm_xrt_dir}}'. Pass -D${_flm_xrt_dir}=<path> "
+                    "pointing at your XRT package; the built-in default is a "
+                    "development-box path and is not present here.")
+            endif()
+        endforeach()
+
         if(FLM_ENABLE_CORELIB_AIE4)
             target_include_directories(flm_corelib_aie4 PUBLIC
                 ${XRT_INCLUDE_DIR})

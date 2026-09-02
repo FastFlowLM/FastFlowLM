@@ -690,10 +690,16 @@ elseif(WIN32)
     # common/audio_process_utils uses fftwf_*, and neither fftw_* (double) nor
     # fftwl_* (long double) appears anywhere in this tree. The vendored
     # include/fftw3.h declares all three, which is why all three were being
-    # linked. They are optional here because Windows conda-forge does not build
-    # the long-double variant at all -- MSVC's long double is a double -- and
-    # failing the build over a library nothing calls would be a self-inflicted
-    # portability limit.
+    # linked.
+    #
+    # Double and long double are marked optional because nothing calls them,
+    # NOT because they are unavailable. All three import libraries are
+    # committed in src/lib and all three resolve there. An earlier version of
+    # this comment said Windows conda-forge does not build the long-double
+    # variant; that is true and was never the reason the build failed. The
+    # reason was that the name list was truncated -- see the SUBLIST note below
+    # -- so `libfftw3l-3` was never searched for under any commit, and the
+    # in-tree copy went unseen.
     # Self-check on the split, against a synthetic entry with two alternative
     # spellings. The real entries are easy to get wrong in a way that still
     # configures -- dropping a fallback name only shows up on a machine that
@@ -741,9 +747,8 @@ elseif(WIN32)
         # This repository vendors libfftw3-3.lib, libfftw3f-3.lib and
         # libfftw3l-3.lib in src/lib, and src/lib is already on flm's link
         # path. Searching only external prefixes therefore did two wrong
-        # things: it failed outright without one (fftw3l is absent from Windows
-        # conda-forge, which is why that FATAL_ERROR fired), and where one WAS
-        # supplied it silently paired conda's import library with the vendored
+        # things: it failed outright without one, and where one WAS supplied it
+        # silently paired conda's import library with the vendored
         # src/include/fftw3.h, because src/include is unconditionally first on
         # the include path and always wins. A configure line reporting a conda
         # .lib while the compiler reads the vendored header describes a build
@@ -772,6 +777,27 @@ elseif(WIN32)
             message(STATUS
                 "  ${_flm_dep_key}: not found (optional, no call sites)")
             continue()
+        endif()
+        # A build directory configured before the in-tree preference existed
+        # keeps its cached external path, so the vendored header would compile
+        # against an external import library -- the exact mismatch this is here
+        # to prevent, silently, on precisely the machines that already had a
+        # working build. find_library will not re-search a set cache entry, so
+        # say so rather than let it pass.
+        if(EXISTS "${CMAKE_SOURCE_DIR}/lib/${_flm_dep_key}.lib" OR
+           EXISTS "${CMAKE_SOURCE_DIR}/lib/lib${_flm_dep_key}-3.lib")
+            string(FIND "${FLM_LIB_${_flm_dep_key}}"
+                   "${CMAKE_SOURCE_DIR}/lib" _flm_dep_in_tree)
+            if(_flm_dep_in_tree EQUAL -1)
+                message(WARNING
+                    "${_flm_dep_key} resolved to "
+                    "'${FLM_LIB_${_flm_dep_key}}' although this tree ships its "
+                    "own copy in ${CMAKE_SOURCE_DIR}/lib. That is a stale "
+                    "cache entry from a configure predating the in-tree "
+                    "preference, and it pairs an external import library with "
+                    "the vendored header. Remove FLM_LIB_${_flm_dep_key} from "
+                    "CMakeCache.txt, or configure a fresh build directory.")
+            endif()
         endif()
         message(STATUS "  ${_flm_dep_key}: ${FLM_LIB_${_flm_dep_key}}")
         list(APPEND _flm_win_libs "${FLM_LIB_${_flm_dep_key}}")

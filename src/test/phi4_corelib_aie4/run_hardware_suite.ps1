@@ -58,6 +58,7 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
+$failures = @()
 $suiteDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 # Nested rather than a three-argument Join-Path: Windows PowerShell 5.1 is the
 # shell on the AIE4 target and its Join-Path takes only -Path and -ChildPath,
@@ -182,13 +183,23 @@ $env:FLM_AIE4_HARDWARE = '1'
 $ctest = Join-Path (Split-Path -Parent $Cmake) 'ctest.exe'
 if (-not (Test-Path $ctest)) { $ctest = 'ctest' }
 # Serial on purpose: several of these hold an AIE4 device context.
-Invoke-Checked 'ctest' $ctest @(
-    '--test-dir', $BuildDir,
-    '-C', 'Release',
-    '--output-on-failure',
-    '--no-tests=error'
-)
-$ran += 'ctest suite (includes test_phi4_hardware and test_fatal_child)'
+#
+# A ctest failure is recorded and the run continues to the numeric goldens.
+# Those are the most expensive and least reproducible part of the acceptance,
+# and aborting before them because an unrelated host test regressed would cost
+# a whole hardware session for no reason.
+try {
+    Invoke-Checked 'ctest' $ctest @(
+        '--test-dir', $BuildDir,
+        '-C', 'Release',
+        '--output-on-failure',
+        '--no-tests=error'
+    )
+    $ran += 'ctest suite (includes test_phi4_hardware and test_fatal_child)'
+} catch {
+    Write-Output "CTEST FAILED: $($_.Exception.Message)"
+    $failures += 'ctest suite'
+}
 
 # ---------------------------------------------------------------------------
 # Numeric goldens, one per forced continuation route
@@ -264,7 +275,12 @@ if (-not $ModelDir) {
     # closure rather than whatever happens to be on PATH.
     $env:RYZENAI_CORELIB_PATH = $corelibDll
 
+    # Both routes always run. Design 12.4 wants one golden per route, and
+    # stopping at the first failing one would leave the other route with no
+    # result at all -- which reads as "not tested" and is indistinguishable
+    # from "tested and fine" once the log scrolls past.
     foreach ($route in @('force_reprefill', 'force_append')) {
+      try {
         Write-Section "Numeric golden: $route"
         $referenceJson = Join-Path $artifacts "reference-$route.json"
         $fastflowJson = Join-Path $artifacts "fastflow-$route.json"
@@ -294,13 +310,53 @@ if (-not $ModelDir) {
         }
         Invoke-Checked "fastflow ($route)" $e2eExe $e2eArgs
 
-        # 3. Comparison holds no device context at all.
-        Invoke-Checked "compare ($route)" $Python @(
-            $comparator, 'compare',
-            '--fastflow-json', $fastflowJson,
-            '--reference-json', $referenceJson
+        # 3. The same binary, again, on the same input. Run before the
+        #    comparison because it is the sharper question: a difference from
+        #    the reference is about tolerances and about which implementation
+        #    is right, whereas a difference between two runs of the same
+        #    implementation on the same input means something is reading state
+        #    the inputs do not determine. No tolerance makes that acceptable,
+        #    so this comparison is bit-exact.
+        $repeatJson = Join-Path $artifacts "fastflow-$route-repeat.json"
+        $repeatArgs = @(
+            '--model-dir', $ModelDir,
+            '--token-ids-json', $tokenPlan,
+            '--decode-steps', "$DecodeSteps",
+            '--continuation-route', $route,
+            '--output-json', $repeatJson
         )
-        $ran += "numeric golden $route"
+        Invoke-Checked "fastflow repeat ($route)" $e2eExe $repeatArgs
+
+        # The two comparisons answer different questions, so one failing must
+        # not hide the other's result.
+        try {
+            Invoke-Checked "self-consistency ($route)" $Python @(
+                $comparator, 'self-consistency',
+                '--a', $fastflowJson,
+                '--b', $repeatJson
+            )
+            $ran += "self-consistency $route"
+        } catch {
+            Write-Output "SELF-CONSISTENCY FAILED ($route)"
+            $failures += "self-consistency $route"
+        }
+
+        # 4. Comparison holds no device context at all.
+        try {
+            Invoke-Checked "compare ($route)" $Python @(
+                $comparator, 'compare',
+                '--fastflow-json', $fastflowJson,
+                '--reference-json', $referenceJson
+            )
+            $ran += "numeric golden $route"
+        } catch {
+            Write-Output "REFERENCE COMPARISON FAILED ($route)"
+            $failures += "numeric golden $route"
+        }
+      } catch {
+        Write-Output "NUMERIC GOLDEN FAILED ($route): $($_.Exception.Message)"
+        $failures += "numeric golden $route"
+      }
     }
     if ($BoundarySweep) {
         $ran += 'boundary sweep (real prefills at every helper transition)'
@@ -331,6 +387,11 @@ $skipped += 'Step 7 CLI and server endpoints (BLOCKED: no Rust toolchain, flm.ex
 Write-Section 'Summary'
 foreach ($item in $ran) { Write-Output "ran    : $item" }
 foreach ($item in $skipped) { Write-Output "skipped: $item" }
+foreach ($item in $failures) { Write-Output "FAILED : $item" }
+if ($failures.Count -gt 0) {
+    Write-Output "run_hardware_suite: FAIL ($($failures.Count) block(s))"
+    exit 1
+}
 if ($ran.Count -eq 0) {
     Write-Output 'run_hardware_suite: SKIPPED -- nothing ran.'
     exit 77

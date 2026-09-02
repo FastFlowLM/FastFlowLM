@@ -399,6 +399,71 @@ def compare(args) -> int:
     return failures.report(f"compare[{mine['continuation_route']}]")
 
 
+def self_consistency(args) -> int:
+    """Two runs of the same binary on the same input must agree bit for bit.
+
+    This is a stronger and much cheaper signal than the comparison against the
+    reference, and it is not the same question. A systematic numeric difference
+    from the reference is a question about tolerances and about which
+    implementation is right. A difference between two runs of the SAME
+    implementation on the SAME input is neither: it means something is reading
+    state that the inputs do not determine, and no tolerance makes that
+    acceptable. Measured on the AIE4 target, FastFlow fails this while the
+    corelib reference driver passes it.
+
+    Bit-exact, deliberately. There is no tolerance under which "the same
+    program, twice, on the same data" is allowed to disagree.
+    """
+    left = json.loads(Path(args.a).read_text(encoding="utf-8"))
+    right = json.loads(Path(args.b).read_text(encoding="utf-8"))
+    failures = Failures()
+
+    def logit_steps(document):
+        steps = [("continuation", document["continuation"]["logits_bf16"])]
+        for index, step in enumerate(document["decode"]):
+            steps.append((f"decode[{index}]", step["logits_bf16"]))
+        return steps
+
+    a_steps = logit_steps(left)
+    b_steps = logit_steps(right)
+    failures.check(
+        len(a_steps) == len(b_steps),
+        f"step counts differ: {len(a_steps)} vs {len(b_steps)}",
+    )
+
+    first_divergence = None
+    for (label, a_bits), (_, b_bits) in zip(a_steps, b_steps):
+        if a_bits != b_bits:
+            differing = sum(1 for x, y in zip(a_bits, b_bits) if x != y)
+            mine = _widen_bf16(a_bits)
+            theirs = _widen_bf16(b_bits)
+            failures.check(
+                False,
+                f"{label}: two runs of the same binary on the same input "
+                f"disagree on {differing}/{len(a_bits)} logits, "
+                f"max |diff| {float(np.max(np.abs(mine - theirs))):.6g}",
+            )
+            if first_divergence is None:
+                first_divergence = label
+
+    a_tokens = [left["continuation"]["top1_id"]] + [
+        step["top1_id"] for step in left["decode"]
+    ]
+    b_tokens = [right["continuation"]["top1_id"]] + [
+        step["top1_id"] for step in right["decode"]
+    ]
+    failures.check(
+        a_tokens == b_tokens,
+        f"emitted token sequences differ:\n      {a_tokens}\n      {b_tokens}",
+    )
+    if first_divergence is not None:
+        print(f"first divergence at {first_divergence}")
+
+    return failures.report(
+        f"self-consistency[{left['continuation_route']}]"
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="mode", required=True)
@@ -415,6 +480,11 @@ def main() -> int:
     check.add_argument("--fastflow-json", required=True)
     check.add_argument("--reference-json", required=True)
     check.set_defaults(handler=compare)
+
+    repeat = subparsers.add_parser("self-consistency")
+    repeat.add_argument("--a", required=True)
+    repeat.add_argument("--b", required=True)
+    repeat.set_defaults(handler=self_consistency)
 
     args = parser.parse_args()
     return args.handler(args)

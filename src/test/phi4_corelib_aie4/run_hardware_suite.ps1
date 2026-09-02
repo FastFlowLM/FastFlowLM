@@ -59,7 +59,11 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $suiteDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$sourceDir = Resolve-Path (Join-Path $suiteDir '..' '..')
+# Nested rather than a three-argument Join-Path: Windows PowerShell 5.1 is the
+# shell on the AIE4 target and its Join-Path takes only -Path and -ChildPath,
+# so the multi-segment form binds the extra segments positionally and fails
+# with a parameter-binding error before the script has done anything.
+$sourceDir = (Resolve-Path (Join-Path (Join-Path $suiteDir '..') '..')).Path
 $ran = @()
 $skipped = @()
 

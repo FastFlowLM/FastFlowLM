@@ -1,4 +1,54 @@
 {
+    "granite:3b": [
+        {
+            "type": "file",
+            "oid": "2ace5b8c3964855369daf18f16907dfdba648708",
+            "size": 1566,
+            "path": ".gitattributes"
+        },
+        {
+            "type": "file",
+            "oid": "cd7c1a742f6729a928449bf587514cdfa21873b8",
+            "size": 3380,
+            "path": "README.md"
+        },
+        {
+            "type": "file",
+            "oid": "f56b1268cb3addc51811411951ff1dc7fd1beacf",
+            "size": 9197,
+            "path": "chat_template.jinja"
+        },
+        {
+            "type": "file",
+            "oid": "5ed1abc98df2487bfaa76956eb3a4312de3ee24f",
+            "size": 1043,
+            "path": "config.json"
+        },
+        {
+            "type": "file",
+            "oid": "459034424fdeb26089a5cf634b35ab4ccf3943e9",
+            "size": 2640901312,
+            "lfs": {
+                "oid": "4900c9c2993a4285d7fe4f49e12d59eee3b2ef775d249d4dd27b27af7a201dea",
+                "size": 2640901312,
+                "pointerSize": 135
+            },
+            "xetHash": "bf1151be3bd02f9847d6a1436fe361c881f594033a0b5647af19803759140771",
+            "path": "model.q4nx"
+        },
+        {
+            "type": "file",
+            "oid": "d7e1714703eb97dcef3435aa50eb1de1cf241d62",
+            "size": 7153421,
+            "path": "tokenizer.json"
+        },
+        {
+            "type": "file",
+            "oid": "23b026c635949bf5941e4884448dccf8d465e283",
+            "size": 18533,
+            "path": "tokenizer_config.json"
+        }
+    ],
     "nanbeige4.1:3b": [
         {
             "type": "file",

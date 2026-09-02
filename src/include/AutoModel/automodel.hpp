@@ -20,6 +20,7 @@
 #include "causal_lm.hpp"
 #include "lm_config.hpp"
 #include "models/llama/llama_npu.hpp"
+#include "models/granite/granite_npu.hpp"
 #include "models/qwen2/qwen2_npu.hpp"
 #include "models/qwen3/qwen3_npu.hpp"
 #include "models/qwen2vl/qwen2vl_npu.hpp"

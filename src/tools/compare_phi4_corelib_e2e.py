@@ -60,9 +60,22 @@ TOP_5 = 5
 #
 # Both are OBSERVED CEILINGS WITH NO MARGIN, not tolerances. A run that exceeds
 # either has done something not previously seen, and the answer is to measure
-# and amend the spec -- never to widen the number so a red run goes green. The
-# 2-ULP figure rests on a single observation and is confirmed or corrected by
-# Task 13's baseline.
+# and amend the spec -- never to widen the number so a red run goes green.
+#
+# TASK 13 MEASURED IT, AND THE 2-ULP FIGURE IS NOT AN UPPER BOUND. Two events
+# exceeded it during that baseline: a reprefill pair differing by up to 0.3125
+# on a logit of 11.125 -- about 2.5 ULP, with 17512 logits over the bound --
+# and an append pair differing by up to 48.34 after the two runs emitted
+# DIFFERENT TOKENS from decode step 7. So this constant no longer describes a
+# ceiling. It describes the largest run-to-run difference that has ever been
+# benign.
+#
+# THAT IS DELIBERATELY LEFT AS IS. DETERM-2 says a logit difference above the
+# bound is a failure and not a wider tolerance, and both events were caught by
+# this gate doing exactly its job. Raising the number to accommodate them is
+# the move DETERM-2 exists to forbid, and it would convert a measured device
+# property into an unbounded one. The right response is the design decision
+# Task 13 report asks for, not an edit here.
 MAX_TOP32_ABS_DIFF = 0.25
 RUN_TO_RUN_MAX_ULPS = 2
 
@@ -656,14 +669,26 @@ def compare(args) -> int:
 
     # MODEL STATE must be bit-identical; the LM head's output need not be.
     #
-    # This split is measured, not a convenience. Across runs the live K/V for
-    # layers 0 and 31 and the final hidden state have been bit-identical to the
-    # reference every single time -- that is the whole 32-layer computation
-    # agreeing exactly -- while one run in three had a single logit vector out
-    # of 17 differ, with every design 12.4 threshold still met and the same
-    # top-1. Identical LM-head input and non-identical LM-head output means the
-    # difference is inside that one 3072 x 200064 dispatch, which is by far the
-    # largest in the model.
+    # This split is measured, not a convenience. Across every CROSS-
+    # IMPLEMENTATION run recorded to date the live K/V for layers 0 and 31 and
+    # the final hidden state have been bit-identical to the reference -- the
+    # whole 32-layer computation agreeing exactly -- while some runs had a
+    # single logit vector out of 17 differ, with every design 12.4 threshold
+    # still met and the same top-1.
+    #
+    # THE RATE HERE READ "one run in three" AND WAS ALREADY STALE WHEN WRITTEN.
+    # Task 13 counted the surviving artifacts: the append route differed from
+    # the reference on 2 of the 4 comparisons whose compare-summary records
+    # exist, the reprefill route on 0 of 4. Stated with its n rather than as a
+    # fraction, because n=4 does not support a rate anyone should rely on. It
+    # is enough to say the effect is route-dependent and real. Task 12 reported
+    # two further append divergences whose artifacts were overwritten before
+    # run-scoped directories existed; they are not counted here.
+    #
+    # NOTE, and it matters: this comment is about the CROSS-IMPLEMENTATION
+    # comparison, where the model state HAS always matched. It is not evidence
+    # about the RUN-TO-RUN case, where Task 13 measured model-state divergence
+    # at layer 31 with layer 0 identical. See the self_consistency docstring.
     #
     # So state bit-identity is enforced: a regression there would mean the
     # model computed something different. Logit bit-identity is reported and
@@ -752,20 +777,41 @@ def self_consistency(args) -> int:
     What is recorded but not gated: the logit bit-identity rate and the
     observed maximum difference.
 
-    The reason for the split is measured, not conceded. On this hardware the
-    LM-head dispatch -- 3072 x 200064, the largest in the model -- is not
-    bit-reproducible: one observed run had 100389 of 200064 logits differ at
-    decode[13] by at most 0.25, while both runs provably loaded the same DLL
-    and the entire 32-layer state, every metric and every emitted token were
-    identical. So the non-determinism is real, it is confined to that one
-    dispatch, and it changes no decision. Gating on bit-identity would make the
-    suite intermittently red for a property the product does not promise;
-    gating on state and tokens catches the thing that would actually matter,
-    which is that dispatch starting to move a sampled token.
+    The reason for the split is measured, not conceded: run-to-run logit
+    bit-identity is not reliably true on this hardware, so gating on it would
+    make the suite intermittently red for a property the product does not
+    promise.
 
-    An earlier version of this docstring said "no tolerance makes that
-    acceptable". That was the right instinct and the wrong conclusion, and the
-    measurement is what settled it.
+    CORRECTED BY TASK 13 BASELINE MEASUREMENT, 2026-09-02. This docstring used
+    to say the non-determinism was "confined to" the 3072 x 200064 LM-head
+    dispatch and "changes no decision", on the strength of ONE observed event:
+    100389 of 200064 logits differing at decode[13] by at most 0.25, with
+    state, metrics and tokens identical. Two of those three claims are now
+    known false.
+
+    IT IS NOT CONFINED TO THE LM HEAD. A reprefill event measured on
+    2026-09-02 left layer 0 K and V bit-identical while layer 31 K and V and
+    last_hidden all differed, with the emitted tokens unchanged. The LM head
+    cannot write a layer-31 K cache, so the divergence entered the model body
+    at some layer above 0. Separately, an FP64 host reference computed from the
+    same ONNX components corelib packs from found the LM head to be a correctly
+    rounded function of its own input in every run measured: 200059 and 200060
+    of 200064 logits within half a BF16 ULP of truth, mean 0.2497 ULP, signs
+    balanced to four parts in 200064. A correctly rounded function of identical
+    input cannot produce different output, so the earlier localisation -- an
+    INFERENCE from end-of-run state identity, never an observation of the
+    LM-head input at the diverging step -- does not hold.
+
+    IT CAN CHANGE A DECISION. An append event in the same campaign produced
+    DIFFERENT EMITTED TOKEN SEQUENCES from two runs of the same binary on the
+    same input, diverging at decode step 7.
+
+    What survives: both runs provably load the same DLL, and the phenomenon is
+    intermittent. For the rate, the spread and the n they rest on, see the
+    DETERM-3 baseline in docs/docs/benchmarks/phi4_results.md.
+
+    The gates below are unchanged and they are what caught both events. Do not
+    weaken them.
     """
     left = json.loads(Path(args.a).read_text(encoding="utf-8"))
     right = json.loads(Path(args.b).read_text(encoding="utf-8"))

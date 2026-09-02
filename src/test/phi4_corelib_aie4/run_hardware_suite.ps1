@@ -556,9 +556,15 @@ if (-not $ModelDir) {
                 # true and load-bearing: live K/V and the final hidden state
                 # must be bit-identical, which is the 32-layer computation
                 # agreeing exactly. Logit bit-identity is reported but not
-                # gated, because one measured run in three had a single logit
-                # vector out of 17 differ inside the LM head while every
-                # design 12.4 threshold was still met and the top-1 matched.
+                # gated, because some runs have a single logit vector out
+                # of 17 differ from the reference while every design 12.4
+                # threshold is still met and the top-1 matches.
+                #
+                # The rate here read "one measured run in three" and was
+                # stale. Task 13 counted the surviving artifacts: the APPEND
+                # route differed on 2 of the 4 comparisons whose records
+                # exist, the REPREFILL route on 0 of 4. Stated with its n,
+                # because n=4 does not support a rate anyone should rely on.
                 # Gating on it would turn that into a red suite for something
                 # that is not a defect. Pass the flag by hand when
                 # investigating.

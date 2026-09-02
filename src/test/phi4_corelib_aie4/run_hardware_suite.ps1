@@ -259,6 +259,15 @@ if ($CorelibIncludeDir) {
 if ($BoostIncludeDir) {
     $configureArgs += "-DBOOST_INCLUDE_DIR=$((Resolve-Path $BoostIncludeDir).Path)"
 }
+# The interpreter this suite was told to use, not whatever `python3` PATH
+# happens to find -- the same reasoning as -CmakeExe for test_packaged_runtime.
+# On the AIE4 target PATH resolves python3 to C:/cygwin/bin/python3, a Cygwin
+# symlink Windows cannot execute, so test_phi4_continuation_calibration would
+# fail for a reason unrelated to the threshold it checks.
+$pythonPath = (Get-Command $Python -ErrorAction SilentlyContinue)
+if ($pythonPath) {
+    $configureArgs += "-DFLM_PYTHON_EXECUTABLE=$($pythonPath.Source -replace '\\', '/')"
+}
 Invoke-Checked 'configure' $Cmake $configureArgs
 Invoke-Checked 'build' $Cmake @('--build', $BuildDir, '--config', 'Release')
 

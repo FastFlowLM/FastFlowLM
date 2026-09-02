@@ -542,11 +542,41 @@ add_task10_production_compile_check(
 # The unittest module registered here runs the calibrator's own suite AND, in
 # CheckedInArtefactsTest, invokes the calibrator with `--check` against the
 # committed header, baseline, crossover history and benchmark document.
-find_program(FLM_PYTHON_EXECUTABLE
-             NAMES python3 python
-             DOC "Python used to run the offline tooling tests")
+#
+# FLM_PYTHON_EXECUTABLE may be set explicitly, and run_hardware_suite.ps1 does
+# set it, for the same reason it passes -CmakeExe: on the AIE4 target PATH
+# resolves `python3` to C:/cygwin/bin/python3, a Cygwin symlink that Windows
+# cannot execute at all. A found-but-unusable interpreter is worse than none,
+# because it registers a test that can never pass for a reason having nothing
+# to do with what the test checks -- which is exactly what happened on the
+# first run of this block.
+if(NOT FLM_PYTHON_EXECUTABLE)
+    find_program(FLM_PYTHON_EXECUTABLE
+                 NAMES python3 python
+                 DOC "Python used to run the offline tooling tests")
+endif()
 
+# Whatever was found or supplied, prove it RUNS before trusting it. `-E` and a
+# trivial expression rather than `--version`, so a wrapper that prints a banner
+# and exits zero without an interpreter behind it still fails here.
+set(FLM_PYTHON_USABLE FALSE)
 if(FLM_PYTHON_EXECUTABLE)
+    execute_process(
+        COMMAND "${FLM_PYTHON_EXECUTABLE}" -c "import sys; sys.exit(0)"
+        RESULT_VARIABLE _flm_python_probe
+        OUTPUT_QUIET
+        ERROR_QUIET)
+    if(_flm_python_probe EQUAL 0)
+        set(FLM_PYTHON_USABLE TRUE)
+    else()
+        message(WARNING
+            "FLM_PYTHON_EXECUTABLE=${FLM_PYTHON_EXECUTABLE} does not run "
+            "(exit ${_flm_python_probe}); ignoring it. Pass a working "
+            "interpreter with -DFLM_PYTHON_EXECUTABLE=<path>.")
+    endif()
+endif()
+
+if(FLM_PYTHON_USABLE)
     # WORKING_DIRECTORY is the repository root because the tests import
     # `tools.calibrate_phi4_corelib_continuation` as a package and resolve the
     # committed artifacts relative to it.
@@ -568,8 +598,8 @@ else()
     set_tests_properties(test_phi4_continuation_calibration PROPERTIES
         TIMEOUT 60)
     message(WARNING
-        "Python was not found. test_phi4_continuation_calibration is "
-        "registered as a FAILING test: the generated "
-        "kContinuationAppendThreshold cannot be checked against the "
-        "measurement it was derived from.")
+        "No usable Python. test_phi4_continuation_calibration is registered "
+        "as a FAILING test: the generated kContinuationAppendThreshold cannot "
+        "be checked against the measurement it was derived from. Pass "
+        "-DFLM_PYTHON_EXECUTABLE=<path> to fix it.")
 endif()

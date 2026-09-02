@@ -10,7 +10,7 @@
                 "modified_at": "2026-09-01T00:00:00Z",
                 "size": 1800000000,
                 "flm_min_version": "0.9.45",
-                "default_context_length": 8192,
+                "default_context_length": 512,
                 "max_prefill_len": 4096,
                 "files": [
                     "config.json",

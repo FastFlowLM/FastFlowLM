@@ -8,6 +8,8 @@
 ///       audios on the uniform input are dropped with a warning.
 ///       The chat template has neither reasoning markers nor tool calls, so the
 ///       base-class pass-through stream / non-stream parsers are kept as is.
+///       No KV-cache checkpoint / restore: every turn re-inserts from the
+///       prompt cache alone, so `checkpoint_his` is never maintained here.
 
 #pragma once
 #include "AutoModel/automodel.hpp"

@@ -7,14 +7,27 @@
 #
 # Usage:
 #   make        - Build the test executable
-#   make test   - Build and run it against the hunyuan:1.8b tag
+#   make test   - Build and run the danmaku benchmark against the hunyuan:1.8b tag
 #   make clean  - Remove all built files
+#
+# Benchmark knobs (passed through to the executable):
+#   WARMUP=3        - leading turns discarded before the statistics are collected
+#   COUNT=0         - turns to run, 0 = the whole corpus in bench_samples.hpp
+#   LENGTH=512      - max generated tokens per turn
+#   CSV=bench.csv   - per-turn CSV written next to the executable, empty to skip
 #
 # =============================================================================
 -include ../common.mk
 
-# 1 = the three short turns, 0 = long prompt from ../../../../prompt.txt
-SHORT ?= 1
+WARMUP ?= 3
+COUNT  ?= 0
+LENGTH ?= 512
+CSV    ?= bench.csv
+
+BENCH_ARGS := --warmup $(WARMUP) --count $(COUNT) --Length $(LENGTH)
+ifneq ($(CSV),)
+BENCH_ARGS += --csv $(CSV)
+endif
 
 SOURCES += test.cpp
 SOURCES += ../../common/AutoModel/automodel.cpp
@@ -24,6 +37,7 @@ SOURCES += ../../common/modules/sampler.cpp
 
 HEADERS += ../../include/models/hunyuan/hunyuan_npu.hpp
 HEADERS += ../../include/AutoModel/modeling_hunyuan.hpp
+HEADERS += bench_samples.hpp
 
 ifeq ($(WSL), 0)
 
@@ -50,7 +64,7 @@ clean:
 
 test: $(BUILD_DIR)/test_hunyuan
 	cp ../../model_list.json $(BUILD_DIR)/model_list.json
-	cd $(BUILD_DIR) && ./test_hunyuan --model hunyuan:1.8b -s $(SHORT)
+	cd $(BUILD_DIR) && ./test_hunyuan --model hunyuan:1.8b $(BENCH_ARGS)
 
 -include $(DEPS)
 .PHONY: all clean test
@@ -75,7 +89,7 @@ clean:
 
 test: directories $(BUILD_DIR)/test_hunyuan.exe
 	cp ../../model_list.json $(BUILD_DIR)/model_list.json
-	cd $(BUILD_DIR) && ${PWSH} -Command "\$$env:PATH = '..\..\..\lib;' + \$$env:PATH; .\test_hunyuan.exe -m hunyuan:1.8b -s $(SHORT) -p 0"
+	cd $(BUILD_DIR) && ${PWSH} -Command "\$$env:PATH = '..\..\..\lib;' + \$$env:PATH; .\test_hunyuan.exe -m hunyuan:1.8b -p 0 $(BENCH_ARGS)"
 
 .PHONY: all clean test directories
 

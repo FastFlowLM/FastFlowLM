@@ -8,7 +8,11 @@
 #include "AutoModel/modeling_hunyuan.hpp"
 
 /************              hunyuan-dense family            **************/
-Hunyuan::Hunyuan(flm_rt::device* npu_device_inst) : AutoModel(npu_device_inst, "Hunyuan") {}
+Hunyuan::Hunyuan(flm_rt::device* npu_device_inst) : AutoModel(npu_device_inst, "Hunyuan") {
+    // the translator emits one short line per turn and the caller already has it
+    // from the stream / return value, so the raw dump would only double the log
+    this->log_raw_output = false;
+}
 
 void Hunyuan::load_model(std::string model_path, json model_info, int default_context_length, bool enable_preemption) {
     this->_shared_load_model(model_path, model_info, default_context_length, enable_preemption);
@@ -98,30 +102,11 @@ bool Hunyuan::insert(chat_meta_info_t& meta_info, lm_uniform_input_t& input, std
     this->profiler_list[TKOEN_ENCODE_TIME].stop(tokens.size());
 
     // hardware
-    int restore_idx = -1;
-    hunyuan_npu* hunyuan_engine = dynamic_cast<hunyuan_npu*>(this->lm_engine.get());
-    if (meta_info.restore_allowed) {
-        restore_idx = hunyuan_engine->restore();
-        this->total_tokens = restore_idx;
-        // keep the token history in lock-step with the restored KV cache, otherwise
-        // _shared_insert's prefix match silently desynchronizes
-        this->token_history = checkpoint_his;
-    }
-    bool success = this->_shared_insert(meta_info, tokens, is_cancelled, nullptr);
-
-    checkpoint_his = token_history;
-    hunyuan_engine->checkpoint();
-
-    return success;
+    return this->_shared_insert(meta_info, tokens, is_cancelled, nullptr);
 }
 
 std::string Hunyuan::generate(chat_meta_info_t& meta_info, int length_limit, std::ostream& os, std::function<bool()> is_cancelled) {
-    std::string result = this->_shared_generate(meta_info, length_limit, os, is_cancelled);
-    // re-checkpoint so the next turn can restore on top of the generated tokens
-    hunyuan_npu* hunyuan_engine = dynamic_cast<hunyuan_npu*>(this->lm_engine.get());
-    checkpoint_his = token_history;
-    hunyuan_engine->checkpoint();
-    return result;
+    return this->_shared_generate(meta_info, length_limit, os, is_cancelled);
 }
 
 std::string Hunyuan::generate_with_prompt(chat_meta_info_t& meta_info, lm_uniform_input_t& input, int length_limit, std::ostream& os) {

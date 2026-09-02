@@ -147,6 +147,10 @@ protected:
 	std::unique_ptr<npu_xclbin_manager> npu = nullptr;
 	bool enable_preemption = false;
     std::vector<int> checkpoint_his;
+	/// \brief dump the undecorated model output to stdout once a turn ends
+	/// \note on by default; models whose turns are short and driven in bulk (the
+	///       hunyuan translator) turn it off so the log is not doubled.
+	bool log_raw_output = true;
 
 
 	uint32_t MAX_L = 0;

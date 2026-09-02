@@ -4,7 +4,7 @@
 
 AppName=flm
 
-AppVersion=1.0.3
+AppVersion=1.0.4
 
 AppPublisher=FastFlowLM
 
@@ -98,6 +98,13 @@ Source: "logo.ico"; DestDir: "{app}"; Flags: ignoreversion
 Source: "model_list.json"; DestDir: "{app}"; Flags: ignoreversion
 Source: "model_info.json"; DestDir: "{app}"; Flags: ignoreversion
 
+; Optional Phi-4 AIE4 runtime and FastFlow-owned model overlays
+Source: "aie4\*"; DestDir: "{app}\aie4"; Flags: ignoreversion recursesubdirs createallsubdirs; Tasks: aie4runtime
+Source: "..\model_overlays\phi4-mini-it-aie4\config.json"; DestDir: "{app}\share\flm\model_overlays\phi4-mini-it-aie4"; Flags: ignoreversion; Tasks: aie4runtime
+Source: "..\model_overlays\phi4-mini-it-aie4\corelib_phi4_manifest.json"; DestDir: "{app}\share\flm\model_overlays\phi4-mini-it-aie4"; Flags: ignoreversion; Tasks: aie4runtime
+Source: "..\model_overlays\phi4-mini-it-aie4\tokenizer_config.json"; DestDir: "{app}\share\flm\model_overlays\phi4-mini-it-aie4"; Flags: ignoreversion; Tasks: aie4runtime
+Source: "..\model_overlays\phi4-mini-it-aie4\provenance.json"; DestDir: "{app}\share\flm\model_overlays\phi4-mini-it-aie4"; Flags: ignoreversion; Tasks: aie4runtime
+
 ; xclbins directory - recursively include all files
 Source: "..\xclbins\*"; DestDir: "{app}\xclbins"; Flags: ignoreversion recursesubdirs createallsubdirs
 
@@ -136,6 +143,7 @@ Name: "{commondesktop}\flm serve"; \
 ; Optional desktop icon task
 
 Name: "desktopicon"; Description: "Create a desktop icon"; GroupDescription: "Additional icons:"; Flags: unchecked
+Name: "aie4runtime"; Description: "Install optional Phi-4 AIE4 corelib runtime"; GroupDescription: "Optional features:"; Flags: unchecked
 
 [Code]
 var

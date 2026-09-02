@@ -469,6 +469,61 @@
                 "footprint": 3.4
             }
         },
+        "phi4-mini-it-aie4": {
+            "4b": {
+                "name": "Phi-4-mini-instruct-oga-dml-AIE4",
+                "url": "https://huggingface.co/amd/phi-4-mini-instruct-oga-dml",
+                "revision": "e751fb68c2cfffe6b0d32942118f75ac0a0365bb",
+                "file_url": "https://huggingface.co/api/models/amd/phi-4-mini-instruct-oga-dml/tree/e751fb68c2cfffe6b0d32942118f75ac0a0365bb?recursive=true&expand=false",
+                "size": 3271001989,
+                "default_context_length": 4096,
+                "max_prefill_len": 4096,
+                "details": {
+                    "family": "phi4",
+                    "think": false,
+                    "think_toggleable": false,
+                    "parameter_size": "4B",
+                    "quantization_level": "MatMulNBits Q4",
+                    "execution_backend": "corelib_aie4"
+                },
+                "flm_min_version": "1.0.4",
+                "vlm": false,
+                "modelscope_supported": false,
+                "files": [
+                    ".gitattributes",
+                    "added_tokens.json",
+                    "chat_template.jinja",
+                    "config.json",
+                    "corelib_phi4_manifest.json",
+                    "genai_config.json",
+                    "merges.txt",
+                    "model.onnx",
+                    "model.onnx.data",
+                    "special_tokens_map.json",
+                    "tokenizer.json",
+                    "tokenizer_config.json",
+                    "vocab.json"
+                ],
+                "bundled_overlays": {
+                    "config.json": {
+                        "path": "phi4-mini-it-aie4/config.json",
+                        "size": 257,
+                        "sha256": "1b3e74125a109c05f53c8383def18359d8581619f998c4f91b3b5bb78bf2919f"
+                    },
+                    "corelib_phi4_manifest.json": {
+                        "path": "phi4-mini-it-aie4/corelib_phi4_manifest.json",
+                        "size": 274527,
+                        "sha256": "09cee6efafc513a2048c89e75b40d92d096144f0eed3b2459c138032b69dc045"
+                    },
+                    "tokenizer_config.json": {
+                        "path": "phi4-mini-it-aie4/tokenizer_config.json",
+                        "size": 3036,
+                        "sha256": "274d22c3cd28c042f28a681832722536663b06e8c9e88b6616622dceab922ca6"
+                    }
+                },
+                "footprint": 3.05
+            }
+        },
         "embed-gemma": {
             "300m": {
                 "name": "Embedding-Gemma-300M-NPU2",

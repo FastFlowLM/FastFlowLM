@@ -783,6 +783,41 @@ void TestValidMappingAndExplicitRoles(
         "missing initializer");
 }
 
+void TestOgaQuantizedLayoutsAccepted(
+    const SyntheticPackage& fixture,
+    const std::shared_ptr<CorelibApi>& api) {
+    json manifest = fixture.manifest();
+    for (auto& [name, initializer] :
+         manifest["initializers"].items()) {
+        if (name.ends_with(".qweight")) {
+            const auto logical =
+                initializer["shape"].get<std::vector<std::int64_t>>();
+            CHECK(logical.size() == 2);
+            CHECK(logical[1] % 64 == 0);
+            initializer["shape"] = {
+                logical[0],
+                logical[1] / 64,
+                64};
+        } else if (
+            name.ends_with(".scales") ||
+            name.ends_with(".qzeros")) {
+            const auto logical =
+                initializer["shape"].get<std::vector<std::int64_t>>();
+            CHECK(logical.size() == 2);
+            initializer["shape"] = {logical[0] * logical[1]};
+        }
+    }
+    fixture.Write(manifest);
+
+    auto package = Phi4Package::Load(fixture.path(), api, false);
+    CHECK(package.weight_objects().size() == 161);
+    CHECK(
+        package.Require(
+            "model.layers.0.attn.q_proj.MatMulNBits.qweight")
+            .shape ==
+        std::vector<std::int64_t>({3072, 24, 64}));
+}
+
 void TestMappedOwnerOutlivesPackage(
     const SyntheticPackage& fixture,
     const std::shared_ptr<CorelibApi>& api) {
@@ -1285,6 +1320,7 @@ int main() {
         SyntheticPackage fixture;
         auto api = ResolveRecordingCorelib();
         TestValidMappingAndExplicitRoles(fixture, api);
+        TestOgaQuantizedLayoutsAccepted(fixture, api);
         TestMappedOwnerOutlivesPackage(fixture, api);
         TestPathRangeAndHashRejections(fixture, api);
         TestWeightObjectRejections(fixture, api);

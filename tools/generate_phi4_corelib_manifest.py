@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
 import onnx
@@ -452,10 +453,30 @@ def _validate_contract(
     shape = [int(dimension) for dimension in tensor.dims]
     if "shape" in contract:
         expected_shape = contract["shape"]
-        if shape != expected_shape:
+        accepted_shapes = [expected_shape]
+        role = contract["role"]
+        if (
+            role.endswith(".qweight")
+            and len(expected_shape) == 2
+            and expected_shape[1] % 64 == 0
+        ):
+            accepted_shapes.append(
+                [expected_shape[0], expected_shape[1] // 64, 64]
+            )
+        elif (
+            len(expected_shape) == 2
+            and (
+                role.endswith(".scales")
+                or role.endswith(".qzeros")
+            )
+        ):
+            accepted_shapes.append(
+                [expected_shape[0] * expected_shape[1]]
+            )
+        if shape not in accepted_shapes:
             raise ValueError(
-                f"{initializer}: shape {shape} does not match "
-                f"{expected_shape}"
+                f"{initializer}: shape {shape} does not match any "
+                f"accepted ONNX layout {accepted_shapes}"
             )
     else:
         rank = contract.get("rank")
@@ -489,13 +510,79 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _file_record(path: Path, full_hash: bool) -> dict[str, object]:
-    size = path.stat().st_size
+def _verified_file_metadata(
+    path: Path,
+    metadata: dict[str, object],
+) -> tuple[int, str]:
+    if set(metadata) != {"size", "sha256"}:
+        raise ValueError(
+            f"verified file metadata must contain size and sha256: {path}"
+        )
+    size = metadata["size"]
+    sha256 = metadata["sha256"]
+    if (
+        isinstance(size, bool)
+        or not isinstance(size, int)
+        or size < 0
+        or size > MAX_U64
+    ):
+        raise ValueError(f"verified file size exceeds uint64: {path}")
+    if (
+        not isinstance(sha256, str)
+        or re.fullmatch(r"[0-9a-fA-F]{64}", sha256) is None
+    ):
+        raise ValueError(f"verified file SHA-256 is invalid: {path}")
+    return size, sha256.lower()
+
+
+def _lfs_pointer_metadata(path: Path) -> tuple[int, str] | None:
+    if path.stat().st_size > 1024:
+        return None
+    try:
+        text = path.read_text(encoding="ascii")
+    except (OSError, UnicodeDecodeError):
+        return None
+    match = re.fullmatch(
+        r"version https://git-lfs\.github\.com/spec/v1\r?\n"
+        r"oid sha256:([0-9a-fA-F]{64})\r?\n"
+        r"size ([0-9]+)\r?\n?",
+        text,
+    )
+    if match is None:
+        return None
+    size = int(match.group(2))
+    if size > MAX_U64:
+        raise ValueError(f"Git LFS pointer size exceeds uint64: {path}")
+    return size, match.group(1).lower()
+
+
+def _file_record(
+    path: Path,
+    full_hash: bool,
+    verified_metadata: dict[str, object] | None = None,
+) -> dict[str, object]:
+    physical_size = path.stat().st_size
+    if verified_metadata is not None:
+        size, sha256 = _verified_file_metadata(path, verified_metadata)
+        pointer = _lfs_pointer_metadata(path)
+        if physical_size == size:
+            if _sha256(path) != sha256:
+                raise ValueError(
+                    f"verified file SHA-256 does not match: {path}"
+                )
+        elif pointer != (size, sha256):
+            raise ValueError(
+                f"file is neither the verified payload nor its Git LFS pointer: "
+                f"{path}"
+            )
+    else:
+        size = physical_size
+        sha256 = _sha256(path) if full_hash else ""
     if size < 0 or size > MAX_U64:
         raise ValueError(f"file size exceeds uint64: {path}")
     record: dict[str, object] = {"size": size}
     if full_hash:
-        record["sha256"] = _sha256(path)
+        record["sha256"] = sha256
     return record
 
 
@@ -606,6 +693,8 @@ def _generate_manifest(
     full_hash: bool,
     roles: dict[str, dict[str, object]],
     weight_objects: list[dict[str, object]] | None = None,
+    *,
+    file_metadata: dict[str, dict[str, object]] | None = None,
 ) -> dict[str, object]:
     """Generate a manifest using an explicit role map.
 
@@ -619,6 +708,10 @@ def _generate_manifest(
         raise ValueError(f"model directory is not a directory: {model_dir}")
     if not isinstance(full_hash, bool):
         raise ValueError("full_hash must be a boolean")
+    if file_metadata is None:
+        file_metadata = {}
+    if not isinstance(file_metadata, dict):
+        raise ValueError("file_metadata must be an object")
 
     model_path = model_dir / "model.onnx"
     if not model_path.is_file():
@@ -636,6 +729,7 @@ def _generate_manifest(
 
     records: dict[str, dict[str, object]] = {}
     external_files: dict[str, Path] = {}
+    external_file_records: dict[str, dict[str, object]] = {}
     embedded: list[tuple[str, bytes]] = []
     embedded_offset = 0
 
@@ -666,9 +760,12 @@ def _generate_manifest(
                 raise ValueError(
                     f"{name}: external offset is not dtype-aligned"
                 )
-            size = path.stat().st_size
-            if size > MAX_U64:
-                raise ValueError(f"{name}: external file size exceeds uint64")
+            file_record = _file_record(
+                path,
+                full_hash,
+                file_metadata.get(location),
+            )
+            size = file_record["size"]
             if offset > size or length > size - offset:
                 raise ValueError(
                     f"{name}: external range exceeds file size"
@@ -678,6 +775,7 @@ def _generate_manifest(
                 raise ValueError(
                     f"{name}: external location resolves inconsistently"
                 )
+            external_file_records[location] = file_record
             records[name] = _initializer_record(
                 contract,
                 dtype=dtype,
@@ -731,14 +829,24 @@ def _generate_manifest(
                 stream.write(raw_data)
 
     files: dict[str, dict[str, object]] = {
-        "model.onnx": _file_record(model_path, full_hash)
+        "model.onnx": _file_record(
+            model_path,
+            full_hash,
+            file_metadata.get("model.onnx"),
+        )
     }
     for location in sorted(external_files):
-        files[location] = _file_record(external_files[location], full_hash)
+        files[location] = external_file_records[location]
     if embedded:
         files[EMBEDDED_INITIALIZERS_FILE] = _file_record(
             sidecar_path,
             full_hash,
+        )
+    unused_metadata = sorted(set(file_metadata) - set(files))
+    if unused_metadata:
+        raise ValueError(
+            "verified metadata does not describe a manifest file: "
+            + unused_metadata[0]
         )
 
     emitted_weight_objects = (
@@ -768,13 +876,21 @@ def generate_manifest(
     model_dir: Path,
     output: Path,
     full_hash: bool,
+    *,
+    file_metadata: dict[str, dict[str, object]] | None = None,
 ) -> dict[str, object]:
-    return _generate_manifest(
+    arguments = (
         model_dir,
         output,
         full_hash,
         required_initializer_roles(),
         required_weight_objects(),
+    )
+    if file_metadata is None:
+        return _generate_manifest(*arguments)
+    return _generate_manifest(
+        *arguments,
+        file_metadata=file_metadata,
     )
 
 

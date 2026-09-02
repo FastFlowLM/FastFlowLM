@@ -5,6 +5,7 @@
 /// \version 0.9.24
 /// \note This class for curl download
 #include "download_model.hpp"
+#include <curl/curl.h>
 #include <fstream>
 #include <iostream>
 #include <filesystem>

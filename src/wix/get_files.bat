@@ -22,4 +22,12 @@ echo Copying static assets...
 copy "..\inno\logo.ico" "package\logo.ico"
 copy "..\inno\terms.rtf" "package\terms.rtf"
 
+REM Copy the validated optional AIE4 runtime closure
+if not exist "..\build\aie4\ryzenai_corelib.dll" (
+    echo ERROR: Build src with FLM_ENABLE_CORELIB_AIE4=ON before packaging.
+    exit /b 1
+)
+if not exist "package\aie4" mkdir "package\aie4"
+xcopy "..\build\aie4\*" "package\aie4\" /E /I /Y
+
 echo Done!

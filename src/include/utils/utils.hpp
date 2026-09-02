@@ -370,6 +370,10 @@ std::string find_model_list();
 
 std::string find_model_info();
 
+///@brief find the root containing FastFlow-owned model overlays
+///@return path to the model_overlays directory
+std::string find_model_overlay_root();
+
 
 ///@brief get the path to the xclbin directory
 ///@return path to the xclbin directory

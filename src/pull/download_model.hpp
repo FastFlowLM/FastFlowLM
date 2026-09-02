@@ -6,11 +6,12 @@
 /// \note This class for curl download
 #pragma once
 
+#include <cstddef>
+#include <cstdio>
 #include <string>
 #include <vector>
 #include <memory>
 #include <functional>
-#include <curl/curl.h>
 #include "nlohmann/json.hpp"
 
 namespace download_utils {

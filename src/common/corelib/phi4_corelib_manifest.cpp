@@ -326,6 +326,21 @@ void RequireShape(
     }
 }
 
+void RequireOneOfShapes(
+    const InitializerView& view,
+    const std::vector<std::vector<std::int64_t>>& expected,
+    std::string_view context) {
+    if (
+        std::none_of(
+            expected.begin(),
+            expected.end(),
+            [&](const std::vector<std::int64_t>& shape) {
+                return view.shape == shape;
+            })) {
+        Throw(context, "has an invalid shape");
+    }
+}
+
 void RequireFloating(
     const InitializerView& view,
     std::string_view context) {
@@ -507,7 +522,7 @@ void ValidateQuantizedProjection(
     const auto validate = [&](
                               std::string_view component,
                               SourceDType dtype,
-                              std::initializer_list<std::int64_t> shape,
+                              std::vector<std::vector<std::int64_t>> shapes,
                               std::string semantic) {
         const std::string role_name =
             std::string(component_prefix) + std::string(component);
@@ -523,7 +538,7 @@ void ValidateQuantizedProjection(
         if (view.dtype != dtype) {
             Throw(context, "has an invalid dtype");
         }
-        RequireShape(view, shape, context);
+        RequireOneOfShapes(view, shapes, context);
         RequireSemanticRole(
             semantic_roles,
             found->second,
@@ -533,7 +548,13 @@ void ValidateQuantizedProjection(
     validate(
         "qweight",
         SourceDType::UInt8,
-        {n, k / 2},
+        {
+            {n, k / 2},
+            {
+                n,
+                groups,
+                static_cast<std::int64_t>(
+                    constants::kGroupSize / 2)}},
         std::string(role_prefix) + ".qweight");
 
     const std::string scales_name =
@@ -550,7 +571,10 @@ void ValidateQuantizedProjection(
         scales_name,
         scales_component->second);
     RequireFloating(scales, scales_context);
-    RequireShape(scales, {n, groups}, scales_context);
+    RequireOneOfShapes(
+        scales,
+        {{n, groups}, {n * groups}},
+        scales_context);
     RequireSemanticRole(
         semantic_roles,
         scales_component->second,
@@ -559,7 +583,9 @@ void ValidateQuantizedProjection(
     validate(
         "qzeros",
         SourceDType::UInt8,
-        {n, (groups + 1) / 2},
+        {
+            {n, (groups + 1) / 2},
+            {n * ((groups + 1) / 2)}},
         std::string(role_prefix) + ".qzeros");
 }
 

@@ -18,12 +18,14 @@
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
      xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
 
-  <?define SourceDir = "..\inno"?>
+  <?define SourceDir = "package"?>
   <?define XclbinsDir = "..\xclbins"?>
+  <?define Aie4Dir = "package\aie4"?>
+  <?define Aie4OverlayDir = "..\model_overlays\phi4-mini-it-aie4"?>
 
   <Package Name="flm"
            Manufacturer="FastFlowLM"
-           Version="1.0.3"
+           Version="1.0.4"
            UpgradeCode="5A5B2872-1E63-4934-9F57-088554CF4959"
            Language="1033"
            Scope="perMachine"
@@ -46,6 +48,14 @@
     <StandardDirectory Id="ProgramFiles64Folder">
       <Directory Id="INSTALLFOLDER" Name="flm">
         <Directory Id="XCLBINSFOLDER" Name="xclbins" />
+        <Directory Id="AIE4FOLDER" Name="aie4" />
+        <Directory Id="SHAREFOLDER" Name="share">
+          <Directory Id="FLMSHAREFOLDER" Name="flm">
+            <Directory Id="MODEL_OVERLAYS_FOLDER" Name="model_overlays">
+              <Directory Id="PHI4_AIE4_OVERLAY_FOLDER" Name="phi4-mini-it-aie4" />
+            </Directory>
+          </Directory>
+        </Directory>
       </Directory>
     </StandardDirectory>
 
@@ -67,6 +77,11 @@
 
     <Feature Id="DesktopShortcutsFeature" Title="Desktop shortcuts" Level="1000">
       <ComponentGroupRef Id="DesktopShortcuts" />
+    </Feature>
+
+    <Feature Id="Aie4Feature" Title="Phi-4 AIE4 corelib runtime" Level="1000">
+      <ComponentGroupRef Id="Aie4RuntimeComponents" />
+      <ComponentGroupRef Id="Aie4OverlayComponents" />
     </Feature>
 
     <ComponentGroup Id="MainComponents" Directory="INSTALLFOLDER">
@@ -217,6 +232,25 @@
     <!-- xclbins\* recursively, mirrors flm.iss's recursesubdirs Source entry -->
     <ComponentGroup Id="XclbinsComponents" Directory="XCLBINSFOLDER">
       <Files Include="$(XclbinsDir)\**" />
+    </ComponentGroup>
+
+    <ComponentGroup Id="Aie4RuntimeComponents" Directory="AIE4FOLDER">
+      <Files Include="$(Aie4Dir)\**" />
+    </ComponentGroup>
+
+    <ComponentGroup Id="Aie4OverlayComponents" Directory="PHI4_AIE4_OVERLAY_FOLDER">
+      <Component Id="Comp_Aie4OverlayConfig" Guid="*">
+        <File Id="File_Aie4OverlayConfig" Source="$(Aie4OverlayDir)\config.json" KeyPath="yes" />
+      </Component>
+      <Component Id="Comp_Aie4OverlayManifest" Guid="*">
+        <File Id="File_Aie4OverlayManifest" Source="$(Aie4OverlayDir)\corelib_phi4_manifest.json" KeyPath="yes" />
+      </Component>
+      <Component Id="Comp_Aie4OverlayTokenizerConfig" Guid="*">
+        <File Id="File_Aie4OverlayTokenizerConfig" Source="$(Aie4OverlayDir)\tokenizer_config.json" KeyPath="yes" />
+      </Component>
+      <Component Id="Comp_Aie4OverlayProvenance" Guid="*">
+        <File Id="File_Aie4OverlayProvenance" Source="$(Aie4OverlayDir)\provenance.json" KeyPath="yes" />
+      </Component>
     </ComponentGroup>
 
     <!-- Start Menu shortcut: always installed -->

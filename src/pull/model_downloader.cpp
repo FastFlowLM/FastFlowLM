@@ -5,6 +5,7 @@
 /// \version 0.9.24
 /// \note This class is used to download models from the huggingface
 #include "model_downloader.hpp"
+#include <pull/model_overlay.hpp>
 #include "utils/utils.hpp"
 #include "download_model.hpp"
 #include <sstream>
@@ -87,6 +88,15 @@ bool ModelDownloader::pull_model(const std::string& model_tag, bool use_modelsco
     try {
         // Get model info
         auto [new_model_tag, model_info] = supported_models.get_model_info(model_tag);
+        flm::pull::RequireSupportedModelSource(
+            model_info,
+            use_modelscope);
+        if (model_info.contains("bundled_overlays")) {
+            flm::pull::StageBundledOverlays(
+                model_info,
+                utils::find_model_overlay_root(),
+                supported_models.get_model_path(new_model_tag));
+        }
         std::string model_name = model_info["name"];
         std::string model_server = use_modelscope ? "ModelScope" : "HuggingFace";
         
@@ -292,10 +302,12 @@ std::pair<nlohmann::json, float> ModelDownloader::build_download_list(const std:
 
     try {
         auto [new_model_tag, model_info] = supported_models.get_model_info(model_tag);
+        flm::pull::RequireSupportedModelSource(model_info, modelscope);
         std::string base_url = modelscope ? model_info["ms_url"] : model_info["url"];
         std::string model_name = model_info["name"];
         std::string file_url = model_info["file_url"];
-        std::vector<std::string> model_files = model_info["files"];
+        std::vector<std::string> model_files =
+            flm::pull::RemoteModelFiles(model_info);
         
         // Create model directory
         std::string model_path = supported_models.get_model_path(new_model_tag);
@@ -333,6 +345,11 @@ std::pair<nlohmann::json, float> ModelDownloader::build_download_list(const std:
                 std::string url;
                 if (std::string(base_url).find("resolve") != std::string::npos) { // resolve provided , may from a specific branch
                     url = base_url + "/" + filename + "?download=true";
+                }
+                else if (!modelscope) {
+                    url = flm::pull::BuildRemoteFileUrl(
+                        model_info,
+                        filename);
                 }
                 else {
                     url = base_url + "/resolve/main/" + filename + "?download=true";
@@ -421,6 +438,7 @@ bool ModelDownloader::remove_model(const std::string& model_tag, bool sub_proces
 /// \return true if all files are present and compatible, false otherwise
 bool ModelDownloader::check_model(const std::string& model_tag, bool use_modelscope, bool sub_process_mode) {
     auto [new_model_tag, model_info] = supported_models.get_model_info(model_tag);
+    flm::pull::RequireSupportedModelSource(model_info, use_modelscope);
     header_print("FLM", "Checking model: " + new_model_tag + "...\n");
 
     ModelStatus status = is_model_downloaded(new_model_tag, sub_process_mode);
@@ -455,6 +473,9 @@ bool ModelDownloader::verify_and_clean_files(const std::string& model_tag, bool 
     bool any_error = false;
     try {
         auto [new_model_tag, model_info] = supported_models.get_model_info(model_tag);
+        flm::pull::RequireSupportedModelSource(
+            model_info,
+            use_modelscope);
         std::vector<std::string> model_files = model_info["files"];
         std::string model_path = supported_models.get_model_path(new_model_tag);
         std::string file_url = model_info["file_url"];
@@ -477,6 +498,33 @@ bool ModelDownloader::verify_and_clean_files(const std::string& model_tag, bool 
                 header_print("FLM", "Checking file: " + filename + "...");
             }
 
+            std::string local_path =
+                get_model_file_path(model_path, filename);
+            if (
+                model_info.contains("bundled_overlays") &&
+                model_info["bundled_overlays"].contains(filename)) {
+                if (flm::pull::VerifyBundledOverlayTarget(
+                        model_info,
+                        filename,
+                        model_path)) {
+                    if (!sub_process_mode) {
+                        header_print("FLM", "Success!");
+                    }
+                } else {
+                    if (!sub_process_mode) {
+                        header_print("FLM", "Fail!");
+                        header_print(
+                            "FLM",
+                            "Removing corrupted bundled overlay: " +
+                                filename + "...");
+                    }
+                    std::error_code ignored;
+                    std::filesystem::remove(local_path, ignored);
+                    any_error = true;
+                }
+                continue;
+            }
+
             auto it = std::find_if(
                 hf_model_infos.begin(),
                 hf_model_infos.end(),
@@ -488,7 +536,6 @@ bool ModelDownloader::verify_and_clean_files(const std::string& model_tag, bool 
                 continue;
             }
             const auto& file = *it;
-            std::string local_path = get_model_file_path(model_path, filename);
 
             // If the file isn't present locally, there's nothing to verify or
             // remove; treat as an error so the caller knows a re-pull is needed.

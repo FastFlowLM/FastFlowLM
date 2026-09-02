@@ -84,6 +84,27 @@ function(add_corelib_host_test TEST_NAME TEST_SOURCE)
 endfunction()
 
 enable_testing()
+add_executable(test_model_catalog
+    test_model_catalog.cpp
+    ${FASTFLOW_SOURCE_DIR}/pull/model_overlay.cpp)
+target_include_directories(test_model_catalog PRIVATE
+    ${FASTFLOW_SOURCE_DIR}/include
+    ${FASTFLOW_SOURCE_DIR}/pull)
+target_compile_definitions(test_model_catalog PRIVATE
+    FLM_TEST_SOURCE_DIR="${FASTFLOW_SOURCE_DIR}")
+add_test(NAME test_model_catalog COMMAND test_model_catalog)
+
+add_library(test_model_downloader_compile OBJECT
+    ${FASTFLOW_SOURCE_DIR}/pull/model_downloader.cpp)
+target_include_directories(test_model_downloader_compile PRIVATE
+    ${FASTFLOW_SOURCE_DIR}/include
+    ${FASTFLOW_SOURCE_DIR}/pull
+    ${FASTFLOW_SOURCE_DIR}/../third_party/tokenizers-cpp/include
+    ${BOOST_INCLUDE_DIR}
+    ${XRT_INCLUDE_DIR})
+target_compile_definitions(test_model_downloader_compile PRIVATE
+    __FLM_VERSION__="${FLM_VERSION}")
+
 add_executable(test_generation_limit
     test_generation_limit.cpp
     ${FASTFLOW_SOURCE_DIR}/server/generation_limit.cpp

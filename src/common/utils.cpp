@@ -111,10 +111,54 @@ std::string find_model_info() {
     if (std::filesystem::exists(exe_relative_path)) {
         return exe_relative_path;
     }
+    for (const std::filesystem::path bundle : {
+             std::filesystem::path(exe_dir) / "share" / "flm" /
+                 "model_info.json",
+             std::filesystem::path(exe_dir) / ".." / "share" / "flm" /
+                 "model_info.json"}) {
+        if (std::filesystem::exists(bundle)) {
+            return bundle.lexically_normal().string();
+        }
+    }
 #endif
 
     // If not found, throw an error
     throw std::runtime_error("model_info.json not found. Please set FLM_MODELINFO_PATH or place it next to the executable.");
+}
+
+std::string find_model_overlay_root() {
+    const char* configured = std::getenv("FLM_MODEL_OVERLAY_PATH");
+    if (configured && *configured) {
+        const std::filesystem::path path(configured);
+        if (std::filesystem::is_directory(path)) {
+            return std::filesystem::absolute(path).lexically_normal().string();
+        }
+        throw std::runtime_error(
+            "FLM_MODEL_OVERLAY_PATH does not name an installed "
+            "model_overlays directory: " +
+            path.string());
+    }
+
+    const std::filesystem::path executable_dir(
+        get_executable_directory());
+    const std::filesystem::path install_prefix(CMAKE_INSTALL_PREFIX);
+    const std::filesystem::path candidates[] = {
+        executable_dir / "model_overlays",
+        executable_dir / "share" / "flm" / "model_overlays",
+        executable_dir / ".." / "share" / "flm" / "model_overlays",
+        std::filesystem::current_path() / "model_overlays",
+        install_prefix / "share" / "flm" / "model_overlays",
+    };
+    for (const auto& candidate : candidates) {
+        if (std::filesystem::is_directory(candidate)) {
+            return std::filesystem::absolute(candidate)
+                .lexically_normal()
+                .string();
+        }
+    }
+    throw std::runtime_error(
+        "FastFlow model overlay root not found. Reinstall the model "
+        "overlay package or set FLM_MODEL_OVERLAY_PATH.");
 }
 
 std::string find_xclbin_path() {

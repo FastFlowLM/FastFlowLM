@@ -1,0 +1,117 @@
+{
+  "generated": {
+    "config.json": {
+      "sha256": "1b3e74125a109c05f53c8383def18359d8581619f998c4f91b3b5bb78bf2919f",
+      "size": 257
+    },
+    "corelib_phi4_manifest.json": {
+      "sha256": "09cee6efafc513a2048c89e75b40d92d096144f0eed3b2459c138032b69dc045",
+      "size": 274527
+    },
+    "tokenizer_config.json": {
+      "sha256": "274d22c3cd28c042f28a681832722536663b06e8c9e88b6616622dceab922ca6",
+      "size": 3036
+    }
+  },
+  "upstream": {
+    "commit": "e751fb68c2cfffe6b0d32942118f75ac0a0365bb",
+    "git_files": [
+      {
+        "oid": "f78df3bfb43291872abf78496110e5856b24de73",
+        "path": ".gitattributes",
+        "size": 1622,
+        "type": "file"
+      },
+      {
+        "oid": "77e6ed402865af3c38b5e44c2d0be68f76f0784f",
+        "path": "added_tokens.json",
+        "size": 261,
+        "type": "file"
+      },
+      {
+        "oid": "a9c00dd9bbd97e117371168e9d62af65b9f0e725",
+        "path": "chat_template.jinja",
+        "size": 423,
+        "type": "file"
+      },
+      {
+        "oid": "55b698edc57fe52593dce4423beb51ded982dc96",
+        "path": "genai_config.json",
+        "size": 1720,
+        "type": "file"
+      },
+      {
+        "oid": "dcecc4524288b351bbd0da8028e74e9b5bcdb9b5",
+        "path": "merges.txt",
+        "size": 2418348,
+        "type": "file"
+      },
+      {
+        "lfs": {
+          "oid": "e80b9d83e018784eda6263d09fa2ab7729087722c6073c72123366f2dbec4529",
+          "pointerSize": 131,
+          "size": 378325
+        },
+        "oid": "df6d4309745d4627b82fd92c615589193ea528db",
+        "path": "model.onnx",
+        "size": 378325,
+        "type": "file"
+      },
+      {
+        "lfs": {
+          "oid": "c48fd647beb02866e68d6dd1fbc05809a439283501d8abb7f6d6b950f92b7b60",
+          "pointerSize": 135,
+          "size": 3248488448
+        },
+        "oid": "5ef8f7f74cf6ac6411b8918e8a850bd2c769dd45",
+        "path": "model.onnx.data",
+        "size": 3248488448,
+        "type": "file"
+      },
+      {
+        "oid": "18eba67aba3ef71b01ed13c16b3feed78e83001f",
+        "path": "special_tokens_map.json",
+        "size": 617,
+        "type": "file"
+      },
+      {
+        "lfs": {
+          "oid": "382cc235b56c725945e149cc25f191da667c836655efd0857b004320e90e91ea",
+          "pointerSize": 133,
+          "size": 15524095
+        },
+        "oid": "3a12dacd8e86802d0229d810d3cc69ab548adf0a",
+        "path": "tokenizer.json",
+        "size": 15524095,
+        "type": "file"
+      },
+      {
+        "oid": "c182c54743fe1735b0d5eb3959b9757a160879e8",
+        "path": "tokenizer_config.json",
+        "size": 2654,
+        "type": "file"
+      },
+      {
+        "oid": "ea953a43348cdb3776cb7fd9ea02e3784febde34",
+        "path": "vocab.json",
+        "size": 3910310,
+        "type": "file"
+      }
+    ],
+    "inputs": {
+      "chat_template.jinja": {
+        "sha256": "febf589225c9728ab791f52e8897d7607a823d45368f0a4c92fa68997b40cce9",
+        "size": 423
+      },
+      "genai_config.json": {
+        "sha256": "8b7206f5f94e84cc0f80d90458cbb6a77caa61ce97e2d694661b9ed0286c820b",
+        "size": 1720
+      },
+      "tokenizer_config.json": {
+        "sha256": "35aab11f13510ccb463fe7e2e54b86eb29406e66b801a66e90e85b89e6da988c",
+        "size": 2654
+      }
+    },
+    "repository": "https://huggingface.co/amd/phi-4-mini-instruct-oga-dml"
+  }
+}

@@ -39,6 +39,9 @@ from pathlib import Path
 from tools import report_phi4_corelib_baseline as report
 from tools.report_phi4_corelib_baseline import (
     MIN_DETERMINISM_RUNS_PER_ROUTE,
+    crossover_edge_stability,
+    crossover_entry,
+    merge_crossover_history,
     ROUTE_DEPENDENCE_ALPHA,
     _fisher_exact_two_sided,
     REQUIRED_IDENTITY_FIELDS,
@@ -1112,6 +1115,26 @@ class MixedLocalisationWindowTests(unittest.TestCase):
         # divergence, must not appear.
         self.assertNotIn("layer at which it enters", text)
 
+        # THE EVIDENCE ITSELF, which the first version silently dropped.
+        #
+        # The trailing conditional bound to the whole concatenation rather
+        # than the last clause, so with no model_body event the count and the
+        # steps were discarded and the paragraph began with a bare period.
+        # This test used to pass over that because it asserted only the
+        # trailing substring.
+        self.assertIn("In the **1** `lm_head` event(s)", text)
+        self.assertIn("`decode[3]`", text)
+        paragraph = next(
+            line
+            for line in text.splitlines()
+            if "LM-head dispatch" in line and "DETERM-1" in line
+        )
+        self.assertFalse(
+            paragraph.startswith("."),
+            f"the paragraph lost its leading sentence: {paragraph!r}",
+        )
+        self.assertTrue(paragraph.startswith("In the "), paragraph)
+
 
 class InterleavingAttestationTests(unittest.TestCase):
     """N-3. The interleaving claim is checked against the timeline, not taken
@@ -1203,6 +1226,206 @@ class InterleavingAttestationTests(unittest.TestCase):
         self.assertTrue(
             any("do not alternate" in p for p in validate(document))
         )
+
+
+class ValidatorUsabilityTests(unittest.TestCase):
+    """A present-but-unusable field must fail, not skip.
+
+    `field not in point` accepts a null, so a record with every
+    `sample_starts_ns` set to null validated clean — the skip-instead-of-fail
+    shape this task closed twice elsewhere, reintroduced in the check added to
+    close it.
+    """
+
+    def test_null_sample_starts_are_rejected(self):
+        document = _baseline()
+        for point in document["continuation"]["points"]:
+            point["sample_starts_ns"] = None
+        problems = validate(document)
+        self.assertTrue(
+            any("sample_starts_ns" in p for p in problems), problems
+        )
+
+    def test_empty_sample_starts_are_rejected(self):
+        document = _baseline()
+        document["continuation"]["points"][0]["sample_starts_ns"] = []
+        self.assertTrue(
+            any("sample_starts_ns" in p for p in validate(document))
+        )
+
+    def test_non_integer_sample_starts_are_rejected(self):
+        document = _baseline()
+        document["continuation"]["points"][0]["sample_starts_ns"] = [
+            0,
+            "200",
+            400,
+            600,
+            800,
+        ]
+        self.assertTrue(
+            any("non-integer" in p for p in validate(document))
+        )
+
+    def test_null_drift_is_rejected(self):
+        document = _baseline()
+        document["continuation"]["points"][0]["drift_ns"] = None
+        self.assertTrue(any("drift_ns" in p for p in validate(document)))
+
+    def test_a_point_with_only_one_route_is_rejected(self):
+        document = _baseline()
+        document["continuation"]["points"] = [
+            document["continuation"]["points"][0]
+        ]
+        problems = validate(document)
+        self.assertTrue(
+            any("has no reprefill entry" in p for p in problems), problems
+        )
+
+
+class CrossoverHistoryTests(unittest.TestCase):
+    """Task 14 reads the document, not the task report.
+
+    The document published `(4, 12]` and `(12, 64]` with margins beside them
+    and never said the upper edge had been 8 and 16 one run earlier. A reader
+    takes an edge with a margin as measured; one of these is, and the other
+    moved by a factor of four between runs of the same binary.
+    """
+
+    def _entry(self, utc, lower512, upper512, lower2048, upper2048,
+               interleaved=True, undecided=()):
+        document = _baseline()
+        document["identity"]["utc"] = utc
+        document["continuation"]["samples_interleaved"] = interleaved
+        document["continuation"]["crossover"] = {
+            "512": {
+                "append_wins_up_to": lower512,
+                "reprefill_wins_from": upper512,
+                "decisions": [
+                    {"suffix": 4, "decided": True},
+                    {"suffix": 8, "decided": 8 not in undecided},
+                ],
+            },
+            "2048": {
+                "append_wins_up_to": lower2048,
+                "reprefill_wins_from": upper2048,
+                "decisions": [{"suffix": 12, "decided": True}],
+            },
+        }
+        return crossover_entry(document, source=f"test:{utc}")
+
+    def test_an_entry_reduces_a_document_to_its_edges(self):
+        entry = self._entry("2026-09-02T15:34:01Z", 4, 8, 12, 16)
+        self.assertEqual(entry["edges"], {"512": [4, 8], "2048": [12, 16]})
+        self.assertEqual(entry["points_decided"], 3)
+        self.assertEqual(entry["points_total"], 3)
+        self.assertTrue(entry["samples_interleaved"])
+
+    def test_undecided_points_are_recorded_by_history(self):
+        entry = self._entry(
+            "2026-09-02T16:32:18Z", 4, 12, 12, 64, undecided=(8,)
+        )
+        self.assertEqual(entry["undecided_suffixes"], {"512": [8]})
+        self.assertEqual(entry["points_decided"], 2)
+
+    def test_merging_the_same_run_twice_adds_one_observation(self):
+        entry = self._entry("2026-09-02T15:34:01Z", 4, 8, 12, 16)
+        history = merge_crossover_history([], entry)
+        history = merge_crossover_history(history, entry)
+        self.assertEqual(len(history), 1)
+
+    def test_history_is_ordered_by_measurement_time(self):
+        late = self._entry("2026-09-02T16:32:18Z", 4, 12, 12, 64)
+        early = self._entry("2026-09-02T15:34:01Z", 4, 8, 12, 16)
+        history = merge_crossover_history(
+            merge_crossover_history([], late), early
+        )
+        self.assertEqual(
+            [item["utc"] for item in history],
+            ["2026-09-02T15:34:01Z", "2026-09-02T16:32:18Z"],
+        )
+
+    def test_stability_sees_a_moving_upper_edge(self):
+        history = [
+            self._entry("2026-09-02T15:34:01Z", 4, 8, 12, 16),
+            self._entry("2026-09-02T16:32:18Z", 4, 12, 12, 64),
+        ]
+        stability = crossover_edge_stability(history)
+        self.assertTrue(stability["lower_is_stable"])
+        self.assertFalse(stability["upper_is_stable"])
+        self.assertEqual(stability["upper_observed"]["2048"], [16, 64])
+        self.assertEqual(stability["lower_stable"]["512"], [4])
+
+    def test_non_interleaved_runs_do_not_vote(self):
+        history = [
+            self._entry(
+                "2026-09-02T14:55:44Z", 9, 9, 9, 9, interleaved=False
+            ),
+            self._entry("2026-09-02T15:34:01Z", 4, 8, 12, 16),
+            self._entry("2026-09-02T16:32:18Z", 4, 12, 12, 64),
+        ]
+        stability = crossover_edge_stability(history)
+        self.assertEqual(stability["runs_considered"], 2)
+        self.assertEqual(stability["lower_stable"]["512"], [4])
+
+    def test_the_document_publishes_the_history_and_the_guidance(self):
+        document = _baseline()
+        document["crossover_history"] = [
+            self._entry("2026-09-02T15:34:01Z", 4, 8, 12, 16),
+            self._entry(
+                "2026-09-02T16:32:18Z", 4, 12, 12, 64, undecided=(8,)
+            ),
+        ]
+        text = render_markdown(document)
+        self.assertIn("The same measurement, run to run", text)
+        self.assertIn("2026-09-02T15:34:01Z", text)
+        self.assertIn("Read the lower edge as measured", text)
+        self.assertIn("upper edge as an upper bound", text)
+        self.assertIn("[16, 64]", text)
+
+    def test_a_single_run_publishes_no_stability_claim(self):
+        document = _baseline()
+        document["crossover_history"] = [
+            self._entry("2026-09-02T15:34:01Z", 4, 8, 12, 16)
+        ]
+        self.assertNotIn(
+            "The same measurement, run to run", render_markdown(document)
+        )
+
+    def test_the_undecided_points_are_named_in_the_document(self):
+        # "Four were undecided" tells a reader nothing about where the
+        # measurement ran out.
+        document = _baseline()
+        document["continuation"]["crossover"]["512"]["decisions"] = [
+            {"suffix": 8, "decided": False, "gap_over_uncertainty": 0.6},
+            {"suffix": 12, "decided": True, "gap_over_uncertainty": 19.3},
+        ]
+        text = render_markdown(document)
+        self.assertIn("Undecided points", text)
+        self.assertIn("history 512 at suffix 8", text)
+
+    def test_the_2x_exemption_is_scoped_to_a_single_point(self):
+        text = render_markdown(_baseline())
+        self.assertIn("exemption is for a single point, not for the bracket", text)
+        # And the sentence that granted it unconditionally is gone.
+        self.assertNotIn("measured and subtracted rather than assumed away", text)
+
+
+class InstrumentCaveatWordingTests(unittest.TestCase):
+    def test_the_withdrawn_rate_claim_is_not_republished(self):
+        # Report section 26 withdrew "a rate consistent with the
+        # uninstrumented campaigns"; this fix round had republished it as a
+        # hardcoded literal into the reader-facing document, where it carried
+        # no correction and no supporting data.
+        records = _determ_runs("append", 40) + [
+            _determ_with_localisation("append", "decode[8]", 2571)
+        ]
+        records += _determ_runs("reprefill", 41)
+        document = _baseline()
+        document["determinism"] = determinism_baseline(records)
+        text = render_markdown(document)
+        self.assertIn("instrument perturbs what it measures", text)
+        self.assertNotIn("rate consistent with the uninstrumented", text)
+        self.assertIn("with the same coarse signature", text)
 
 
 if __name__ == "__main__":

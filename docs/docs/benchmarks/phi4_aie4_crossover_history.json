@@ -1,0 +1,142 @@
+[
+  {
+    "utc": "2026-09-02T13:12:13Z",
+    "fastflow_revision": "00332b995ce2da95b2bf0309f1d06615fc58d681",
+    "corelib_dll_sha256": "a523b23837c9bea3b06f8f8ae74e1e8292092eb73aaa93791022c448b865ecdb",
+    "samples_interleaved": null,
+    "suffix_grid": [
+      1,
+      2,
+      32,
+      128,
+      256
+    ],
+    "edges": {
+      "2048": [
+        2,
+        null
+      ],
+      "512": [
+        2,
+        null
+      ]
+    },
+    "points_decided": 0,
+    "points_total": 0,
+    "undecided_suffixes": {},
+    "source": "git:47680585:docs/docs/benchmarks/phi4_aie4_baseline.json",
+    "note": "sparse five-point grid; reported a single threshold, retracted as a grid artifact (report section 12). Not comparable."
+  },
+  {
+    "utc": "2026-09-02T14:55:44Z",
+    "fastflow_revision": "21ad125ffdea96341d7bf898348dcccc1c26e0ad-untracked-only",
+    "corelib_dll_sha256": "a523b23837c9bea3b06f8f8ae74e1e8292092eb73aaa93791022c448b865ecdb",
+    "samples_interleaved": null,
+    "suffix_grid": [
+      1,
+      2,
+      4,
+      8,
+      12,
+      16,
+      24,
+      32,
+      64,
+      128,
+      256
+    ],
+    "edges": {
+      "2048": [
+        12,
+        16
+      ],
+      "512": [
+        4,
+        8
+      ]
+    },
+    "points_decided": 21,
+    "points_total": 22,
+    "undecided_suffixes": {
+      "2048": [
+        32
+      ]
+    },
+    "source": "git:3c532e80:docs/docs/benchmarks/phi4_aie4_baseline.json"
+  },
+  {
+    "utc": "2026-09-02T15:34:01Z",
+    "fastflow_revision": "26f2dcb5d2d8d8b7cd2915f5a56db94e5a68fb7d-untracked-only",
+    "corelib_dll_sha256": "a523b23837c9bea3b06f8f8ae74e1e8292092eb73aaa93791022c448b865ecdb",
+    "samples_interleaved": true,
+    "suffix_grid": [
+      1,
+      2,
+      4,
+      8,
+      12,
+      16,
+      24,
+      32,
+      64,
+      128,
+      256
+    ],
+    "edges": {
+      "2048": [
+        12,
+        16
+      ],
+      "512": [
+        4,
+        8
+      ]
+    },
+    "points_decided": 22,
+    "points_total": 22,
+    "undecided_suffixes": {},
+    "source": "git:1d573e30:docs/docs/benchmarks/phi4_aie4_baseline.json"
+  },
+  {
+    "utc": "2026-09-02T16:32:18Z",
+    "fastflow_revision": "a02a2cf7e6cda62ab21e1383de2674b933ed2b74-untracked-only",
+    "corelib_dll_sha256": "a523b23837c9bea3b06f8f8ae74e1e8292092eb73aaa93791022c448b865ecdb",
+    "samples_interleaved": true,
+    "suffix_grid": [
+      1,
+      2,
+      4,
+      8,
+      12,
+      16,
+      24,
+      32,
+      64,
+      128,
+      256
+    ],
+    "edges": {
+      "2048": [
+        12,
+        64
+      ],
+      "512": [
+        4,
+        12
+      ]
+    },
+    "points_decided": 18,
+    "points_total": 22,
+    "undecided_suffixes": {
+      "2048": [
+        16,
+        24,
+        32
+      ],
+      "512": [
+        8
+      ]
+    },
+    "source": "git:90300b0a:docs/docs/benchmarks/phi4_aie4_baseline.json"
+  }
+]

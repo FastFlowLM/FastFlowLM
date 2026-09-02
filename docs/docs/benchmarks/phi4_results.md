@@ -53,7 +53,9 @@ Recorded per design section 15.6, **without pass/fail thresholds**. Design secti
 
 > **Every latency and throughput figure here comes from ONE run on a shared lab machine.** Task 13 ran this same benchmark three times against the same binary and the same model within two hours and measured decode throughput of 22.5, 22.4 and 12.4 tokens/s at context 128 — a factor of 1.8, with no code change. Within a single run, per-token append latency stepped from 76 ms to 46 ms partway through the continuation sweep and stayed there. The machine runs corporate endpoint agents whose scans are not under this project's control, and the host share of a decode token is large enough for CPU contention to show.
 
-> **Two different comparisons, and they do not share a rule.** Comparing a figure here against one from a DIFFERENT run — a later revision, another machine, this document a month from now — is subject to that 1.8x instability, so treat a difference below roughly 2x as unresolved unless it is reproduced across runs. The append-versus-re-prefill comparison below is not that comparison: its samples are **interleaved within a single point**, so a regime shift moves both routes together, and each point additionally has to beat the drift measured across it. That is why it can resolve differences the 2x rule could not — the instability it would be guarding against has been measured and subtracted rather than assumed away.
+> **Two different comparisons, and they do not share a rule.** Comparing a figure here against one from a DIFFERENT run — a later revision, another machine, this document a month from now — is subject to that 1.8x instability, so treat a difference below roughly 2x as unresolved unless it is reproduced across runs. The append-versus-re-prefill decision AT EACH POINT is not that comparison: its samples are **interleaved within a single point**, so a regime shift moves both routes together, and each point additionally has to beat the drift measured across it. That is why a single point can resolve differences the 2x rule could not.
+
+> **The exemption is for a single point, not for the bracket.** Whether a given suffix can be decided depends on how quiet the machine was during that point, so the SET of decided points — and therefore the bracket's width — is subject to the same run-to-run instability as everything else here. The run-to-run table under "Where append stops winning" shows how far it has actually moved.
 
 ### Identity
 
@@ -171,6 +173,23 @@ Recorded per design section 15.6, **without pass/fail thresholds**. Design secti
 
 18 of 22 sweep points were decided; 4 were not and widen the brackets above. The margin column is the gap between the routes divided by the uncertainty it had to beat at that suffix.
 
+Undecided points, which is where the bracket's width comes from: history 2048 at suffix 16, 24, 32; history 512 at suffix 8.
+
+##### The same measurement, run to run
+
+**The bracket's upper edge is not stable and its lower edge is.** This table is every render of this document that recorded a crossover, from the committed baseline artifacts.
+
+| measured (UTC) | interleaved | grid | history 2048 | history 512 | decided | note |
+| --- | :---: | ---: | ---: | ---: | ---: | :--- |
+| 2026-09-02T13:12:13Z | no | 5 points | threshold `2` | threshold `2` | n/a | sparse five-point grid; reported a single threshold, retracted as a grid artifact (report section 12). Not comparable. |
+| 2026-09-02T14:55:44Z | no | 11 points | `(12, 16]` | `(4, 8]` | 21/22 |  |
+| 2026-09-02T15:34:01Z | yes | 11 points | `(12, 16]` | `(4, 8]` | 22/22 |  |
+| 2026-09-02T16:32:18Z | yes | 11 points | `(12, 64]` | `(4, 12]` | 18/22 |  |
+
+> **Read the lower edge as measured and the upper edge as an upper bound.** Across the 2 interleaved runs the lower edge has been **12** at history 2048, **4** at history 512 every time, while the upper edge has taken the values [16, 64] at history 2048; [8, 12] at history 512 on the same binary and the same model. The upper edge moves with how quiet the machine was, because that is what decides how many points near the crossover can be called at all.
+
+The 1 non-interleaved run(s) in the table are excluded from that comparison, because they measured the routes in blocks rather than paired in time. They are shown for provenance — and their lower edges agree with the interleaved ones, which is a point in the lower edge's favour that the stability test above deliberately does not count.
+
 Prefix-monotonic: `True`. Decision rule: append and re-prefill samples are INTERLEAVED, so a machine regime shift moves both routes together; a point is decided only when the gap between the two routes' p50 exceeds BOTH the larger within-point p50-to-p95 spread AND the larger drift between a route's first and last sample at that point. The reported figure is a BRACKET, not a threshold..
 
 ### V scatter, memory and synchronization
@@ -208,7 +227,7 @@ Observed maximum absolute difference, `append`: `49.2148` × 1, `49.25` × 1.
 
 At the step whose logits first differ, the harness records the exact row that was fed to the LM head in each run, so this is an observation and not an inference. **2 event(s): `model_body`**.
 
-> **The instrument perturbs what it measures.** These 2 localisation(s) were measured by capturing the LM-head input after every model step, which adds a host tensor read and a stream acquisition between steps — changing the timing of exactly the window a race would occupy. The phenomenon survives the instrumentation: it still reproduces at a rate consistent with the uninstrumented campaigns. What this data cannot rule out is that the capture shifts the rate, or which step is reached first.
+> **The instrument perturbs what it measures.** These 2 localisation(s) were measured by capturing the LM-head input after every model step, which adds a host tensor read and a stream acquisition between steps — changing the timing of exactly the window a race would occupy. The phenomenon survives the instrumentation: it still reproduces, and with the same coarse signature. What this data cannot rule out is that the capture shifts the rate, or which step is reached first — the campaigns are far too small to detect either.
 
 In the **2** `model_body` event(s) the two runs fed the LM head **different rows** — 2,571, 2,754 of 3,072 elements differing, at `decode[6]`, `decode[8]`. **In those events the divergence enters the model body, not the LM-head dispatch.** Each run's LM head was separately measured to be correctly rounded against its own input, so it is faithfully transforming inputs that already differ.
 

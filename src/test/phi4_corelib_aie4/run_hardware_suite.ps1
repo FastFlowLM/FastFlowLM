@@ -157,6 +157,27 @@ function Remove-ConsumedArtifact {
 #
 # Every record is copied out to a committed directory, not just the breaching
 # ones: a rate is only auditable if the clean runs it rests on are there too.
+# StrictMode makes `$object.missing` a terminating error, not $null. So a
+# VALID record that simply lacks `verdict` -- a truncated write, a future
+# schema, a tool that failed before filling it in -- threw at the first
+# interpolation and crashed the suite instead of reaching the fail-closed
+# routing added to catch exactly that case. Reading through these helpers
+# turns an absent property back into a value the routing can classify.
+function Get-JsonField {
+    param($Object, [string]$Name)
+    if ($null -eq $Object) { return $null }
+    $property = $Object.PSObject.Properties[$Name]
+    if ($null -eq $property) { return $null }
+    return $property.Value
+}
+
+function Get-VerdictName {
+    param($Object)
+    $value = Get-JsonField $Object 'verdict'
+    if ($null -eq $value -or "$value" -eq '') { return '<absent>' }
+    return "$value"
+}
+
 function Save-DeterminismRecord {
     param([string]$Path, [string]$Destination)
     if (-not (Test-Path $Path)) { return $null }
@@ -841,11 +862,12 @@ if (-not $ModelDir) {
                         }
                         if ($lm) {
                             $lmHeadRuns++
+                            $verdict = Get-VerdictName $lm
                             Write-Output ("  Step 9b verdict [$tag]: " +
-                                "$($lm.verdict)")
-                            $note = ("Step 9b [$tag]: $($lm.verdict); " +
+                                "$verdict")
+                            $note = ("Step 9b [$tag]: $verdict; " +
                                 "LM-head inputs identical: " +
-                                "$($lm.lm_head_inputs_identical)")
+                                "$(Get-JsonField $lm 'lm_head_inputs_identical')")
                             $bitExactNotes += $note
                             $beyondRounding = @(
                                 'common_bias',
@@ -865,14 +887,14 @@ if (-not $ModelDir) {
                                 'benign_accumulation_order',
                                 'benign_no_divergence_in_sample',
                                 'model_body_divergence') + $beyondRounding
-                            if (-not ($known -contains $lm.verdict)) {
+                            if (-not ($known -contains $verdict)) {
                                 Write-Output ("  STEP 9b RETURNED AN " +
                                     "UNRECOGNISED VERDICT ($tag): " +
-                                    "'$($lm.verdict)'")
+                                    "'$verdict'")
                                 $failures += ("Step 9b [$tag]: unrecognised " +
-                                    "verdict '$($lm.verdict)' with a " +
+                                    "verdict '$verdict' with a " +
                                     "non-zero exit; failing closed")
-                            } elseif ($beyondRounding -contains $lm.verdict) {
+                            } elseif ($beyondRounding -contains $verdict) {
                                 Write-Output ("  STEP 9b REPORTS SOMETHING " +
                                     "BEYOND ROUNDING ($tag): " +
                                     "$($lm.verdict)")
@@ -881,7 +903,7 @@ if (-not $ModelDir) {
                                     "accumulation-order nondeterminism " +
                                     "DETERM-1 accepts")
                             } elseif (
-                                $lm.verdict -eq 'model_body_divergence' -and
+                                $verdict -eq 'model_body_divergence' -and
                                 -not $gateFailed) {
                                 Write-Output ("  STEP 9b FOUND A MODEL-BODY " +
                                     "DIVERGENCE THAT NO GATE CAUGHT ($tag)")
@@ -900,12 +922,17 @@ if (-not $ModelDir) {
                                 "record for $tag")
                         }
                     }
-                    if (Test-Path $lmHeadJson) {
-                        $lm = Get-Content $lmHeadJson -Raw | ConvertFrom-Json
+                    # $lm is whatever the success or the catch path already
+                    # parsed. Re-reading and re-parsing here was a second,
+                    # UNGUARDED ConvertFrom-Json of the same file: on a
+                    # truncated record it threw and aborted the suite three
+                    # lines after the failure had been recorded, so the
+                    # summary that carries the finding never printed.
+                    if ($lm) {
                         Write-Output ("  Step 9b [$tag]: verdict " +
-                            "$($lm.verdict), LM-head inputs identical " +
-                            "$($lm.lm_head_inputs_identical) at " +
-                            "$($lm.analysed_step)")
+                            "$(Get-VerdictName $lm), LM-head inputs " +
+                            "identical $(Get-JsonField $lm 'lm_head_inputs_identical') " +
+                            "at $(Get-JsonField $lm 'analysed_step')")
                     }
                 } else {
                     Remove-ConsumedArtifact @($aJson, $bJson)
@@ -1019,6 +1046,15 @@ if (-not $ModelDir) {
                     '--input', $baselineJson,
                     '--determinism-glob', $determGlob,
                     '--markdown', (Join-Path $repoRoot 'docs/docs/benchmarks/phi4_results.md'),
+                    # The crossover edges of every previous render, committed.
+                    #
+                    # Without this the document publishes a bracket with
+                    # margins beside it and no indication that its upper edge
+                    # moved by a factor of four between two runs of the same
+                    # binary. Task 14 reads the document, not the task report,
+                    # and an edge with a margin beside it reads as measured.
+                    '--crossover-history',
+                    (Join-Path $repoRoot 'docs/docs/benchmarks/phi4_aie4_crossover_history.json'),
                     '--output-json', (Join-Path $BuildDir 'phi4_aie4_baseline_merged.json')
                 )
                 $ran += 'baseline report rendered (validated, DETERM-3 baseline established)'

@@ -315,15 +315,33 @@ def _continuation_problems(continuation: object) -> list[str]:
     for point in points:
         if not isinstance(point, dict):
             continue
-        for field in ("drift_ns", "sample_starts_ns"):
-            if field not in point:
-                problems.append(
-                    f"continuation point "
-                    f"{point.get('history_rows')}/{point.get('suffix')}"
-                    f"/{point.get('route')} has no {field}: the drift term is "
-                    f"half the decision rule, and without the sample starts "
-                    f"the interleaving cannot be checked"
-                )
+        # PRESENT IS NOT USABLE. `field not in point` accepts a null, and a
+        # record with every `sample_starts_ns` set to null validated clean --
+        # the same skip-instead-of-fail shape this round closed twice
+        # elsewhere, reintroduced in the check added to close it.
+        if not isinstance(point.get("drift_ns"), int):
+            problems.append(
+                f"continuation point "
+                f"{point.get('history_rows')}/{point.get('suffix')}"
+                f"/{point.get('route')}: drift_ns is "
+                f"{point.get('drift_ns')!r}, not an integer. The drift term "
+                f"is half the decision rule."
+            )
+        starts = point.get("sample_starts_ns")
+        if not isinstance(starts, list) or not starts:
+            problems.append(
+                f"continuation point "
+                f"{point.get('history_rows')}/{point.get('suffix')}"
+                f"/{point.get('route')}: sample_starts_ns is {starts!r}, not "
+                f"a non-empty list. Without it the interleaving cannot be "
+                f"checked and the published claim is unattested."
+            )
+        elif not all(isinstance(value, int) for value in starts):
+            problems.append(
+                f"continuation point "
+                f"{point.get('history_rows')}/{point.get('suffix')}"
+                f"/{point.get('route')}: sample_starts_ns holds a non-integer"
+            )
         key = (point.get("history_rows"), point.get("suffix"))
         route = str(point.get("route"))
         by_point.setdefault(key, {})[route] = point
@@ -331,9 +349,27 @@ def _continuation_problems(continuation: object) -> list[str]:
     for key, routes in sorted(
         by_point.items(), key=lambda item: (str(item[0][0]), str(item[0][1]))
     ):
+        # A point with only one route was skipped silently. Both routes are
+        # measured at every point by construction, so one missing means the
+        # record is not what the document says it is.
+        missing = {"append", "reprefill"} - set(routes)
+        if missing:
+            problems.append(
+                f"continuation point {key[0]}/{key[1]} has no "
+                f"{', '.join(sorted(missing))} entry, so the two routes "
+                f"cannot have been interleaved there"
+            )
+            continue
         append = routes.get("append", {}).get("sample_starts_ns")
         reprefill = routes.get("reprefill", {}).get("sample_starts_ns")
         if not isinstance(append, list) or not isinstance(reprefill, list):
+            continue
+        # Already reported above as a bad field. Sorting a mixed list of
+        # strings and ints raises, which would turn a reportable defect in the
+        # record into a crash in the validator.
+        if not all(
+            isinstance(value, int) for value in append + reprefill
+        ):
             continue
         if len(append) != len(reprefill):
             problems.append(
@@ -686,6 +722,103 @@ def determinism_baseline(records: list[dict]) -> dict:
     }
 
 
+def crossover_entry(document: dict, source: str = "") -> dict:
+    """One run's crossover edges, reduced to what a history needs.
+
+    Task 14 reads the benchmark document, not the task report. The document
+    published `(4, 12]` and `(12, 64]` with margins and one sentence saying
+    four points were undecided -- and nowhere that the upper edge had been
+    `8` and `16` one run earlier. A reader takes an edge with a margin beside
+    it as measured. One of these edges is; the other moved by a factor of
+    four between two runs of the same binary.
+    """
+    identity = document.get("identity", {})
+    continuation = document.get("continuation", {})
+    crossover = continuation.get("crossover") or {}
+    edges: dict[str, list] = {}
+    undecided: dict[str, list] = {}
+    decided = 0
+    total = 0
+    for history, entry in crossover.items():
+        edges[str(history)] = [
+            entry.get("append_wins_up_to"),
+            entry.get("reprefill_wins_from"),
+        ]
+        for decision in entry.get("decisions", []):
+            total += 1
+            if decision.get("decided"):
+                decided += 1
+            else:
+                undecided.setdefault(str(history), []).append(
+                    decision.get("suffix")
+                )
+    return {
+        "utc": identity.get("utc"),
+        "fastflow_revision": identity.get("fastflow_revision"),
+        "corelib_dll_sha256": identity.get("corelib_dll_sha256"),
+        "samples_interleaved": continuation.get("samples_interleaved"),
+        "suffix_grid": continuation.get("suffixes"),
+        "edges": edges,
+        "points_decided": decided,
+        "points_total": total,
+        "undecided_suffixes": {
+            key: sorted(value) for key, value in sorted(undecided.items())
+        },
+        "source": source,
+    }
+
+
+def merge_crossover_history(history: list[dict], entry: dict) -> list[dict]:
+    """Append `entry` unless a run with the same UTC stamp is already there.
+
+    Keyed on the measurement time rather than on position, so re-rendering the
+    same baseline twice does not invent a second observation.
+    """
+    stamps = {item.get("utc") for item in history}
+    if entry.get("utc") in stamps:
+        return history
+    return sorted(
+        history + [entry], key=lambda item: str(item.get("utc") or "")
+    )
+
+
+def crossover_edge_stability(history: list[dict]) -> dict:
+    """Which edges have held across runs and which have not.
+
+    Derived from the history rather than asserted, because the conclusion --
+    read the lower edge as measured and the upper as an upper bound -- is
+    exactly the kind of guidance that was living in a task report where the
+    reader who needs it will not look.
+    """
+    lower: dict[str, set] = {}
+    upper: dict[str, set] = {}
+    for item in history:
+        if not item.get("samples_interleaved"):
+            # A non-interleaved run measured a different thing; it is kept in
+            # the table for provenance but must not vote on stability.
+            continue
+        for key, edge in (item.get("edges") or {}).items():
+            if not isinstance(edge, list) or len(edge) != 2:
+                continue
+            lower.setdefault(key, set()).add(edge[0])
+            upper.setdefault(key, set()).add(edge[1])
+    return {
+        "runs_considered": sum(
+            1 for item in history if item.get("samples_interleaved")
+        ),
+        "lower_stable": {
+            key: sorted(values) for key, values in sorted(lower.items())
+        },
+        "upper_observed": {
+            key: sorted(values) for key, values in sorted(upper.items())
+        },
+        "lower_is_stable": all(len(values) == 1 for values in lower.values())
+        and bool(lower),
+        "upper_is_stable": all(len(values) == 1 for values in upper.values())
+        and bool(upper),
+    }
+
+
 def load_determinism_records(pattern: str) -> list[dict]:
     records = []
     for path in sorted(globlib.glob(pattern)):
@@ -773,13 +906,30 @@ def render_markdown(document: dict) -> str:
         "revision, another machine, this document a month from now — is "
         "subject to that 1.8x instability, so treat a difference below "
         "roughly 2x as unresolved unless it is reproduced across runs. The "
-        "append-versus-re-prefill comparison below is not that comparison: "
-        "its samples are **interleaved within a single point**, so a regime "
-        "shift moves both routes together, and each point additionally has "
-        "to beat the drift measured across it. That is why it can resolve "
-        "differences the 2x rule could not — the instability it would be "
-        "guarding against has been measured and subtracted rather than "
-        "assumed away."
+        "append-versus-re-prefill decision AT EACH POINT is not that "
+        "comparison: its samples are **interleaved within a single point**, "
+        "so a regime shift moves both routes together, and each point "
+        "additionally has to beat the drift measured across it. That is why "
+        "a single point can resolve differences the 2x rule could not."
+    )
+    add("")
+    # SCOPED, because the exemption above was being read too widely.
+    #
+    # This blockquote used to end "the instability it would be guarding
+    # against has been measured and subtracted rather than assumed away",
+    # full stop -- which tells a reader that the crossover bracket is exempt
+    # from run-to-run doubt. Its upper edge then moved from 16 to 64 between
+    # two runs of the same binary. The per-point decision is paired in time;
+    # WHICH points can be decided at all is not, and the bracket is built out
+    # of that.
+    add(
+        "> **The exemption is for a single point, not for the bracket.** "
+        "Whether a given suffix can be decided depends on how quiet the "
+        "machine was during that point, so the SET of decided points — and "
+        "therefore the bracket's width — is subject to the same run-to-run "
+        "instability as everything else here. The run-to-run table under "
+        "\"Where append stops winning\" shows how far it has actually "
+        "moved."
     )
     add("")
     add("### Identity")
@@ -940,11 +1090,15 @@ def render_markdown(document: dict) -> str:
                     f"{', '.join(margins) if margins else 'n/a'} |"
                 )
             add("")
+            undecided_by_history: dict[str, list] = {}
+            for history, entry in crossover.items():
+                for decision in entry.get("decisions", []):
+                    if not decision.get("decided"):
+                        undecided_by_history.setdefault(
+                            str(history), []
+                        ).append(decision.get("suffix"))
             undecided = sum(
-                1
-                for entry in crossover.values()
-                for decision in entry.get("decisions", [])
-                if not decision.get("decided")
+                len(value) for value in undecided_by_history.values()
             )
             total = sum(
                 len(entry.get("decisions", [])) for entry in crossover.values()
@@ -956,6 +1110,146 @@ def render_markdown(document: dict) -> str:
                 f"uncertainty it had to beat at that suffix."
             )
             add("")
+            # WHICH points, not just how many. "Four were undecided" tells a
+            # reader nothing about where the measurement ran out.
+            if undecided_by_history:
+                add(
+                    "Undecided points, which is where the bracket's width "
+                    "comes from: "
+                    + "; ".join(
+                        f"history {key} at suffix "
+                        + ", ".join(str(value) for value in sorted(values))
+                        for key, values in sorted(
+                            undecided_by_history.items()
+                        )
+                    )
+                    + "."
+                )
+                add("")
+
+            history = document.get("crossover_history") or []
+            if len(history) > 1:
+                stability = crossover_edge_stability(history)
+                add("##### The same measurement, run to run")
+                add("")
+                add(
+                    "**The bracket's upper edge is not stable and its lower "
+                    "edge is.** This table is every render of this document "
+                    "that recorded a crossover, from the committed baseline "
+                    "artifacts."
+                )
+                add("")
+                add(
+                    "| measured (UTC) | interleaved | grid | "
+                    + " | ".join(
+                        f"history {key}"
+                        for key in sorted(
+                            {
+                                key
+                                for item in history
+                                for key in (item.get("edges") or {})
+                            }
+                        )
+                    )
+                    + " | decided | note |"
+                )
+                keys = sorted(
+                    {
+                        key
+                        for item in history
+                        for key in (item.get("edges") or {})
+                    }
+                )
+                add(
+                    "| --- | :---: | ---: | "
+                    + " | ".join(["---:"] * len(keys))
+                    + " | ---: | :--- |"
+                )
+                for item in history:
+                    cells = []
+                    for key in keys:
+                        edge = (item.get("edges") or {}).get(key)
+                        if not isinstance(edge, list) or len(edge) != 2:
+                            cells.append("n/a")
+                        elif edge[1] is None:
+                            # A run that reported a single threshold rather
+                            # than a bracket. Shown as what it was, not as a
+                            # bracket with a hole in it.
+                            cells.append(f"threshold `{edge[0]}`")
+                        else:
+                            cells.append(f"`({edge[0]}, {edge[1]}]`")
+                    decided = (
+                        f"{item.get('points_decided')}"
+                        f"/{item.get('points_total')}"
+                        if item.get("points_total")
+                        else "n/a"
+                    )
+                    note = item.get("note", "")
+                    add(
+                        f"| {item.get('utc', 'n/a')} "
+                        f"| {'yes' if item.get('samples_interleaved') else 'no'} "
+                        f"| {len(item.get('suffix_grid') or [])} points | "
+                        + " | ".join(cells)
+                        + f" | {decided} | {note} |"
+                    )
+                add("")
+                if stability["lower_is_stable"] and not stability[
+                    "upper_is_stable"
+                ]:
+                    add(
+                        "> **Read the lower edge as measured and the upper "
+                        "edge as an upper bound.** Across the "
+                        f"{stability['runs_considered']} interleaved runs the "
+                        "lower edge has been "
+                        + ", ".join(
+                            f"**{values[0]}** at history {key}"
+                            for key, values in stability[
+                                "lower_stable"
+                            ].items()
+                        )
+                        + " every time, while the upper edge has taken the "
+                        "values "
+                        + "; ".join(
+                            f"{values} at history {key}"
+                            for key, values in stability[
+                                "upper_observed"
+                            ].items()
+                        )
+                        + " on the same binary and the same model. The upper "
+                        "edge moves with how quiet the machine was, because "
+                        "that is what decides how many points near the "
+                        "crossover can be called at all."
+                    )
+                    add("")
+                    older = [
+                        item
+                        for item in history
+                        if not item.get("samples_interleaved")
+                        and any(
+                            isinstance(edge, list) and edge[1] is not None
+                            for edge in (item.get("edges") or {}).values()
+                        )
+                    ]
+                    if older:
+                        add(
+                            f"The {len(older)} non-interleaved run(s) in the "
+                            "table are excluded from that comparison, because "
+                            "they measured the routes in blocks rather than "
+                            "paired in time. They are shown for provenance — "
+                            "and their lower edges agree with the interleaved "
+                            "ones, which is a point in the lower edge's favour "
+                            "that the stability test above deliberately does "
+                            "not count."
+                        )
+                        add("")
+                elif stability["lower_is_stable"] and stability[
+                    "upper_is_stable"
+                ]:
+                    add(
+                        f"> Both edges have held across the "
+                        f"{stability['runs_considered']} interleaved runs."
+                    )
+                    add("")
             add(
                 f"Prefix-monotonic: "
                 f"`{continuation.get('prefix_monotonic')}`. Decision rule: "
@@ -1095,6 +1389,17 @@ def render_markdown(document: dict) -> str:
             # it. Conditional on the data: only a per-step capture can measure
             # a localisation at all.
             if instruments:
+                # NO RATE CLAIM HERE.
+                #
+                # This blockquote used to say the phenomenon "still
+                # reproduces at a rate consistent with the uninstrumented
+                # campaigns". That is the sentence report section 26
+                # withdrew -- per route the distribution flipped, and the
+                # comparison would have needed a sevenfold change to register
+                # -- and it was republished as a hardcoded literal into the
+                # reader-facing document, where it carried no correction and
+                # no supporting data. The document contains no uninstrumented
+                # figures at all, so it could not have supported it.
                 add(
                     "> **The instrument perturbs what it measures.** These "
                     f"{sum(instruments.values())} localisation(s) were "
@@ -1102,10 +1407,11 @@ def render_markdown(document: dict) -> str:
                     "model step, which adds a host tensor read and a stream "
                     "acquisition between steps — changing the timing of "
                     "exactly the window a race would occupy. The phenomenon "
-                    "survives the instrumentation: it still reproduces at a "
-                    "rate consistent with the uninstrumented campaigns. What "
-                    "this data cannot rule out is that the capture shifts the "
-                    "rate, or which step is reached first."
+                    "survives the instrumentation: it still reproduces, and "
+                    "with the same coarse signature. What this data cannot "
+                    "rule out is that the capture shifts the rate, or which "
+                    "step is reached first — the campaigns are far too small "
+                    "to detect either."
                 )
                 add("")
             if by_source.get("model_body"):
@@ -1128,23 +1434,38 @@ def render_markdown(document: dict) -> str:
             if by_source.get("lm_head"):
                 count = by_source["lm_head"]
                 steps = sorted(set(steps_by_source.get("lm_head", [])))
-                add(
+                # Built in pieces, deliberately.
+                #
+                # This was one expression with a trailing conditional, and
+                # Python bound the `if` to the WHOLE concatenation rather than
+                # the last clause. In a window with no `model_body` event the
+                # leading sentence -- the count and the steps -- was discarded
+                # and the document published a paragraph beginning with a bare
+                # period, silently losing the evidence. The test passed over
+                # it because it asserted only the trailing substring.
+                where = (
+                    ", at " + ", ".join(f"`{step}`" for step in steps)
+                    if steps
+                    else ""
+                )
+                lead = (
                     f"In the **{count}** `lm_head` event(s) the two runs fed "
                     f"the LM head an **identical** row and it produced "
-                    f"different logits"
-                    + (
-                        ", at " + ", ".join(f"`{step}`" for step in steps)
-                        if steps
-                        else ""
-                    )
-                    + ". That is the case `DETERM-1` describes, and it is a "
-                    "different mechanism from the one above. **Both are "
-                    "present in this window**, so neither explanation covers "
-                    "it alone."
-                    if by_source.get("model_body")
-                    else ". That is the case `DETERM-1` describes: the "
-                    "divergence is inside the LM-head dispatch."
+                    f"different logits{where}."
                 )
+                if by_source.get("model_body"):
+                    tail = (
+                        " That is the case `DETERM-1` describes, and it is a "
+                        "different mechanism from the one above. **Both are "
+                        "present in this window**, so neither explanation "
+                        "covers it alone."
+                    )
+                else:
+                    tail = (
+                        " That is the case `DETERM-1` describes: the "
+                        "divergence is inside the LM-head dispatch."
+                    )
+                add(lead + tail)
                 add("")
             if by_source.get("model_body"):
                 add(
@@ -1248,6 +1569,17 @@ def main(argv: list[str] | None = None) -> int:
         "merged in, to this path",
     )
     parser.add_argument(
+        "--crossover-history",
+        help=(
+            "a committed JSON list of previous runs' crossover edges. This "
+            "run's edges are appended (keyed on the measurement UTC, so "
+            "re-rendering does not invent an observation) and the history is "
+            "rendered into the document. Without it the document publishes a "
+            "bracket with no indication that its upper edge has moved by a "
+            "factor of four between runs of the same binary."
+        ),
+    )
+    parser.add_argument(
         "--allow-incomplete-determinism",
         action="store_true",
         help=(
@@ -1261,6 +1593,19 @@ def main(argv: list[str] | None = None) -> int:
 
     document = json.loads(Path(args.input).read_text(encoding="utf-8"))
     problems = validate(document)
+
+    history: list[dict] = []
+    if args.crossover_history:
+        history_path = Path(args.crossover_history)
+        if history_path.exists():
+            history = json.loads(history_path.read_text(encoding="utf-8"))
+        history = merge_crossover_history(
+            history, crossover_entry(document, source=str(args.input))
+        )
+        history_path.write_text(
+            json.dumps(history, indent=2), encoding="utf-8"
+        )
+        document["crossover_history"] = history
 
     records = load_determinism_records(args.determinism_glob)
     if not records:

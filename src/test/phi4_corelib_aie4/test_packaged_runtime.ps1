@@ -441,7 +441,27 @@ flm_aie4_install_runtime(DESTINATION bin/aie4 COMPONENT AIE4)
 
     if ($FlmExe) {
         $resolvedFlm = (Resolve-Path $FlmExe).Path
-        $imports = (& dumpbin /nologo /dependents $resolvedFlm | Out-String)
+        # -FlmExe is the first positional parameter, so a stray argument from a
+        # mis-quoted argument vector lands here. Refusing a non-file keeps that
+        # mistake from entering this block and reporting a run it never made.
+        if (-not (Test-Path -LiteralPath $resolvedFlm -PathType Leaf)) {
+            throw "-FlmExe is not a file: $resolvedFlm"
+        }
+
+        # dumpbin's exit code is load-bearing. If it runs but errors -- wrong
+        # architecture, missing tool, unreadable image -- its output simply
+        # fails to match the import pattern, and the Step 8 guard passes
+        # vacuously while checking nothing.
+        $imports = (& dumpbin /nologo /dependents $resolvedFlm 2>&1 |
+            Out-String)
+        if ($LASTEXITCODE -ne 0) {
+            throw "dumpbin failed with exit code ${LASTEXITCODE}.`n$imports"
+        }
+        if ($imports -notmatch "(?i)Image has the following dependencies") {
+            throw (
+                "dumpbin produced no dependency listing, so the no-import " +
+                "check would pass vacuously.`n$imports")
+        }
         if ($imports -match "(?im)^\s*ryzenai_corelib\.dll\s*$") {
             throw "flm.exe has an unexpected ryzenai_corelib import"
         }

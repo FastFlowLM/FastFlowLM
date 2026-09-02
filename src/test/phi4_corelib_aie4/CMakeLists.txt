@@ -155,17 +155,55 @@ endif()
 find_program(FLM_POWERSHELL_EXECUTABLE
              NAMES pwsh powershell
              DOC "PowerShell used to run the packaging tests")
+
+# Builds the argument vector for test_packaged_runtime.ps1.
+#
+# `-DependencyDir` takes one argument holding a semicolon-separated list, so
+# the separator must be escaped before it is appended. `list(JOIN ... ";" ...)`
+# followed by `list(APPEND)` does NOT achieve that: the join produces a string
+# that append immediately re-splits, yielding one argv entry per directory.
+#
+# The consequence in PowerShell is worse than a lost directory. `-DependencyDir`
+# binds only the first entry, and each orphan then binds POSITIONALLY -- the
+# next positional parameter is `$FlmExe` -- so a second dependency directory
+# silently becomes the path to the executable under test, turning an honest
+# SKIPPED into a spurious flm.exe run against a directory.
+function(flm_packaged_runtime_args output corelib_dir dependency_dirs)
+    set(_args "")
+    if(corelib_dir)
+        list(APPEND _args -CorelibRuntimeDir "${corelib_dir}")
+    endif()
+    if(dependency_dirs)
+        string(REPLACE ";" "\\;" _escaped "${dependency_dirs}")
+        list(APPEND _args -DependencyDir "${_escaped}")
+    endif()
+    set(${output} "${_args}" PARENT_SCOPE)
+endfunction()
+
+# Self-check on the escaping, run at configure time against a synthetic
+# multi-entry value so it does not depend on how this machine's cache happens
+# to be populated. A single-entry cache masks the defect completely, which is
+# how it survived the previous round.
+flm_packaged_runtime_args(_flm_argv_probe "C:/core" "C:/one;C:/two")
+list(LENGTH _flm_argv_probe _flm_argv_probe_length)
+if(NOT _flm_argv_probe_length EQUAL 4)
+    message(FATAL_ERROR
+        "test_packaged_runtime argument construction flattened a multi-entry "
+        "dependency list into ${_flm_argv_probe_length} arguments instead of "
+        "4. The extra entries bind positionally in PowerShell, so -FlmExe "
+        "would receive a directory: [${_flm_argv_probe}]")
+endif()
+list(GET _flm_argv_probe 3 _flm_argv_probe_deps)
+if(NOT _flm_argv_probe_deps STREQUAL "C:/one;C:/two")
+    message(FATAL_ERROR
+        "test_packaged_runtime dropped a dependency directory: "
+        "[${_flm_argv_probe_deps}]")
+endif()
+
 if(FLM_POWERSHELL_EXECUTABLE)
-    set(_packaged_runtime_args "")
-    if(RYZENAI_CORELIB_RUNTIME_DIR)
-        list(APPEND _packaged_runtime_args
-            -CorelibRuntimeDir "${RYZENAI_CORELIB_RUNTIME_DIR}")
-    endif()
-    if(RYZENAI_CORELIB_EXTRA_DLL_DIRS)
-        list(JOIN RYZENAI_CORELIB_EXTRA_DLL_DIRS ";" _packaged_runtime_deps)
-        list(APPEND _packaged_runtime_args
-            -DependencyDir "${_packaged_runtime_deps}")
-    endif()
+    flm_packaged_runtime_args(_packaged_runtime_args
+        "${RYZENAI_CORELIB_RUNTIME_DIR}"
+        "${RYZENAI_CORELIB_EXTRA_DLL_DIRS}")
     add_test(NAME test_packaged_runtime
              COMMAND "${FLM_POWERSHELL_EXECUTABLE}"
                      -NoProfile

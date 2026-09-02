@@ -144,6 +144,54 @@ if(RYZENAI_CORELIB_RUNTIME_DIR)
         "PATH=path_list_prepend:${XRT_LIB_DIR};PATH=path_list_prepend:${RYZENAI_CORELIB_RUNTIME_DIR}")
 endif()
 
+# The AIE4 hardware suite. These need a real NPU as well as a real DLL, so
+# unlike test_real_corelib they cannot run anywhere but the target -- and like
+# it, they report SKIPPED rather than Passed when the runtime directory is
+# unset, because a green-and-inert hardware check reads as coverage it does not
+# have.
+function(add_corelib_hardware_test TEST_NAME TEST_SOURCE)
+    add_executable(${TEST_NAME} ${TEST_SOURCE})
+    target_link_libraries(${TEST_NAME} PRIVATE
+        flm_corelib_aie4_testlib
+        shell32
+        ole32
+        advapi32)
+    target_compile_definitions(${TEST_NAME} PRIVATE
+        FLM_REAL_CORELIB_RUNTIME_DIR="${RYZENAI_CORELIB_RUNTIME_DIR}"
+        FLM_REAL_CORELIB_EXTRA_DLL_DIRS="${RYZENAI_CORELIB_EXTRA_DLL_DIRS_ESCAPED}")
+    add_test(NAME ${TEST_NAME} COMMAND ${TEST_NAME})
+    set_tests_properties(${TEST_NAME} PROPERTIES
+        SKIP_RETURN_CODE 77
+        # A hardware run loads a 3 GB model and packs its weights, and two
+        # AIE4 contexts at once fail in ways that look like defects. RUN_
+        # SERIAL keeps ctest from overlapping them.
+        RUN_SERIAL ON
+        TIMEOUT 3600)
+    if(RYZENAI_CORELIB_RUNTIME_DIR)
+        set_tests_properties(${TEST_NAME} PROPERTIES
+            ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${XRT_LIB_DIR};PATH=path_list_prepend:${RYZENAI_CORELIB_RUNTIME_DIR}")
+    endif()
+endfunction()
+
+add_corelib_hardware_test(test_phi4_hardware test_phi4_hardware.cpp)
+add_corelib_hardware_test(test_fatal_child test_fatal_child.cpp)
+
+# The end-to-end harness is NOT registered with add_test. It requires a model
+# directory and explicit token IDs, and the reference comparator must run to
+# completion before it starts; run_hardware_suite.ps1 owns that sequencing.
+# Registering it here with no arguments would produce a test that fails for
+# want of a flag on every machine, which is worse than one that is absent.
+add_executable(test_phi4_e2e test_phi4_e2e.cpp)
+target_link_libraries(test_phi4_e2e PRIVATE
+    flm_corelib_aie4_testlib
+    shell32
+    ole32
+    advapi32)
+target_compile_definitions(test_phi4_e2e PRIVATE
+    FLM_REAL_CORELIB_RUNTIME_DIR="${RYZENAI_CORELIB_RUNTIME_DIR}"
+    FLM_REAL_CORELIB_EXTRA_DLL_DIRS="${RYZENAI_CORELIB_EXTRA_DLL_DIRS_ESCAPED}")
+
 # The packaging and clean-environment checks run by default rather than only
 # when someone remembers the command. Every regression guard in that script --
 # the derived closure, the CLOSURE-2 negative control, the no-corelib-import

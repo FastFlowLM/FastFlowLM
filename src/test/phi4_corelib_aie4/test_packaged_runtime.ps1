@@ -13,10 +13,30 @@ param(
     [string]$CorelibRuntimeDir = "",
     [string]$XrtRuntimeDir = "",
     [string]$DependencyDir = "",
+    # The CMake to configure the fixture with. CMakeLists passes
+    # ${CMAKE_COMMAND}, so the guard runs against the same CMake that
+    # configured the suite. The default is only for a hand-run.
+    #
+    # Bare `cmake` is not good enough. On the AIE4 target PATH finds Cygwin's
+    # CMake 3.14.5, which is below the 3.24 that StageAie4Runtime.cmake
+    # requires for file(GET_RUNTIME_DEPENDENCIES) -- so the closure guard
+    # failed for a reason that had nothing to do with the closure.
+    [string]$CmakeExe = "cmake",
     [switch]$RunAie4ModelLoad
 )
 
 $ErrorActionPreference = "Stop"
+
+# Without this, a terminating error inside the script's try/finally exits 1
+# with NOTHING on either stream when the script is launched with `pwsh -File`.
+# That is how the CMake version problem above stayed invisible: the packaging
+# guard reported failure and said nothing about it, which is the worst thing a
+# guard can do.
+trap {
+    [Console]::Error.WriteLine("test_packaged_runtime: $($_.Exception.Message)")
+    [Console]::Error.WriteLine($_.ScriptStackTrace)
+    exit 1
+}
 
 # Skipped work is reported as skipped, never as passed. A script that prints a
 # success line for blocks it never entered reads as coverage it does not have,
@@ -92,7 +112,7 @@ function Invoke-Configure {
     }
     $previousPreference = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
-    $output = (& cmake @arguments 2>&1 |
+    $output = (& $CmakeExe @arguments 2>&1 |
         ForEach-Object { $_.ToString() } |
         Out-String)
     $exitCode = $LASTEXITCODE
@@ -111,7 +131,7 @@ function Invoke-Install {
     )
     $previousPreference = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
-    $output = (& cmake --install $Build --prefix $Prefix 2>&1 |
+    $output = (& $CmakeExe --install $Build --prefix $Prefix 2>&1 |
         ForEach-Object { $_.ToString() } |
         Out-String)
     $exitCode = $LASTEXITCODE

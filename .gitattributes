@@ -1,0 +1,18 @@
+# The AIE4 model overlays are shipped verbatim and their bytes are hashed.
+#
+# `model_list.json` records a byte size and a SHA-256 for every file under
+# `src/model_overlays/`, and the installer copies those files as they sit in
+# the checkout. Git's default `core.autocrlf=true` on Windows rewrites text
+# files on checkout, so a fresh clone gets different bytes, a different size
+# and a different hash from the ones recorded -- and the catalog then describes
+# a file that does not exist on that machine.
+#
+# Measured on the AIE4 target: `test_model_catalog` failed on
+# `record.at("size") == FileSize(path)` for the overlay files, on a clean
+# checkout of the same commit that passes on a development box whose worktree
+# happened to be LF. Nothing about the product was wrong; the checkout was.
+#
+# `-text` disables all end-of-line conversion for these paths in both
+# directions, which is the only setting that makes the recorded hash a property
+# of the commit rather than of the machine that cloned it.
+src/model_overlays/** -text

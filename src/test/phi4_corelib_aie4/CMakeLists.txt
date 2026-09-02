@@ -258,6 +258,13 @@ if(FLM_POWERSHELL_EXECUTABLE)
                      -ExecutionPolicy Bypass
                      -File
                      "${CMAKE_CURRENT_LIST_DIR}/test_packaged_runtime.ps1"
+                     # The CMake that configured this suite, not whatever
+                     # `cmake` PATH happens to find. On the AIE4 target PATH
+                     # finds Cygwin's 3.14.5, which cannot run
+                     # StageAie4Runtime.cmake's required 3.24 -- so the
+                     # closure guard failed for a reason unrelated to the
+                     # closure.
+                     -CmakeExe "${CMAKE_COMMAND}"
                      ${_packaged_runtime_args})
     set_tests_properties(test_packaged_runtime PROPERTIES
         SKIP_RETURN_CODE 77

@@ -28,3 +28,4 @@ has_children: true
 - [Whisper](whisper/)
 - [EmbeddingGemma](embeddinggemma/)
 - [SmolVLA](smolvla/)
+- [Granite](granite/)

@@ -72,93 +72,93 @@ Recorded per design section 15.6, **without pass/fail thresholds**. Design secti
 | XRT | `32.0.20214.4161 (C:\Windows\SYSTEM32\xrt_coreutil.dll)` |
 | model directory | `C:\Users\chiz\work\FastFlowLM\src\build\phi4-hardware\model` |
 | model SHA-256 | `d6f503a9ea142c8b6320313d6ae341a88049b1b8ef01e641b2313fe42cdc7309` |
-| FastFlow revision | `26f2dcb5d2d8d8b7cd2915f5a56db94e5a68fb7d-untracked-only` |
-| measured (UTC) | `2026-09-02T15:34:01Z` |
+| FastFlow revision | `a02a2cf7e6cda62ab21e1383de2674b933ed2b74-untracked-only` |
+| measured (UTC) | `2026-09-02T16:32:18Z` |
 
 ### Model load and TTFT
 
 | | |
 | --- | --- |
-| manifest parse and file mapping | 8.0 ms |
-| **1..4096 helper interrogation (`Phi4ShapePlan::Build`)** | **15739.6 ms** — **90% of load** |
-| weight pack/upload (161 objects) | 1622.3 ms |
-| stream, 76 device tensors, RoPE upload | 146.3 ms |
-| unaccounted | 11.0 ms |
-| total model load | 17527.3 ms |
-| cold TTFT (19 prompt tokens, row extent 64) | 3667.9 ms |
-| warm TTFT, same Stream after `clear_context()` | 149.7 ms |
+| manifest parse and file mapping | 4.5 ms |
+| **1..4096 helper interrogation (`Phi4ShapePlan::Build`)** | **11282.6 ms** — **86% of load** |
+| weight pack/upload (161 objects) | 1603.4 ms |
+| stream, 76 device tensors, RoPE upload | 142.3 ms |
+| unaccounted | 11.1 ms |
+| total model load | 13043.9 ms |
+| cold TTFT (19 prompt tokens, row extent 64) | 3169.4 ms |
+| warm TTFT, same Stream after `clear_context()` | 49.1 ms |
 
 ### Fresh prefill
 
 | rows | padded rows | wall time | tokens/s |
 | ---: | ---: | ---: | ---: |
-| 1 | 1 | 193.4 ms | 5.2 |
-| 2 | 64 | 89.1 ms | 22.5 |
-| 65 | 128 | 138.3 ms | 469.9 |
-| 129 | 256 | 173.1 ms | 745.1 |
-| 257 | 512 | 226.4 ms | 1,135.0 |
-| 513 | 1024 | 342.4 ms | 1,498.2 |
-| 1025 | 2048 | 715.9 ms | 1,431.7 |
-| 2049 | 3072 | 1187.0 ms | 1,726.2 |
-| 3073 | 4096 | 1657.5 ms | 1,854.0 |
-| 4096 | 4096 | 1699.2 ms | 2,410.6 |
+| 1 | 1 | 144.7 ms | 6.9 |
+| 2 | 64 | 50.5 ms | 39.6 |
+| 65 | 128 | 70.6 ms | 920.6 |
+| 129 | 256 | 92.7 ms | 1,392.2 |
+| 257 | 512 | 136.4 ms | 1,884.7 |
+| 513 | 1024 | 289.4 ms | 1,772.5 |
+| 1025 | 2048 | 731.3 ms | 1,401.6 |
+| 2049 | 3072 | 1171.7 ms | 1,748.7 |
+| 3073 | 4096 | 1717.8 ms | 1,788.9 |
+| 4096 | 4096 | 1746.3 ms | 2,345.5 |
 
 ### Decode
 
 | starting context | tokens | tokens/s | p50 | p95 | synchronizes per pass |
 | ---: | ---: | ---: | ---: | ---: | ---: |
-| 128 | 128 | 22.27 | 41.9 ms | 51.4 ms | 129 |
-| 512 | 128 | 21.88 | 42.4 ms | 55.3 ms | 129 |
-| 2048 | 128 | 20.67 | 45.6 ms | 55.3 ms | 129 |
+| 128 | 128 | 20.04 | 41.1 ms | 91.8 ms | 129 |
+| 512 | 128 | 21.16 | 41.7 ms | 54.8 ms | 129 |
+| 2048 | 128 | 20.68 | 44.2 ms | 55.8 ms | 129 |
 
 ### Continuation routes
 
 | history rows | suffix | route | samples | p50 | p95 |
 | ---: | ---: | --- | ---: | ---: | ---: |
-| 512 | 1 | append | 5 | 43.9 ms | 66.7 ms |
-| 512 | 1 | reprefill | 5 | 360.6 ms | 364.1 ms |
-| 512 | 2 | append | 5 | 115.8 ms | 243.6 ms |
-| 512 | 2 | reprefill | 5 | 348.4 ms | 440.3 ms |
-| 512 | 4 | append | 5 | 316.5 ms | 323.9 ms |
-| 512 | 4 | reprefill | 5 | 380.9 ms | 396.9 ms |
-| 512 | 8 | append | 5 | 654.1 ms | 668.3 ms |
-| 512 | 8 | reprefill | 5 | 380.8 ms | 390.3 ms |
-| 512 | 12 | append | 5 | 1006.7 ms | 1115.1 ms |
-| 512 | 12 | reprefill | 5 | 377.9 ms | 386.3 ms |
-| 512 | 16 | append | 5 | 1270.1 ms | 1311.7 ms |
-| 512 | 16 | reprefill | 5 | 384.4 ms | 385.1 ms |
-| 512 | 24 | append | 5 | 1914.4 ms | 1964.4 ms |
-| 512 | 24 | reprefill | 5 | 384.2 ms | 386.0 ms |
-| 512 | 32 | append | 5 | 2505.8 ms | 2591.3 ms |
-| 512 | 32 | reprefill | 5 | 383.0 ms | 385.3 ms |
-| 512 | 64 | append | 5 | 4977.2 ms | 5095.7 ms |
-| 512 | 64 | reprefill | 5 | 385.4 ms | 388.8 ms |
-| 512 | 128 | append | 5 | 9744.2 ms | 10185.0 ms |
-| 512 | 128 | reprefill | 5 | 384.9 ms | 405.2 ms |
-| 512 | 256 | append | 5 | 19725.7 ms | 20580.1 ms |
-| 512 | 256 | reprefill | 5 | 387.5 ms | 389.7 ms |
-| 2048 | 1 | append | 5 | 80.7 ms | 99.7 ms |
-| 2048 | 1 | reprefill | 5 | 1202.0 ms | 1204.7 ms |
-| 2048 | 2 | append | 5 | 171.9 ms | 180.0 ms |
-| 2048 | 2 | reprefill | 5 | 1189.0 ms | 1207.7 ms |
-| 2048 | 4 | append | 5 | 361.5 ms | 370.1 ms |
-| 2048 | 4 | reprefill | 5 | 1186.0 ms | 1212.8 ms |
-| 2048 | 8 | append | 5 | 638.2 ms | 664.7 ms |
-| 2048 | 8 | reprefill | 5 | 1191.9 ms | 1201.6 ms |
-| 2048 | 12 | append | 5 | 945.2 ms | 993.8 ms |
-| 2048 | 12 | reprefill | 5 | 1197.2 ms | 1205.5 ms |
-| 2048 | 16 | append | 5 | 1319.2 ms | 1350.4 ms |
-| 2048 | 16 | reprefill | 5 | 1185.4 ms | 1197.1 ms |
-| 2048 | 24 | append | 5 | 1969.3 ms | 1978.8 ms |
-| 2048 | 24 | reprefill | 5 | 1194.7 ms | 1205.4 ms |
-| 2048 | 32 | append | 5 | 2763.3 ms | 2896.6 ms |
-| 2048 | 32 | reprefill | 5 | 1194.7 ms | 1212.1 ms |
-| 2048 | 64 | append | 5 | 2942.3 ms | 3617.0 ms |
-| 2048 | 64 | reprefill | 5 | 1149.0 ms | 1155.6 ms |
-| 2048 | 128 | append | 5 | 6159.0 ms | 7009.8 ms |
-| 2048 | 128 | reprefill | 5 | 1147.7 ms | 1193.5 ms |
-| 2048 | 256 | append | 5 | 13732.9 ms | 14008.4 ms |
-| 2048 | 256 | reprefill | 5 | 1156.3 ms | 1171.1 ms |
+| 512 | 1 | append | 5 | 48.9 ms | 52.9 ms |
+| 512 | 1 | reprefill | 5 | 315.7 ms | 365.7 ms |
+| 512 | 2 | append | 5 | 93.9 ms | 100.9 ms |
+| 512 | 2 | reprefill | 5 | 332.0 ms | 343.5 ms |
+| 512 | 4 | append | 5 | 182.5 ms | 192.3 ms |
+| 512 | 4 | reprefill | 5 | 311.1 ms | 350.1 ms |
+| 512 | 8 | append | 5 | 352.6 ms | 381.9 ms |
+| 512 | 8 | reprefill | 5 | 334.1 ms | 336.2 ms |
+| 512 | 12 | append | 5 | 513.2 ms | 530.7 ms |
+| 512 | 12 | reprefill | 5 | 298.6 ms | 335.6 ms |
+| 512 | 16 | append | 5 | 702.2 ms | 727.5 ms |
+| 512 | 16 | reprefill | 5 | 318.0 ms | 391.0 ms |
+| 512 | 24 | append | 5 | 1006.9 ms | 1048.9 ms |
+| 512 | 24 | reprefill | 5 | 296.9 ms | 340.6 ms |
+| 512 | 32 | append | 5 | 1429.6 ms | 1509.0 ms |
+| 512 | 32 | reprefill | 5 | 308.3 ms | 335.4 ms |
+| 512 | 64 | append | 5 | 2671.5 ms | 2750.8 ms |
+| 512 | 64 | reprefill | 5 | 300.7 ms | 342.8 ms |
+| 512 | 128 | append | 5 | 5301.3 ms | 5356.2 ms |
+| 512 | 128 | reprefill | 5 | 311.2 ms | 344.9 ms |
+| 512 | 256 | append | 5 | 10624.5 ms | 10841.4 ms |
+| 512 | 256 | reprefill | 5 | 294.8 ms | 344.2 ms |
+| 2048 | 1 | append | 5 | 54.7 ms | 61.7 ms |
+| 2048 | 1 | reprefill | 5 | 1161.0 ms | 1176.0 ms |
+| 2048 | 2 | append | 5 | 104.8 ms | 113.8 ms |
+| 2048 | 2 | reprefill | 5 | 1152.3 ms | 1173.2 ms |
+| 2048 | 4 | append | 5 | 196.4 ms | 203.7 ms |
+| 2048 | 4 | reprefill | 5 | 1156.1 ms | 1162.1 ms |
+| 2048 | 8 | append | 5 | 370.5 ms | 386.5 ms |
+| 2048 | 8 | reprefill | 5 | 1152.1 ms | 1157.7 ms |
+| 2048 | 12 | append | 5 | 547.3 ms | 589.4 ms |
+| 2048 | 12 | reprefill | 5 | 1148.7 ms | 1156.0 ms |
+| 2048 | 16 | append | 5 | 783.4 ms | 1536.1 ms |
+| 2048 | 16 | reprefill | 5 | 1158.3 ms | 1190.8 ms |
+| 2048 | 24 | append | 5 | 1229.6 ms | 2382.6 ms |
+| 2048 | 24 | reprefill | 5 | 1147.3 ms | 1160.7 ms |
+| 2048 | 32 | append | 5 | 1545.3 ms | 2234.5 ms |
+| 2048 | 32 | reprefill | 5 | 1146.1 ms | 1173.4 ms |
+| 2048 | 64 | append | 5 | 4158.2 ms | 4624.3 ms |
+| 2048 | 64 | reprefill | 5 | 1156.3 ms | 1175.9 ms |
+| 2048 | 128 | append | 5 | 5775.1 ms | 6003.7 ms |
+| 2048 | 128 | reprefill | 5 | 1150.6 ms | 1180.5 ms |
+| 2048 | 256 | append | 5 | 11376.5 ms | 13055.3 ms |
+| 2048 | 256 | reprefill | 5 | 1160.7 ms | 1245.2 ms |
 
 #### Where append stops winning
 
@@ -166,10 +166,10 @@ Recorded per design section 15.6, **without pass/fail thresholds**. Design secti
 
 | rendered history | append decisively wins up to | re-prefill decisively wins from | crossover lies in | margin at each bracket edge |
 | ---: | ---: | ---: | :--- | :--- |
-| 2048 | 12 | 16 | `(12, 16]` — not resolved further | 12: 5.2x, 16: 4.3x |
-| 512 | 4 | 8 | `(4, 8]` — not resolved further | 4: 3.9x, 8: 19.3x |
+| 2048 | 12 | 64 | `(12, 64]` — not resolved further | 12: 14.3x, 64: 6.4x |
+| 512 | 4 | 12 | `(4, 12]` — not resolved further | 4: 3.3x, 12: 5.8x |
 
-22 of 22 sweep points were decided; 0 were not and widen the brackets above. The margin column is the gap between the routes divided by the uncertainty it had to beat at that suffix.
+18 of 22 sweep points were decided; 4 were not and widen the brackets above. The margin column is the gap between the routes divided by the uncertainty it had to beat at that suffix.
 
 Prefix-monotonic: `True`. Decision rule: append and re-prefill samples are INTERLEAVED, so a machine regime shift moves both routes together; a point is decided only when the gap between the two routes' p50 exceeds BOTH the larger within-point p50-to-p95 spread AND the larger drift between a route's first and last sample at that point. The reported figure is a BRACKET, not a threshold..
 
@@ -180,16 +180,16 @@ Prefix-monotonic: `True`. Decision rule: append and re-prefill samples are INTER
 | V cache reads per model step | 32 |
 | per-head V writes per model step | 256 |
 | V bytes transferred | 44.60 GiB |
-| V scatter wall time | 4355.6 ms |
+| V scatter wall time | 3315.9 ms |
 | FP16 embedding | 1.14 GiB |
 | KV cache | 512.00 MiB |
 | corelib packed weights | 1.95 GiB |
 | scratch and device tensors | 161.89 MiB |
 | mapped ONNX source | 3.03 GiB |
-| peak host private bytes | 7.63 GiB |
-| peak host working set | 9.55 GiB |
+| peak host private bytes | 7.67 GiB |
+| peak host working set | 9.52 GiB |
 
-128-token stability window: device tensors created after warmup **0**, weight objects **0**, net live corelib objects **0**, private-byte growth **0 B**, least-squares private-byte slope over tokens 9..128 **-234.96 KiB/token**.
+128-token stability window: device tensors created after warmup **0**, weight objects **0**, net live corelib objects **0**, private-byte growth **0 B**, least-squares private-byte slope over tokens 9..128 **-50.21 KiB/token**.
 
 ### DETERM-3 — run-to-run logit bit-identity baseline
 
@@ -208,7 +208,9 @@ Observed maximum absolute difference, `append`: `49.2148` × 1, `49.25` × 1.
 
 At the step whose logits first differ, the harness records the exact row that was fed to the LM head in each run, so this is an observation and not an inference. **2 event(s): `model_body`**.
 
-In every measured event the two runs fed the LM head **different rows** — 2,571, 2,754 of 3,072 elements differing, at `decode[6]`, `decode[8]`. **The divergence therefore enters the model body, not the LM-head dispatch.** Each run's LM head was separately measured to be correctly rounded against its own input, so it is faithfully transforming inputs that already differ.
+> **The instrument perturbs what it measures.** These 2 localisation(s) were measured by capturing the LM-head input after every model step, which adds a host tensor read and a stream acquisition between steps — changing the timing of exactly the window a race would occupy. The phenomenon survives the instrumentation: it still reproduces at a rate consistent with the uninstrumented campaigns. What this data cannot rule out is that the capture shifts the rate, or which step is reached first.
+
+In the **2** `model_body` event(s) the two runs fed the LM head **different rows** — 2,571, 2,754 of 3,072 elements differing, at `decode[6]`, `decode[8]`. **In those events the divergence enters the model body, not the LM-head dispatch.** Each run's LM head was separately measured to be correctly rounded against its own input, so it is faithfully transforming inputs that already differ.
 
 **The layer at which it enters is not known.** Layer 0's K and V have been bit-identical in the events where the emitted tokens matched, and layer 31's have not, which bounds it to somewhere above layer 0. Narrowing it further needs per-layer capture, and until then this is an open question rather than a characterised one.
 

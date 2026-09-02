@@ -45,44 +45,103 @@ MIN_DECODE_STEPS = 16
 TOP_K = 32
 TOP_5 = 5
 
-# DETERM-2. This is an OBSERVED CEILING WITH NO MARGIN, not a tolerance.
+# DETERM-2. Two bounds, deliberately in DIFFERENT UNITS.
 #
-# 0.25 is the largest logit difference actually measured on the AIE4 target,
-# both across implementations (design 12.4) and run to run inside the LM-head
-# dispatch (design 15.3, DETERM-1). It was not chosen with headroom and it is
-# not a knob. A run that exceeds it has done something not previously seen, and
-# the correct response is to measure and amend the spec -- never to widen this
-# number so a red run goes green.
+# CROSS-IMPLEMENTATION (design 12.4): absolute 0.25 over the union top-32.
+# FastFlow and the reference driver can differ for reasons other than
+# accumulation order, so an absolute ceiling is the right shape there.
 #
-# One constant serves both comparisons deliberately: they are the same bound on
-# the same quantity, and two copies would drift.
-MAX_ABS_DIFF = 0.25
-MAX_TOP32_ABS_DIFF = MAX_ABS_DIFF
-MAX_RUN_TO_RUN_ABS_DIFF = MAX_ABS_DIFF
+# RUN-TO-RUN (design 15.3, DETERM-1): 2 BF16 ULP of the larger of the two
+# compared values. The phenomenon is ULP-relative, not absolute. The one
+# observed event sat at exactly 0.25, which is 2 ULP for logits in [16, 32) --
+# an absolute 0.25 bound would therefore have hard-failed the identical 2-ULP
+# wobble on a logit in [32, 64), where 2 ULP is 0.5, for no reason but
+# magnitude. This corrects the UNITS; it does not widen the tolerance.
+#
+# Both are OBSERVED CEILINGS WITH NO MARGIN, not tolerances. A run that exceeds
+# either has done something not previously seen, and the answer is to measure
+# and amend the spec -- never to widen the number so a red run goes green. The
+# 2-ULP figure rests on a single observation and is confirmed or corrected by
+# Task 13's baseline.
+MAX_TOP32_ABS_DIFF = 0.25
+RUN_TO_RUN_MAX_ULPS = 2
 
-# A tripwire, because a comment is not an obstacle.
+# The seal, and it covers EVERY name a failure message can hand you.
 #
-# Editing MAX_ABS_DIFF alone makes the tool refuse to run. Getting past this
-# requires editing a second literal that exists for no other purpose, and
-# reading why that is the wrong move. That is the whole point: the failure mode
-# DETERM-2 guards against is a one-character edit during a red run, and the
-# only defence that survives deadline pressure is one that cannot be done
-# absent-mindedly.
-_DETERM2_SEALED_BOUND = 0.25
-if MAX_ABS_DIFF != _DETERM2_SEALED_BOUND:
-    raise SystemExit(
-        "DETERM-2: MAX_ABS_DIFF has been changed from the sealed value "
-        f"{_DETERM2_SEALED_BOUND} to {MAX_ABS_DIFF}.\n"
-        "\n"
-        "That bound is the maximum logit difference ever measured on this "
-        "hardware, recorded with no margin. Widening it does not make a "
-        "failing run acceptable; it makes the suite stop reporting a change "
-        "in behaviour that nobody has looked at.\n"
-        "\n"
-        "If a run genuinely exceeds 0.25: measure it, characterise it the way "
-        "report section 14.2 characterises the run-to-run case, and amend "
-        "design section 15.3. Then update both literals together."
-    )
+# The previous version sealed one private constant and then exposed unsealed
+# public aliases -- including the very name its own error message advertised.
+# Grepping the name from the message landed on an alias that could be edited
+# freely, and the tool started normally and went green. The bump was off to the
+# side of the road.
+#
+# So: every constant below is cross-checked against a literal that exists for
+# no other purpose, and the runtime failure messages point at this block by
+# name so that grepping what the message says leads HERE.
+_DETERM2_SEALED = {
+    "MAX_TOP32_ABS_DIFF": 0.25,
+    "RUN_TO_RUN_MAX_ULPS": 2,
+}
+for _sealed_name, _sealed_value in _DETERM2_SEALED.items():
+    _actual = globals()[_sealed_name]
+    if _actual != _sealed_value:
+        raise SystemExit(
+            f"DETERM-2: {_sealed_name} has been changed from its sealed "
+            f"value {_sealed_value} to {_actual}.\n"
+            "\n"
+            "These bounds are the largest differences ever measured on this "
+            "hardware, recorded with no margin. Widening one does not make a "
+            "failing run acceptable; it makes the suite stop reporting a "
+            "change in behaviour that nobody has looked at.\n"
+            "\n"
+            "If a run genuinely exceeds a bound: measure it, characterise it "
+            "the way report section 14.2 characterises the run-to-run case, "
+            "and amend design section 15.3. Only then update the constant "
+            "AND its entry in _DETERM2_SEALED together."
+        )
+
+
+def _two_bf16_ulp(magnitude: np.ndarray) -> np.ndarray:
+    """`RUN_TO_RUN_MAX_ULPS` ULP at each magnitude, exactly.
+
+    BF16 keeps 8 significand bits, so ULP at a value with exponent e is
+    2**(e - 7). The exponent is read out of the FP32 bit pattern rather than
+    via log2: these values were widened from BF16 so the field is exact, and
+    log2 of a value a hair under a power of two is exactly the case that would
+    round the wrong way and silently shift the bound by a factor of two.
+
+    Zero gets a bound of zero -- two runs that both produced zero are already
+    equal, and anything else there is a real difference.
+    """
+    magnitude = np.asarray(magnitude, dtype=np.float32)
+    bits = np.ascontiguousarray(magnitude).view(np.uint32)
+    exponent = ((bits >> 23) & 0xFF).astype(np.int32) - 127
+    # N * 2**(e - 7), written out rather than folded into the exponent: the
+    # folded form is only correct while N is a power of two, and a later change
+    # to RUN_TO_RUN_MAX_ULPS would silently compute the wrong bound.
+    ulp = np.exp2((exponent - 7).astype(np.float64))
+    return np.where(magnitude == 0.0, 0.0, RUN_TO_RUN_MAX_ULPS * ulp)
+
+
+# The ULP bound is checked at import, at the boundaries that matter.
+#
+# The whole correction in DETERM-2 is that the bound scales with magnitude, so
+# a bound that silently failed to step at a power of two would reintroduce the
+# absolute-ceiling bug while looking relative. 20 and 31.5 must give 0.25 (the
+# observed event), 32 and 40 must give 0.5, and the step must land exactly on
+# the binade edge -- which is why the exponent comes from the bit pattern and
+# not from log2.
+_ULP_SELF_CHECK = ((16.0, 0.25), (20.0, 0.25), (31.5, 0.25),
+                   (32.0, 0.5), (40.0, 0.5), (64.0, 1.0), (0.0, 0.0))
+if RUN_TO_RUN_MAX_ULPS == 2:
+    _probe = _two_bf16_ulp(
+        np.array([v for v, _ in _ULP_SELF_CHECK], dtype=np.float32))
+    for _index, (_value, _expected) in enumerate(_ULP_SELF_CHECK):
+        if float(_probe[_index]) != _expected:
+            raise SystemExit(
+                f"DETERM-2: the ULP bound is miscomputed. 2 ULP of {_value} "
+                f"should be {_expected}, got {float(_probe[_index])}. The "
+                "run-to-run gate would be applying the wrong tolerance."
+            )
 
 
 def _import_reference():
@@ -686,7 +745,9 @@ def self_consistency(args) -> int:
 
       * live K/V, last_hidden and every non-timing metric, bit-identical;
       * the emitted token-ID sequence, identical;
-      * logit maximum absolute difference at most MAX_RUN_TO_RUN_ABS_DIFF.
+      * every logit within RUN_TO_RUN_MAX_ULPS BF16 ULP of the larger of
+        the two compared values -- a RELATIVE bound, because the
+        phenomenon is.
 
     What is recorded but not gated: the logit bit-identity rate and the
     observed maximum difference.
@@ -764,24 +825,48 @@ def self_consistency(args) -> int:
         differing = sum(1 for x, y in zip(a_bits, b_bits) if x != y)
         mine = _widen_bf16(a_bits)
         theirs = _widen_bf16(b_bits)
-        step_max = float(np.max(np.abs(mine - theirs)))
+        if mine.shape != theirs.shape:
+            failures.check(
+                False,
+                f"{label}: logit vector lengths differ, "
+                f"{mine.shape} vs {theirs.shape}",
+            )
+            continue
+        difference = np.abs(mine - theirs)
+        step_max = float(np.max(difference))
         observed_max_diff = max(observed_max_diff, step_max)
         if first_divergence is None:
             first_divergence = label
-        # GATED on the magnitude, RECORDED for the fact of differing.
-        # DETERM-1: bit-identity here is not promised, but the size of the
-        # difference is bounded, and a step past the bound is a behaviour
-        # nobody has measured.
-        failures.check(
-            step_max <= MAX_RUN_TO_RUN_ABS_DIFF,
-            f"{label}: two runs of the same binary differ by "
-            f"{step_max:.6g}, above the DETERM-2 bound of "
-            f"{MAX_RUN_TO_RUN_ABS_DIFF}. Do not widen the bound; measure "
-            f"what changed. ({differing}/{len(a_bits)} logits differ.)",
-        )
+
+        # GATED in ULP, RECORDED for the fact of differing.
+        #
+        # DETERM-1 does not promise bit-identity here, but it does bound the
+        # size of the difference -- and the bound is relative, because the
+        # phenomenon is. Comparing each element against 2 ULP of the larger of
+        # the two values treats a 2-ULP wobble the same whether the logit is 20
+        # or 40; an absolute ceiling would have failed the second for nothing
+        # but magnitude.
+        allowed = _two_bf16_ulp(np.maximum(np.abs(mine), np.abs(theirs)))
+        # NaN compares false against everything, so a non-finite result on
+        # either side lands here rather than slipping through the <= .
+        over = ~(difference <= allowed)
+        over_count = int(np.count_nonzero(over))
+        if over_count:
+            worst = int(np.argmax(np.where(over, difference, 0.0)))
+            failures.check(
+                False,
+                f"{label}: {over_count}/{len(a_bits)} logits differ by more "
+                f"than {RUN_TO_RUN_MAX_ULPS} BF16 ULP between two runs of the "
+                f"same binary. Worst at index {worst}: {mine[worst]:.9g} vs "
+                f"{theirs[worst]:.9g}, difference {difference[worst]:.6g}, "
+                f"allowed {allowed[worst]:.6g}. Do NOT widen the bound -- see "
+                f"_DETERM2_SEALED in this file; measure what changed.",
+            )
         print(
             f"  {label}: {differing}/{len(a_bits)} logits differ, "
-            f"max |diff| {step_max:.6g} (within DETERM-2, recorded not gated)"
+            f"max |diff| {step_max:.6g}, "
+            f"{'ALL' if not over_count else f'{len(a_bits) - over_count}/{len(a_bits)}'} "
+            f"within {RUN_TO_RUN_MAX_ULPS} ULP"
         )
 
     a_tokens = [left["continuation"]["top1_id"]] + [
@@ -860,7 +945,7 @@ def self_consistency(args) -> int:
         f"run-to-run: logits bit-identical "
         f"{bit_exact_steps}/{len(a_steps)} steps, "
         f"max |diff| {observed_max_diff:.6g} "
-        f"(bound {MAX_RUN_TO_RUN_ABS_DIFF})"
+        f"(bound {RUN_TO_RUN_MAX_ULPS} BF16 ULP, relative)"
     )
     if first_divergence is not None:
         print(f"first divergence at {first_divergence}")
@@ -873,7 +958,8 @@ def self_consistency(args) -> int:
                     "logits_bit_exact_steps": bit_exact_steps,
                     "logits_total_steps": len(a_steps),
                     "observed_max_abs_diff": observed_max_diff,
-                    "determ2_bound": MAX_RUN_TO_RUN_ABS_DIFF,
+                    "determ2_bound_ulps": RUN_TO_RUN_MAX_ULPS,
+                    "determ2_bound_kind": "relative_bf16_ulp",
                     "first_divergence": first_divergence,
                     "failures": failures.messages,
                 },

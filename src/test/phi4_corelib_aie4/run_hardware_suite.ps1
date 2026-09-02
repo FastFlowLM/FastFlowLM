@@ -335,8 +335,24 @@ if (-not $ModelDir) {
 } else {
     $ModelDir = (Resolve-Path $ModelDir).Path
     $CorelibSource = (Resolve-Path $CorelibSource).Path
-    $artifacts = Join-Path $BuildDir 'artifacts'
+    # RUN-SCOPED, so history accumulates.
+    #
+    # A fixed directory meant determ1-<route>.json was overwritten every run
+    # and nothing could be computed across runs. That was a tolerable annoyance
+    # until DETERM-3: Task 13 has to establish the bit-identity baseline over at
+    # least 20 runs per route, and a baseline assembled from whichever files
+    # happened to survive, or from someone remembering to copy them off between
+    # runs, is not a baseline. It also cost this task the evidence for the
+    # 16/17 event, which was overwritten before it could be interrogated.
+    #
+    # Sortable UTC stamp plus the PID: two runs started in the same second on
+    # the same machine still get their own directory.
+    $runStamp = '{0}-{1}' -f (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssZ'), $PID
+    $artifacts = Join-Path (Join-Path $BuildDir 'artifacts') $runStamp
     New-Item -ItemType Directory -Force -Path $artifacts | Out-Null
+    Write-Output "artifacts for this run: $artifacts"
+    Write-Output ("  DETERM-3 baseline input: " +
+        (Join-Path (Join-Path $BuildDir 'artifacts') '*/determ1-*.json'))
 
     if (-not (Test-Path (Join-Path $ModelDir 'corelib_phi4_manifest.json'))) {
         $overlayDir = Join-Path $sourceDir 'model_overlays/phi4-mini-it-aie4'
@@ -410,12 +426,17 @@ if (-not $ModelDir) {
         Invoke-Checked "fastflow ($route)" $e2eExe $e2eArgs
 
         # 3. The same binary, again, on the same input. Run before the
-        #    comparison because it is the sharper question: a difference from
-        #    the reference is about tolerances and about which implementation
-        #    is right, whereas a difference between two runs of the same
-        #    implementation on the same input means something is reading state
-        #    the inputs do not determine. No tolerance makes that acceptable,
-        #    so this comparison is bit-exact.
+        #    comparison because it asks a different and sharper question: a
+        #    difference from the reference is about which implementation is
+        #    right, whereas a difference between two runs of the same
+        #    implementation is about whether anything outside the inputs is
+        #    being read.
+        #
+        #    Per DETERM-1 this is NOT a bit-exact comparison. State, metrics
+        #    and the emitted tokens must match exactly; the logits must agree
+        #    within 2 BF16 ULP, and their bit-identity rate is recorded rather
+        #    than gated. An earlier version of this comment said the opposite,
+        #    twenty lines above the check that had already stopped doing it.
         $repeatJson = Join-Path $artifacts "fastflow-$route-repeat.json"
         $summaryJson = Join-Path $artifacts "compare-summary-$route.json"
         $determJson = Join-Path $artifacts "determ1-$route.json"
@@ -448,12 +469,28 @@ if (-not $ModelDir) {
             $dnote = ("run-to-run [$route]: logits bit-identical " +
                 "$($d.logits_bit_exact_steps)/$($d.logits_total_steps), " +
                 "max |diff| $($d.observed_max_abs_diff) " +
-                "(DETERM-2 bound $($d.determ2_bound))")
+                "(DETERM-2 bound $($d.determ2_bound_ulps) BF16 ULP)")
             $ran += $dnote
             $bitExactNotes += $dnote
         } catch {
             Write-Output "SELF-CONSISTENCY FAILED ($route)"
             $failures += "self-consistency $route"
+            # The record goes to the summary on the FAILURE path too.
+            # DETERM-1 says every run, and a red run is precisely the one
+            # a baseline most needs to count -- it was previously written
+            # only on the success path, so the artifact survived and the
+            # summary line did not.
+            if (Test-Path $determJson) {
+                $d = Get-Content $determJson -Raw | ConvertFrom-Json
+                $bitExactNotes += ("run-to-run [$route] (FAILED): logits " +
+                    "bit-identical " +
+                    "$($d.logits_bit_exact_steps)/$($d.logits_total_steps), " +
+                    "max |diff| $($d.observed_max_abs_diff), " +
+                    "first divergence $($d.first_divergence)")
+            } else {
+                $bitExactNotes +=
+                    "run-to-run [$route] (FAILED): no DETERM-1 record written"
+            }
         }
 
         # 4. Comparison holds no device context at all.
@@ -493,23 +530,21 @@ if (-not $ModelDir) {
                 throw "compare ($route) exited 0 but wrote no " +
                       "--summary-json at $summaryJson"
             }
-            if ($true) {
-                $s = Get-Content $summaryJson -Raw | ConvertFrom-Json
-                $note = ("bit-exact vs reference [$route]: logits " +
-                    "$($s.logits_bit_exact_steps)/$($s.logits_total_steps), " +
-                    "K/V $($s.kv_bit_exact_tensors)/$($s.kv_total_tensors), " +
-                    "last_hidden $($s.last_hidden_bit_exact)")
-                $ran += $note
-                $bitExactNotes += $note
-                if ($s.logits_bit_exact_steps -lt $s.logits_total_steps) {
-                    # Not a failure -- see the comparator's note on why logit
-                    # bit-identity is reported rather than gated -- but it must
-                    # be impossible to miss in the summary.
-                    $bitExactNotes +=
-                        ("  NOTE [$route]: $($s.logits_total_steps - $s.logits_bit_exact_steps) " +
-                         "logit vector(s) differed from the reference inside " +
-                         "the LM head, within all design 12.4 thresholds.")
-                }
+            $s = Get-Content $summaryJson -Raw | ConvertFrom-Json
+            $note = ("bit-exact vs reference [$route]: logits " +
+                "$($s.logits_bit_exact_steps)/$($s.logits_total_steps), " +
+                "K/V $($s.kv_bit_exact_tensors)/$($s.kv_total_tensors), " +
+                "last_hidden $($s.last_hidden_bit_exact)")
+            $ran += $note
+            $bitExactNotes += $note
+            if ($s.logits_bit_exact_steps -lt $s.logits_total_steps) {
+                # Not a failure -- see the comparator's note on why logit
+                # bit-identity is reported rather than gated -- but it must
+                # be impossible to miss in the summary.
+                $bitExactNotes +=
+                    ("  NOTE [$route]: $($s.logits_total_steps - $s.logits_bit_exact_steps) " +
+                     "logit vector(s) differed from the reference inside " +
+                     "the LM head, within all design 12.4 thresholds.")
             }
         } catch {
             Write-Output "REFERENCE COMPARISON FAILED ($route)"

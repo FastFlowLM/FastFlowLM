@@ -169,6 +169,28 @@ try {
         }
     }
 
+    # flm.exe must never gain a link-time dependency on ryzenai_corelib. The
+    # DLL is resolved at run time by absolute path precisely so that a binary
+    # without the AIE4 runtime installed still starts. dumpbin on the packaged
+    # exe is the end check, but it only runs where an exe exists; this catches
+    # the regression at its source.
+    foreach ($buildFile in @(
+        "CMakeLists.txt",
+        "cmake/ConfigureAie4Runtime.cmake",
+        "common/corelib/corelib_sources.cmake"
+    )) {
+        $path = Join-Path $sourceRoot $buildFile
+        if (-not (Test-Path $path)) { continue }
+        foreach ($line in Get-Content $path) {
+            if (
+                $line -match "target_link_libraries" -and
+                $line -match "ryzenai_corelib"
+            ) {
+                throw "$buildFile links ryzenai_corelib: $line"
+            }
+        }
+    }
+
     New-Item -ItemType Directory -Path $temporary | Out-Null
     $fixture = Join-Path $temporary "fixture"
     New-Item -ItemType Directory -Path $fixture | Out-Null

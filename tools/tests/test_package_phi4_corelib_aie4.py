@@ -680,6 +680,33 @@ class Phi4CatalogProvenanceTests(unittest.TestCase):
         self.assertIs(entry["modelscope_supported"], False)
         self.assertNotIn("ms_url", entry)
 
+    def test_catalog_size_matches_a_measured_assembled_directory(self):
+        # Step 2 forbids hand-estimating the catalog numbers. The entry is
+        # computed from metadata because nobody assembles a 3 GiB directory to
+        # write a catalog line, so this pins the two derivations together: if
+        # they ever disagree, the published number stops describing the
+        # directory a user actually gets.
+        entry, records, overlay = self._committed()
+        indexed = {record["path"]: record for record in records}
+        overlays = entry["bundled_overlays"]
+        with tempfile.TemporaryDirectory() as directory:
+            assembled = Path(directory)
+            logical_sizes = {}
+            for name in entry["files"]:
+                target = assembled / name
+                if name in overlays:
+                    target.write_bytes((overlay / name).read_bytes())
+                else:
+                    # Stand in for the payload; the logical size comes from the
+                    # upstream record, exactly as it does for an LFS pointer.
+                    target.write_bytes(b"")
+                    logical_sizes[name] = indexed[name]["size"]
+            size, footprint = package_tool.catalog_measurements(
+                assembled, logical_sizes
+            )
+        self.assertEqual(size, entry["size"])
+        self.assertEqual(footprint, entry["footprint"])
+
     def test_genai_config_is_not_carried_through(self):
         # MODEL-2: flm.exe runs no ORT or genai graph, and an unused config
         # invites a future reader to believe it is authoritative.

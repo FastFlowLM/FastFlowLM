@@ -33,6 +33,7 @@
 #include "models/phi4/phi4_npu.hpp"
 #include "models/gpt_oss/gpt_oss_npu.hpp"
 #include "models/nanbeige/nanbeige_npu.hpp"
+#include "models/hunyuan/hunyuan_npu.hpp"
 #include "tokenizer/tokenizer.hpp"
 #include "modules/sampler.hpp"
 #include "utils/utils.hpp"

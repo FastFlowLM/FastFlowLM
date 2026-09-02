@@ -1,0 +1,132 @@
+/// \file modeling_hunyuan.cpp
+/// \brief Hunyuan class
+/// \author FastFlowLM Team
+/// \date 2026-09-01
+/// \version 0.9.45
+/// \note AutoModel wrapper for the `hunyuan-dense` engine (Hy-MT2-1.8B).
+
+#include "AutoModel/modeling_hunyuan.hpp"
+
+/************              hunyuan-dense family            **************/
+Hunyuan::Hunyuan(flm_rt::device* npu_device_inst) : AutoModel(npu_device_inst, "Hunyuan") {}
+
+void Hunyuan::load_model(std::string model_path, json model_info, int default_context_length, bool enable_preemption) {
+    this->_shared_load_model(model_path, model_info, default_context_length, enable_preemption);
+
+    this->q4nx = std::make_unique<Q4NX>(this->model_path);
+    this->lm_engine = std::make_unique<hunyuan_npu>(*this->lm_config, this->npu.get(), this->MAX_L);
+
+    this->lm_engine->load_weights(*this->q4nx);
+
+    // free the mmap'd weights immediately
+    this->q4nx.reset();
+
+    this->lm_engine->clear_context();
+    this->setup_tokenizer(model_path);
+    this->sampler.reset();
+
+    // Defaults published with the checkpoint (general.sampling.* in the GGUF).
+    sampler_config config;
+    config.top_k = 20;
+    config.top_p = 0.8;
+    config.temperature = 0.7;
+
+    this->set_sampler(config);
+    for (size_t i = 0; i < PROFILER_TYPE_NUM; i++) {
+        this->profiler_list[i].reset();
+    }
+}
+
+void Hunyuan::setup_tokenizer(std::string model_path) {
+    auto tokenizer_config = this->_shared_setup_tokenizer(model_path);
+}
+
+/// \note The template renders `system` only when it is messages[0]; every other
+///       role but user / assistant is dropped. It never branches on `tools`, so
+///       the argument is accepted for the interface and ignored.
+std::string Hunyuan::apply_chat_template(nlohmann::ordered_json& messages, nlohmann::ordered_json tools) {
+    minja::chat_template_inputs inputs;
+    inputs.add_generation_prompt = true;
+    inputs.messages = messages;
+    inputs.extra_context = this->extra_context;
+    return this->chat_tmpl->apply(inputs);
+}
+
+chat_template_type_t Hunyuan::get_chat_template_type() {
+    // One marker per role turn plus a trailing generation prompt: the same shape
+    // the prompt cache assumes for chat_ml.
+    return chat_template_type_t::chat_ml;
+}
+
+bool Hunyuan::insert(chat_meta_info_t& meta_info, lm_uniform_input_t& input, std::function<bool()> is_cancelled) {
+    // preprocess
+    this->profiler_list[TKOEN_ENCODE_TIME].start();
+    std::string templated_text;
+    if (input.messages.empty() && input.prompt.empty()) {
+        header_print("WARNING", "No messages or prompt provided");
+        return false;
+    }
+
+    // Language only: drop any multimodal payload rather than failing the request.
+    if (!input.images.empty()) {
+        header_print("WARNING", "Hy-MT2-1.8B is a text-only model, ignoring " << input.images.size() << " image(s)");
+        input.images.clear();
+        input.image_payload_types.clear();
+    }
+    if (!input.audios.empty()) {
+        header_print("WARNING", "Hy-MT2-1.8B is a text-only model, ignoring " << input.audios.size() << " audio input(s)");
+        input.audios.clear();
+        input.audio_payload_types.clear();
+    }
+
+    if (!input.messages.empty()) { // already a formated messages, usually from REST API
+        for (auto& message : input.messages) {
+            message.erase("images");
+            message.erase("audios");
+        }
+        templated_text = this->apply_chat_template(input.messages, input.tools);
+    }
+    else if (!input.prompt.empty()) { // a pure text, usually from the cli
+        nlohmann::ordered_json messages;
+
+        messages.push_back({ {"role", "user"}, {"content", input.prompt} });
+        templated_text = this->apply_chat_template(messages);
+    }
+
+    std::vector<int> tokens = this->tokenizer->encode(templated_text);
+
+    this->profiler_list[TKOEN_ENCODE_TIME].stop(tokens.size());
+
+    // hardware
+    int restore_idx = -1;
+    hunyuan_npu* hunyuan_engine = dynamic_cast<hunyuan_npu*>(this->lm_engine.get());
+    if (meta_info.restore_allowed) {
+        restore_idx = hunyuan_engine->restore();
+        this->total_tokens = restore_idx;
+        // keep the token history in lock-step with the restored KV cache, otherwise
+        // _shared_insert's prefix match silently desynchronizes
+        this->token_history = checkpoint_his;
+    }
+    bool success = this->_shared_insert(meta_info, tokens, is_cancelled, nullptr);
+
+    checkpoint_his = token_history;
+    hunyuan_engine->checkpoint();
+
+    return success;
+}
+
+std::string Hunyuan::generate(chat_meta_info_t& meta_info, int length_limit, std::ostream& os, std::function<bool()> is_cancelled) {
+    std::string result = this->_shared_generate(meta_info, length_limit, os, is_cancelled);
+    // re-checkpoint so the next turn can restore on top of the generated tokens
+    hunyuan_npu* hunyuan_engine = dynamic_cast<hunyuan_npu*>(this->lm_engine.get());
+    checkpoint_his = token_history;
+    hunyuan_engine->checkpoint();
+    return result;
+}
+
+std::string Hunyuan::generate_with_prompt(chat_meta_info_t& meta_info, lm_uniform_input_t& input, int length_limit, std::ostream& os) {
+    if (!this->insert(meta_info, input)) {
+        return "";
+    }
+    return this->generate(meta_info, length_limit, os);
+}

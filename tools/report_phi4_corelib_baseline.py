@@ -808,8 +808,13 @@ def render_markdown(document: dict) -> str:
         add("")
         add(
             "| route | runs (n) | step bit-identity | run bit-identity | "
-            "max abs diff: max / median | nonzero runs | baseline? |"
+            "max abs diff: max / median | nonzero runs | "
+            f"≥ {MIN_DETERMINISM_RUNS_PER_ROUTE} runs? |"
         )
+        # The last column is the run-count precondition, NOT "is this a
+        # settled baseline". Labelling it "baseline?" put a `yes` beside a
+        # route whose window contained a hard-gate failure, two lines above
+        # the blockquote saying exactly that must not be read as a baseline.
         add("| --- | ---: | ---: | ---: | ---: | ---: | --- |")
         for route, entry in determinism.get("routes", {}).items():
             spread = entry.get("observed_max_abs_diff", {})
@@ -820,9 +825,17 @@ def render_markdown(document: dict) -> str:
                 f"{_rate(entry.get('run_bit_identity_rate'), entry.get('runs'))}"
                 f" | {spread.get('max')} / {spread.get('median')} | "
                 f"{spread.get('nonzero_runs')} | "
-                f"{'yes' if entry.get('is_baseline') else '**no baseline**'} |"
+                f"{'yes' if entry.get('is_baseline') else '**no — too few runs**'} |"
             )
         add("")
+        if not determinism.get("is_baseline"):
+            add(
+                "**This window is not a settled baseline.** The figures above "
+                "are what has been measured; the problems listed below say "
+                "why they cannot yet be cited as the floor `DETERM-2`'s "
+                '"degrades from the recorded baseline" clause needs.'
+            )
+            add("")
         for route, entry in determinism.get("routes", {}).items():
             histogram = entry.get("observed_max_abs_diff", {}).get("histogram")
             if histogram:

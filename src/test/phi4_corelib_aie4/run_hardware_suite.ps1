@@ -174,8 +174,15 @@ Write-Section 'CTest suite (host tests, real-corelib check, device smoke, fatal 
 # failure -- which is the behaviour that matters on the one machine where this
 # script is meant to run.
 $env:FLM_AIE4_HARDWARE = '1'
+# The ctest beside the chosen cmake, never the one on PATH. On the AIE4 target
+# PATH finds Cygwin's ctest, which reads a Windows -DVALUE --test-dir as a
+# POSIX path, silently reports "Test project /cygdrive/c/Users/chiz" and then
+# "No tests were found" -- a result that looks like an empty suite rather than
+# like a wrong tool.
+$ctest = Join-Path (Split-Path -Parent $Cmake) 'ctest.exe'
+if (-not (Test-Path $ctest)) { $ctest = 'ctest' }
 # Serial on purpose: several of these hold an AIE4 device context.
-Invoke-Checked 'ctest' 'ctest' @(
+Invoke-Checked 'ctest' $ctest @(
     '--test-dir', $BuildDir,
     '-C', 'Release',
     '--output-on-failure',

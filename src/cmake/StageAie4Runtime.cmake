@@ -79,17 +79,36 @@ endforeach()
 list(REMOVE_DUPLICATES _flm_aie4_search_dirs)
 
 # `dyn_bins.dll` holds DynamicDispatch's precompiled binaries and is opened by
-# name at runtime, so it is never an import and a walker cannot find it. It is
-# staged when the selected linkage ships it and omitted when DynamicDispatch is
-# statically linked, which is why it is discovered by presence rather than
-# demanded unconditionally.
+# NAME at runtime, so it is never an import and a dependency walker cannot see
+# it. It has to be found by presence, and WHERE it lives depends on the
+# DynamicDispatch linkage:
+#
+#   * statically linked DD -- the dev box -- puts it beside
+#     ryzenai_corelib.dll, because Transaction resolves it against the
+#     directory of the module that linked DD in;
+#   * shared DD -- the AIE4 target -- puts it beside dyn_dispatch_core.dll.
+#
+# Searching only the corelib directory is therefore correct on one box and
+# silently wrong on the other. It is silent because nothing fails to load: the
+# process starts, and every shape query then comes back "Shape list size: 0",
+# which surfaces as `matmul_bf16_weights_create_onnx failed ... not supported
+# in this supported shape list` at weight-packing time. That is a long way from
+# the missing file, which is why this searches every directory the closure is
+# allowed to draw from rather than assuming a linkage.
 set(_flm_aie4_runtime_loaded "")
-foreach(_flm_aie4_name IN ITEMS dyn_bins.dll)
-    if(EXISTS "${FLM_AIE4_CORELIB_DIR}/${_flm_aie4_name}")
+foreach(_flm_aie4_dir IN LISTS _flm_aie4_search_dirs)
+    if(EXISTS "${_flm_aie4_dir}/dyn_bins.dll")
         list(APPEND _flm_aie4_runtime_loaded
-            "${FLM_AIE4_CORELIB_DIR}/${_flm_aie4_name}")
+            "${_flm_aie4_dir}/dyn_bins.dll")
+        break()
     endif()
 endforeach()
+if(NOT _flm_aie4_runtime_loaded)
+    message(STATUS
+        "No dyn_bins.dll in any search directory. That is expected only for "
+        "a DynamicDispatch build that embeds its binaries; if the staged "
+        "runtime later reports \"Shape list size: 0\", this is why.")
+endif()
 
 # The Visual C++ runtime is deliberately not staged. `flm.exe` itself imports
 # MSVCP140/VCRUNTIME140, so the redistributable is already a product-wide

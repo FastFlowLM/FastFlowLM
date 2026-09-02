@@ -196,6 +196,38 @@ $ran += 'ctest suite (includes test_phi4_hardware and test_fatal_child)'
 
 $comparator = Join-Path $sourceDir 'tools/compare_phi4_corelib_e2e.py'
 
+# A bare Hugging Face download is not a Phi-4 AIE4 package.
+#
+# `flm pull` writes the four bundled overlays -- config.json,
+# corelib_phi4_manifest.json, provenance.json and tokenizer_config.json -- over
+# the downloaded files, and the engine requires the manifest. flm.exe cannot be
+# built here (see Step 7 below), so the same composition is done directly, from
+# the same src/model_overlays the installer ships.
+#
+# The downloaded files are HARDLINKED rather than copied: model.onnx.data is
+# 3.2 GB, and a copy would be three minutes and three gigabytes for no
+# additional coverage. The overlays are real copies, because they are the files
+# being overlaid.
+function New-ComposedModelDir {
+    param([string]$Source, [string]$Destination, [string]$OverlayDir)
+
+    if (Test-Path $Destination) {
+        Remove-Item $Destination -Recurse -Force
+    }
+    New-Item -ItemType Directory -Force -Path $Destination | Out-Null
+
+    foreach ($file in Get-ChildItem -Path $Source -File) {
+        New-Item -ItemType HardLink `
+            -Path (Join-Path $Destination $file.Name) `
+            -Target $file.FullName | Out-Null
+    }
+    foreach ($overlay in Get-ChildItem -Path $OverlayDir -File) {
+        Copy-Item -Path $overlay.FullName `
+            -Destination (Join-Path $Destination $overlay.Name) -Force
+    }
+    return $Destination
+}
+
 if (-not $ModelDir) {
     $skipped += 'numeric goldens and boundary sweep (-ModelDir not supplied)'
 } elseif (-not $CorelibSource) {
@@ -205,6 +237,15 @@ if (-not $ModelDir) {
     $CorelibSource = (Resolve-Path $CorelibSource).Path
     $artifacts = Join-Path $BuildDir 'artifacts'
     New-Item -ItemType Directory -Force -Path $artifacts | Out-Null
+
+    if (-not (Test-Path (Join-Path $ModelDir 'corelib_phi4_manifest.json'))) {
+        $overlayDir = Join-Path $sourceDir 'model_overlays/phi4-mini-it-aie4'
+        $composed = Join-Path $BuildDir 'model'
+        Write-Output "composing an AIE4 package from $ModelDir + $overlayDir"
+        $ModelDir = New-ComposedModelDir $ModelDir $composed $overlayDir
+        Write-Output "model dir: $ModelDir"
+        $ran += 'model package composed from the shipped overlays'
+    }
 
     # Explicit token IDs, never a tokenizer. The point of design Section 12.4's
     # explicit-token checkpoints is that both sides consume the SAME integers,

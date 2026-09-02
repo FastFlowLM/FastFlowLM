@@ -640,31 +640,45 @@ elseif(WIN32)
     # This does NOT make an ambient prefix acceptable in place of proper target
     # wiring (ENV-2). It makes the search explicit and its result auditable,
     # which is the opposite of relying on whatever happens to be reachable.
+    # Only the SINGLE-precision FFTW entry points are called: everything in
+    # common/audio_process_utils uses fftwf_*, and neither fftw_* (double) nor
+    # fftwl_* (long double) appears anywhere in this tree. The vendored
+    # include/fftw3.h declares all three, which is why all three were being
+    # linked. They are optional here because Windows conda-forge does not build
+    # the long-double variant at all -- MSVC's long double is a double -- and
+    # failing the build over a library nothing calls would be a self-inflicted
+    # portability limit.
     set(_flm_win_libs "")
     foreach(_flm_dep IN ITEMS
-            "avformat|avformat"
-            "avcodec|avcodec"
-            "avutil|avutil"
-            "swscale|swscale"
-            "swresample|swresample"
-            "curl|libcurl;libcurl_imp;curl"
-            "boost_program_options|boost_program_options;libboost_program_options-vc143-mt-x64-1_88;libboost_program_options-vc142-mt-x64-1_88"
-            "fftw3|fftw3;libfftw3-3"
-            "fftw3f|fftw3f;libfftw3f-3"
-            "fftw3l|fftw3l;libfftw3l-3")
+            "required|avformat|avformat"
+            "required|avcodec|avcodec"
+            "required|avutil|avutil"
+            "required|swscale|swscale"
+            "required|swresample|swresample"
+            "required|curl|libcurl;libcurl_imp;curl"
+            "required|boost_program_options|boost_program_options;libboost_program_options-vc143-mt-x64-1_88;libboost_program_options-vc142-mt-x64-1_88"
+            "required|fftw3f|fftw3f;libfftw3f-3"
+            "optional|fftw3|fftw3;libfftw3-3"
+            "optional|fftw3l|fftw3l;libfftw3l-3")
         string(REPLACE "|" ";" _flm_dep_parts "${_flm_dep}")
-        list(GET _flm_dep_parts 0 _flm_dep_key)
-        list(GET _flm_dep_parts 1 _flm_dep_names)
+        list(GET _flm_dep_parts 0 _flm_dep_need)
+        list(GET _flm_dep_parts 1 _flm_dep_key)
+        list(GET _flm_dep_parts 2 _flm_dep_names)
         find_library(FLM_LIB_${_flm_dep_key}
                      NAMES ${_flm_dep_names}
                      DOC "Import library for ${_flm_dep_key}")
         if(NOT FLM_LIB_${_flm_dep_key})
-            message(FATAL_ERROR
-                "Could not find an import library for '${_flm_dep_key}' "
-                "(tried: ${_flm_dep_names}). flm.exe needs FFmpeg, CURL, "
-                "Boost.program_options and FFTW3. Either configure with a "
-                "vcpkg toolchain, or add the prefix that provides them to "
-                "CMAKE_PREFIX_PATH.")
+            if(_flm_dep_need STREQUAL "required")
+                message(FATAL_ERROR
+                    "Could not find an import library for '${_flm_dep_key}' "
+                    "(tried: ${_flm_dep_names}). flm.exe needs FFmpeg, CURL, "
+                    "Boost.program_options and single-precision FFTW3. Either "
+                    "configure with a vcpkg toolchain, or add the prefix that "
+                    "provides them to CMAKE_PREFIX_PATH.")
+            endif()
+            message(STATUS
+                "  ${_flm_dep_key}: not found (optional, no call sites)")
+            continue()
         endif()
         message(STATUS "  ${_flm_dep_key}: ${FLM_LIB_${_flm_dep_key}}")
         list(APPEND _flm_win_libs "${FLM_LIB_${_flm_dep_key}}")

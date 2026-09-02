@@ -53,7 +53,8 @@ class TempModelPackage final {
 public:
     explicit TempModelPackage(
         std::vector<int> eos_ids = {200020, 199999},
-        std::optional<int> hidden_size = 3072) {
+        std::optional<int> hidden_size = 3072,
+        nlohmann::json config_overrides = nlohmann::json::object()) {
         const auto base = std::filesystem::temp_directory_path();
         for (int attempt = 0; attempt < 100; ++attempt) {
             path_ = base /
@@ -82,6 +83,9 @@ public:
             {"vocab_size", 200064},
             {"rms_norm_eps", 1.0e-5},
         };
+        for (const auto& [key, value] : config_overrides.items()) {
+            config[key] = value;
+        }
         WriteJson(path_ / "config.json", config);
 
         nlohmann::json tokenizer_config = {
@@ -105,6 +109,12 @@ public:
 
     const std::filesystem::path& path() const noexcept {
         return path_;
+    }
+
+    void OverwriteFile(
+        std::string_view name,
+        std::string_view contents) const {
+        WriteText(path_ / name, contents);
     }
 
 private:
@@ -561,6 +571,62 @@ void ConfigureFakeCorelibDll() {
             fake_dll.c_str()) != 0) {
         throw std::runtime_error(
             "failed to configure RYZENAI_CORELIB_PATH");
+    }
+}
+
+// Design `MODEL-2`. The overlay config.json is a restatement of the model
+// contract, so any disagreement with the validated constants must fail the
+// load rather than quietly reconfigure the model. Each corruption below is a
+// value the AIE4 frontend and weight loader would otherwise trust.
+void TestCorruptOverlayConfigFailsLoad() {
+    const nlohmann::json corruptions[] = {
+        {{"num_hidden_layers", 28}},
+        {{"hidden_size", 4096}},
+        {{"intermediate_size", 8960}},
+        {{"num_attention_heads", 32}},
+        {{"num_key_value_heads", 4}},
+        {{"head_dim", 64}},
+        {{"vocab_size", 200065}},
+        {{"rms_norm_eps", 1.0e-6}},
+        {{"model_type", "phi3"}},
+    };
+    for (const auto& corruption : corruptions) {
+        TempModelPackage package({200020, 199999}, 3072, corruption);
+        FactoryScope factory;
+        CheckThrowsContains(
+            [&] {
+                auto model = Load(
+                    package,
+                    ModelInfo(64, "corelib_aie4"),
+                    -1,
+                    false,
+                    nullptr);
+                (void)model;
+            },
+            "config.json");
+        // The engine must never be constructed from a package whose declared
+        // contract does not match the validated one.
+        CHECK(g_factory.calls == 0);
+    }
+
+    // A config.json that is not even parseable must fail the same way rather
+    // than falling through to a partially initialized model.
+    {
+        TempModelPackage package;
+        package.OverwriteFile("config.json", "{not json");
+        FactoryScope factory;
+        CheckThrowsContains(
+            [&] {
+                auto model = Load(
+                    package,
+                    ModelInfo(64, "corelib_aie4"),
+                    -1,
+                    false,
+                    nullptr);
+                (void)model;
+            },
+            "config.json");
+        CHECK(g_factory.calls == 0);
     }
 }
 
@@ -1316,6 +1382,7 @@ int main() {
         TestLegacyExactRepeatPreservesEmptyPrefillPayload();
 #if defined(FLM_ENABLE_CORELIB_AIE4)
         ConfigureFakeCorelibDll();
+        TestCorruptOverlayConfigFailsLoad();
         TestCorelibRoutingAndPreemption();
         TestInitialAndAtomicCaps();
         TestEnginePositionIsAuthoritativeForCapUpdate();

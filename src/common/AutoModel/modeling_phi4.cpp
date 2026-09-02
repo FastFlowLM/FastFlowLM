@@ -7,6 +7,10 @@
 
 #include "AutoModel/modeling_phi4.hpp"
 
+#if defined(FLM_ENABLE_CORELIB_AIE4)
+#include <models/phi4/phi4_corelib_constants.hpp>
+#endif
+
 #include <algorithm>
 #include <chrono>
 #include <filesystem>
@@ -78,6 +82,91 @@ void RequireAie4FrontendFile(
     }
 }
 
+#if defined(FLM_ENABLE_CORELIB_AIE4)
+
+// Design `MODEL-2`. The overlay `config.json` exists only because the upstream
+// repository ships none, and it restates the Section 5.1 constants so
+// FastFlow's existing readers keep working. It is never an independent source
+// of truth. `flm::phi4::constants` holds those same Section 5.1 values and is
+// what the manifest loader validates the ONNX initializers against, so
+// requiring the overlay to equal them is what makes a disagreement between the
+// overlay and the real weights a hard load failure instead of a silent
+// reconfiguration of the model.
+void RequireAie4OverlayMatchesModelConstants(
+    const std::filesystem::path& model_path) {
+    namespace constants = flm::phi4::constants;
+    const auto path = model_path / "config.json";
+    json config;
+    try {
+        std::ifstream input(path, std::ios::binary);
+        input.exceptions(std::ios::badbit);
+        config = json::parse(input);
+    } catch (const std::exception& error) {
+        throw std::runtime_error(
+            "Phi-4 AIE4 config.json could not be parsed: " + path.string() +
+            ": " + error.what());
+    }
+    if (!config.is_object()) {
+        throw std::runtime_error(
+            "Phi-4 AIE4 config.json must be a JSON object: " + path.string());
+    }
+
+    const auto require_integer =
+        [&](std::string_view field, std::int64_t expected) {
+            const auto found = config.find(field);
+            if (found == config.end() || !found->is_number_integer()) {
+                throw std::runtime_error(
+                    "Phi-4 AIE4 config.json is missing integer field '" +
+                    std::string(field) + "': " + path.string());
+            }
+            const std::int64_t actual = found->get<std::int64_t>();
+            if (actual != expected) {
+                throw std::runtime_error(
+                    "Phi-4 AIE4 config.json disagrees with the validated "
+                    "model constants: " +
+                    std::string(field) + " is " + std::to_string(actual) +
+                    ", expected " + std::to_string(expected) +
+                    ". The overlay restates the model contract and cannot "
+                    "redefine it; regenerate it from the packaged model "
+                    "rather than editing it.");
+            }
+        };
+
+    require_integer("num_hidden_layers", constants::kLayerCount);
+    require_integer("hidden_size", constants::kHiddenSize);
+    require_integer("intermediate_size", constants::kIntermediateSize);
+    require_integer("num_attention_heads", constants::kQueryHeadCount);
+    require_integer("num_key_value_heads", constants::kKvHeadCount);
+    require_integer("head_dim", constants::kHeadSize);
+    require_integer("vocab_size", constants::kVocabularySize);
+
+    const auto model_type = config.find("model_type");
+    if (
+        model_type == config.end() ||
+        !model_type->is_string() ||
+        model_type->get<std::string>() != "phi4") {
+        throw std::runtime_error(
+            "Phi-4 AIE4 config.json must declare model_type \"phi4\": " +
+            path.string());
+    }
+
+    const auto epsilon = config.find("rms_norm_eps");
+    if (epsilon == config.end() || !epsilon->is_number()) {
+        throw std::runtime_error(
+            "Phi-4 AIE4 config.json is missing numeric field "
+            "'rms_norm_eps': " +
+            path.string());
+    }
+    if (epsilon->get<double>() != constants::kRmsEpsilon) {
+        throw std::runtime_error(
+            "Phi-4 AIE4 config.json disagrees with the validated model "
+            "constants: rms_norm_eps does not equal the packed epsilon. "
+            "The overlay restates the model contract and cannot redefine it.");
+    }
+}
+
+#endif  // FLM_ENABLE_CORELIB_AIE4
+
 void ConfigureDefaultSampler(Phi4& model) {
     sampler_config config;
     config.top_k = 40;
@@ -118,6 +207,7 @@ void Phi4::load_model(std::string model_path, json model_info, int default_conte
         RequireAie4FrontendFile(
             package_path,
             "tokenizer_config.json");
+        RequireAie4OverlayMatchesModelConstants(package_path);
 
         this->_shared_initialize_model_state(
             model_path,

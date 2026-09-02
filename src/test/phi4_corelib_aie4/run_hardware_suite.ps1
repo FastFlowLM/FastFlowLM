@@ -802,19 +802,66 @@ if (-not $ModelDir) {
                                 '--output-json', $lmHeadJson)
                         $lmHeadRuns++
                     } catch {
-                        # A non-zero exit is the tool REPORTING a finding --
-                        # a model-body divergence, a bias, or a gross
-                        # disagreement -- not a tooling failure. The record
-                        # is what matters and it is written before the exit.
+                        # A NON-ZERO EXIT HERE IS A FINDING, AND SOME FINDINGS
+                        # MUST REACH THE SUITE'S EXIT CODE.
+                        #
+                        # This block used to downgrade every non-zero exit
+                        # that still wrote a record to a summary note. That
+                        # swallowed `common_bias` and `one_run_further` --
+                        # which are precisely diagnostic answers (2) and (3),
+                        # the two the human asked to be TOLD about -- and
+                        # `gross_disagreement`, which says the analysis itself
+                        # is not trustworthy. A campaign could exit 0 while
+                        # Step 9b had reported a systematic LM-head bias.
+                        # That is the ninth instance of this project's
+                        # recurring pattern.
+                        #
+                        # The split, and which is which:
+                        #
+                        #   common_bias / one_run_further  -> FAILURE. Beyond
+                        #     rounding; nothing else in the suite looks for
+                        #     them.
+                        #   gross_disagreement             -> FAILURE. The
+                        #     reference and the device disagree by more than
+                        #     rounding, so every other number in the record
+                        #     is suspect.
+                        #   model_body_divergence          -> a note ONLY
+                        #     when this same sample already failed the
+                        #     DETERM-2 gate above, because then it is already
+                        #     counted. When the gate PASSED, no other check
+                        #     in this suite would notice, so it fails too.
                         if (Test-Path $lmHeadJson) {
                             $lm = Get-Content $lmHeadJson -Raw |
                                 ConvertFrom-Json
+                            $lmHeadRuns++
                             Write-Output ("  Step 9b verdict [$tag]: " +
                                 "$($lm.verdict)")
-                            $bitExactNotes += ("Step 9b [$tag]: " +
-                                "$($lm.verdict); LM-head inputs identical: " +
+                            $note = ("Step 9b [$tag]: $($lm.verdict); " +
+                                "LM-head inputs identical: " +
                                 "$($lm.lm_head_inputs_identical)")
-                            $lmHeadRuns++
+                            $bitExactNotes += $note
+                            $beyondRounding = @(
+                                'common_bias',
+                                'one_run_further',
+                                'gross_disagreement')
+                            if ($beyondRounding -contains $lm.verdict) {
+                                Write-Output ("  STEP 9b REPORTS SOMETHING " +
+                                    "BEYOND ROUNDING ($tag): " +
+                                    "$($lm.verdict)")
+                                $failures += ("Step 9b [$tag]: " +
+                                    "$($lm.verdict) -- not the benign " +
+                                    "accumulation-order nondeterminism " +
+                                    "DETERM-1 accepts")
+                            } elseif (
+                                $lm.verdict -eq 'model_body_divergence' -and
+                                -not $gateFailed) {
+                                Write-Output ("  STEP 9b FOUND A MODEL-BODY " +
+                                    "DIVERGENCE THAT NO GATE CAUGHT ($tag)")
+                                $failures += ("Step 9b [$tag]: model-body " +
+                                    "divergence in a sample that PASSED the " +
+                                    "DETERM-2 gates, so nothing else here " +
+                                    "would have reported it")
+                            }
                         } else {
                             Write-Output ("STEP 9b FAILED TO PRODUCE A " +
                                 "RECORD ($tag): $($_.Exception.Message)")

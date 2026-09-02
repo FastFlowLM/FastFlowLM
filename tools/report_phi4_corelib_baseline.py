@@ -96,6 +96,10 @@ MIN_DETERMINISM_RUNS_PER_ROUTE = 20
 # bold from a float inequality on 1-vs-2 divergent runs of 33.
 ROUTE_DEPENDENCE_ALPHA = 0.05
 
+# Design 5.1. The LM-head input row is one hidden state, and the localisation
+# counts are reported against it.
+HIDDEN_SIZE = 3072
+
 # The routes `DETERM-3` requires separately. Append and re-prefill drive
 # different row extents through the same LM-head shape, so a difference
 # between them is informative about the mechanism and must not be averaged
@@ -401,6 +405,13 @@ def determinism_baseline(records: list[dict]) -> dict:
                 },
                 "runs_with_gate_failures": 0,
                 "first_divergences": {},
+                "localisation": {
+                    "measured_runs": 0,
+                    "by_source": {},
+                    "lm_head_input_differing_elements": [],
+                    "lm_head_input_elements": HIDDEN_SIZE,
+                    "steps": [],
+                },
                 "is_baseline": False,
             }
             continue
@@ -433,6 +444,31 @@ def determinism_baseline(records: list[dict]) -> dict:
             if label:
                 divergences[label] = divergences.get(label, 0) + 1
 
+        # WHERE THE DIVERGENCE ENTERED, aggregated so the published document
+        # carries the finding and not only the rate.
+        #
+        # A reader of the benchmark document was learning that 2 runs in 41
+        # were not bit-identical, and nothing about the thing that actually
+        # matters: that the two runs fed the LM head DIFFERENT rows, so the
+        # divergence is upstream of it. That was in the task report, the
+        # records README and the design spec, and in none of the places a
+        # reader of the benchmarks would look.
+        localisations: dict[str, int] = {}
+        localisation_elements: list[int] = []
+        localisation_steps: list[str] = []
+        for entry in entries:
+            record = entry.get("localisation") or {}
+            if not record.get("measured"):
+                continue
+            source = str(record.get("source", "unknown"))
+            localisations[source] = localisations.get(source, 0) + 1
+            if record.get("lm_head_input_differing_elements") is not None:
+                localisation_elements.append(
+                    int(record["lm_head_input_differing_elements"])
+                )
+            if record.get("step"):
+                localisation_steps.append(str(record["step"]))
+
         routes[route] = {
             "runs": runs,
             "steps": total_steps,
@@ -458,6 +494,15 @@ def determinism_baseline(records: list[dict]) -> dict:
             },
             "runs_with_gate_failures": len(failing),
             "first_divergences": dict(sorted(divergences.items())),
+            "localisation": {
+                "measured_runs": sum(localisations.values()),
+                "by_source": dict(sorted(localisations.items())),
+                "lm_head_input_differing_elements": sorted(
+                    localisation_elements
+                ),
+                "lm_head_input_elements": HIDDEN_SIZE,
+                "steps": sorted(localisation_steps),
+            },
             "is_baseline": runs >= MIN_DETERMINISM_RUNS_PER_ROUTE,
         }
         if runs < MIN_DETERMINISM_RUNS_PER_ROUTE:
@@ -609,8 +654,30 @@ def render_markdown(document: dict) -> str:
         "through the continuation sweep and stayed there. The machine runs "
         "corporate endpoint agents whose scans are not under this project's "
         "control, and the host share of a decode token is large enough for "
-        "CPU contention to show. Treat a difference below roughly 2x as "
-        "unresolved unless it is reproduced across runs."
+        "CPU contention to show."
+    )
+    add("")
+    # TWO COMPARISONS, TWO RULES, AND WHICH IS WHICH.
+    #
+    # This caveat used to end "treat a difference below roughly 2x as
+    # unresolved", stated unconditionally -- and thirty lines below it the
+    # crossover table published a bracket decided on differences far smaller
+    # than 2x. Two live rules, one contradicting the other, is the same defect
+    # as publishing a grid artifact as a measurement: the reader cannot tell
+    # which number to act on.
+    add(
+        "> **Two different comparisons, and they do not share a rule.** "
+        "Comparing a figure here against one from a DIFFERENT run — a later "
+        "revision, another machine, this document a month from now — is "
+        "subject to that 1.8x instability, so treat a difference below "
+        "roughly 2x as unresolved unless it is reproduced across runs. The "
+        "append-versus-re-prefill comparison below is not that comparison: "
+        "its samples are **interleaved within a single point**, so a regime "
+        "shift moves both routes together, and each point additionally has "
+        "to beat the drift measured across it. That is why it can resolve "
+        "differences the 2x rule could not — the instability it would be "
+        "guarding against has been measured and subtracted rather than "
+        "assumed away."
     )
     add("")
     add("### Identity")
@@ -727,13 +794,16 @@ def render_markdown(document: dict) -> str:
             add("#### Where append stops winning")
             add("")
             add(
-                "**This is a BRACKET, not a threshold.** A point counts as "
-                "decided only when the gap between the two routes exceeds the "
-                "larger of their own p50-to-p95 spreads at that point; "
-                "anything else widens the bracket. Task 14 has to choose this "
-                "constant, so what it needs to see is how much room the "
-                "measurement leaves — not a number picked because it was the "
-                "last grid point where append happened to win."
+                "**This is a BRACKET, not a threshold.** Append and "
+                "re-prefill samples are interleaved within each point, so a "
+                "machine regime shift moves both together rather than one. A "
+                "point counts as decided only when the gap between the routes "
+                "exceeds **both** the larger within-point p50-to-p95 spread "
+                "**and** the larger drift between a route's first and last "
+                "sample there; anything else widens the bracket. Task 14 has "
+                "to choose this constant, so what it needs to see is how much "
+                "room the measurement leaves — not a number picked because it "
+                "was the last grid point where append happened to win."
             )
             add("")
             add(
@@ -851,6 +921,60 @@ def render_markdown(document: dict) -> str:
             for entry in determinism.get("routes", {}).values()
         ):
             add("")
+        by_source: dict[str, int] = {}
+        elements: list[int] = []
+        steps: list[str] = []
+        for entry in determinism.get("routes", {}).values():
+            record = entry.get("localisation") or {}
+            for source, count in (record.get("by_source") or {}).items():
+                by_source[source] = by_source.get(source, 0) + count
+            elements.extend(
+                record.get("lm_head_input_differing_elements") or []
+            )
+            steps.extend(record.get("steps") or [])
+        if by_source:
+            add("#### Where the divergence enters — measured")
+            add("")
+            add(
+                "At the step whose logits first differ, the harness records "
+                "the exact row that was fed to the LM head in each run, so "
+                "this is an observation and not an inference. "
+                + ", ".join(
+                    f"**{count} event(s): `{source}`**"
+                    for source, count in sorted(by_source.items())
+                )
+                + "."
+            )
+            add("")
+            if by_source.get("model_body"):
+                width = (
+                    determinism.get("routes", {})
+                    .get("append", {})
+                    .get("localisation", {})
+                    .get("lm_head_input_elements", HIDDEN_SIZE)
+                )
+                add(
+                    f"In every measured event the two runs fed the LM head "
+                    f"**different rows** — "
+                    + ", ".join(f"{value:,}" for value in sorted(elements))
+                    + f" of {width:,} elements differing, at "
+                    + ", ".join(f"`{step}`" for step in sorted(set(steps)))
+                    + ". **The divergence therefore enters the model body, "
+                    "not the LM-head dispatch.** Each run's LM head was "
+                    "separately measured to be correctly rounded against its "
+                    "own input, so it is faithfully transforming inputs that "
+                    "already differ."
+                )
+                add("")
+                add(
+                    "**The layer at which it enters is not known.** Layer 0's "
+                    "K and V have been bit-identical in the events where the "
+                    "emitted tokens matched, and layer 31's have not, which "
+                    "bounds it to somewhere above layer 0. Narrowing it "
+                    "further needs per-layer capture, and until then this is "
+                    "an open question rather than a characterised one."
+                )
+                add("")
         gate_failures = sum(
             entry.get("runs_with_gate_failures", 0)
             for entry in determinism.get("routes", {}).values()

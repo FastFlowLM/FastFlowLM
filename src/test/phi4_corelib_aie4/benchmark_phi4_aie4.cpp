@@ -1041,48 +1041,109 @@ int main(int argc, char** argv) {
                 std::vector<std::uint64_t> append_p95;
                 std::vector<std::uint64_t> reprefill_p50;
                 std::vector<std::uint64_t> reprefill_p95;
+                std::vector<std::uint64_t> append_drifts;
+                std::vector<std::uint64_t> reprefill_drifts;
 
                 for (const std::size_t suffix : suffixes) {
                     const std::vector<int> suffix_tokens =
                         MakeTokens(prompt, suffix);
 
-                    // ---- append ----
-                    EstablishContext(engine, prompt, history);
-                    engine.checkpoint();
+                    // INTERLEAVED, one append sample then one re-prefill
+                    // sample, and back.
+                    //
+                    // The first version ran all six append samples and then
+                    // all six re-prefill samples. At suffix 256 that is two
+                    // minutes of append followed by seven seconds of
+                    // re-prefill, and this machine has been measured shifting
+                    // regime by a factor of 1.8 between runs. A shift landing
+                    // between the two blocks moves one route and not the
+                    // other, and NOTHING in the within-point spread can see
+                    // it: the spread is computed inside each block, where the
+                    // regime was constant.
+                    //
+                    // Interleaving makes the comparison paired in time, so a
+                    // drift moves both routes together. The residual is then
+                    // what the within-point spread actually bounds, which is
+                    // what makes the decision rule below defensible rather
+                    // than merely tighter than the alternative.
+                    //
+                    // Each repetition re-establishes the history, because a
+                    // re-prefill leaves the position past it. That reset is
+                    // the same work the append precondition needs anyway.
                     std::vector<std::uint64_t> append_samples;
-                    // One discarded warm-up repetition per point, then the
-                    // measured ones. Design 15.6 asks for warm repetitions;
-                    // the first pass at a new row extent pays for whatever
-                    // the library caches on first use at that shape.
+                    std::vector<std::uint64_t> reprefill_samples;
                     for (int repeat = -1;
                          repeat < options.continuation_samples;
                          ++repeat) {
+                        // One discarded warm-up repetition, then the measured
+                        // ones. Design 15.6 asks for warm repetitions; the
+                        // first pass at a new row extent pays for whatever
+                        // the library caches on first use at that shape.
+                        EstablishContext(engine, prompt, history);
+                        engine.checkpoint();
+
                         engine.restore();
-                        const auto before = engine.metrics();
-                        const auto started = Clock::now();
-                        for (const int token : suffix_tokens) {
-                            logits = engine.forward(token);
+                        {
+                            const auto before = engine.metrics();
+                            const auto started = Clock::now();
+                            for (const int token : suffix_tokens) {
+                                logits = engine.forward(token);
+                            }
+                            const std::uint64_t ns = ElapsedNs(started);
+                            const auto after = engine.metrics();
+                            // Append is N complete one-row passes, so the
+                            // synchronize and V-scatter counts scale
+                            // linearly. Design 15.3 states this; it is
+                            // checked, not assumed.
+                            RequireOneModelStep(
+                                Delta(before, after),
+                                static_cast<std::uint64_t>(suffix));
+                            CHECK(
+                                engine.get_current_context_length() ==
+                                static_cast<int>(history + suffix));
+                            if (repeat >= 0) {
+                                append_samples.push_back(ns);
+                            }
                         }
-                        const std::uint64_t ns = ElapsedNs(started);
-                        const auto after = engine.metrics();
-                        // Append is N complete one-row passes, so the
-                        // synchronize and V-scatter counts scale linearly.
-                        // Design 15.3 states this; it is checked, not assumed.
-                        RequireOneModelStep(
-                            Delta(before, after),
-                            static_cast<std::uint64_t>(suffix));
-                        CHECK(
-                            engine.get_current_context_length() ==
-                            static_cast<int>(history + suffix));
-                        if (repeat >= 0) {
-                            append_samples.push_back(ns);
+
+                        {
+                            engine.clear_context();
+                            std::vector<int> full =
+                                MakeTokens(prompt, history + suffix);
+                            const auto before = engine.metrics();
+                            const auto started = Clock::now();
+                            logits = engine.prefill(full);
+                            const std::uint64_t ns = ElapsedNs(started);
+                            const auto after = engine.metrics();
+                            // Re-prefill is ONE complete pass regardless of
+                            // the row count. That asymmetry against append is
+                            // the whole reason the two routes exist.
+                            RequireOneModelStep(Delta(before, after), 1);
+                            CHECK(
+                                engine.get_current_context_length() ==
+                                static_cast<int>(history + suffix));
+                            if (repeat >= 0) {
+                                reprefill_samples.push_back(ns);
+                            }
                         }
                     }
+
                     json append_point = LatencySummary(append_samples);
                     append_point["history_rows"] = history;
                     append_point["suffix"] = suffix;
                     append_point["route"] = "append";
                     append_point["model_steps"] = suffix;
+                    append_point["interleaved_with_reprefill"] = true;
+                    // DRIFT ACROSS THE POINT: the last measured sample
+                    // against the first. Interleaving makes a regime shift
+                    // affect both routes; this is what makes it VISIBLE, so
+                    // the decision rule can refuse a point where the machine
+                    // moved more than the routes differ.
+                    const std::uint64_t append_drift =
+                        append_samples.back() > append_samples.front()
+                            ? append_samples.back() - append_samples.front()
+                            : append_samples.front() - append_samples.back();
+                    append_point["drift_ns"] = append_drift;
                     append_point["tokens_per_second"] =
                         static_cast<double>(suffix) * 1e9 /
                         static_cast<double>(
@@ -1091,37 +1152,22 @@ int main(int argc, char** argv) {
                         append_point["p50_ns"].get<std::uint64_t>());
                     append_p95.push_back(
                         append_point["p95_ns"].get<std::uint64_t>());
+                    append_drifts.push_back(append_drift);
                     continuation_points.push_back(std::move(append_point));
 
-                    // ---- re-prefill ----
-                    std::vector<std::uint64_t> reprefill_samples;
-                    for (int repeat = -1;
-                         repeat < options.continuation_samples;
-                         ++repeat) {
-                        engine.clear_context();
-                        std::vector<int> full =
-                            MakeTokens(prompt, history + suffix);
-                        const auto before = engine.metrics();
-                        const auto started = Clock::now();
-                        logits = engine.prefill(full);
-                        const std::uint64_t ns = ElapsedNs(started);
-                        const auto after = engine.metrics();
-                        // Re-prefill is ONE complete pass regardless of the
-                        // row count. That asymmetry against append is the
-                        // whole reason the two routes exist.
-                        RequireOneModelStep(Delta(before, after), 1);
-                        CHECK(
-                            engine.get_current_context_length() ==
-                            static_cast<int>(history + suffix));
-                        if (repeat >= 0) {
-                            reprefill_samples.push_back(ns);
-                        }
-                    }
                     json reprefill_point = LatencySummary(reprefill_samples);
                     reprefill_point["history_rows"] = history;
                     reprefill_point["suffix"] = suffix;
                     reprefill_point["route"] = "reprefill";
                     reprefill_point["model_steps"] = 1;
+                    reprefill_point["interleaved_with_append"] = true;
+                    const std::uint64_t reprefill_drift =
+                        reprefill_samples.back() > reprefill_samples.front()
+                            ? reprefill_samples.back() -
+                                  reprefill_samples.front()
+                            : reprefill_samples.front() -
+                                  reprefill_samples.back();
+                    reprefill_point["drift_ns"] = reprefill_drift;
                     reprefill_point["tokens_per_second"] =
                         static_cast<double>(history + suffix) * 1e9 /
                         static_cast<double>(
@@ -1130,6 +1176,7 @@ int main(int argc, char** argv) {
                         reprefill_point["p50_ns"].get<std::uint64_t>());
                     reprefill_p95.push_back(
                         reprefill_point["p95_ns"].get<std::uint64_t>());
+                    reprefill_drifts.push_back(reprefill_drift);
                     continuation_points.push_back(std::move(reprefill_point));
 
                     note_peak(SampleMemory());
@@ -1167,10 +1214,24 @@ int main(int argc, char** argv) {
                     const std::uint64_t pa = append_p50[index];
                     const std::uint64_t pr = reprefill_p50[index];
                     const std::uint64_t gap = pa > pr ? pa - pr : pr - pa;
+                    // TWO sources of uncertainty, and the point must beat
+                    // both.
+                    //
+                    // `noise` is the within-point spread: how much a route
+                    // varies across its own five samples. `drift` is how far
+                    // the machine moved between the first and last sample of
+                    // the point, which is the between-run instability seen
+                    // from inside the point. The previous rule used `noise`
+                    // alone, and a within-point spread cannot see a regime
+                    // shift -- which is exactly the objection the document's
+                    // own "below 2x is unresolved" caveat was making.
                     const std::uint64_t noise = std::max(
                         append_p95[index] - append_p50[index],
                         reprefill_p95[index] - reprefill_p50[index]);
-                    const bool decided = gap > noise;
+                    const std::uint64_t drift = std::max(
+                        append_drifts[index], reprefill_drifts[index]);
+                    const std::uint64_t uncertainty = std::max(noise, drift);
+                    const bool decided = gap > uncertainty;
                     const bool append_wins_here = pa < pr;
 
                     json decision;
@@ -1179,6 +1240,13 @@ int main(int argc, char** argv) {
                     decision["reprefill_p50_ns"] = pr;
                     decision["gap_ns"] = gap;
                     decision["within_route_spread_ns"] = noise;
+                    decision["drift_across_point_ns"] = drift;
+                    decision["uncertainty_ns"] = uncertainty;
+                    decision["gap_over_uncertainty"] =
+                        uncertainty == 0
+                            ? 0.0
+                            : static_cast<double>(gap) /
+                                  static_cast<double>(uncertainty);
                     decision["decided"] = decided;
                     decision["winner"] =
                         !decided ? "undecided"
@@ -1234,11 +1302,14 @@ int main(int argc, char** argv) {
                 {"warm_samples_per_point", options.continuation_samples},
                 {"histories", histories},
                 {"suffixes", suffixes},
+                {"samples_interleaved", true},
                 {"decision_rule",
-                 "a point is decided only when the gap between the two "
-                 "routes' p50 exceeds the larger of the two routes' own "
-                 "p50-to-p95 spread at that point; the reported figure is a "
-                 "BRACKET, not a threshold"}};
+                 "append and re-prefill samples are INTERLEAVED, so a machine "
+                 "regime shift moves both routes together; a point is decided "
+                 "only when the gap between the two routes' p50 exceeds BOTH "
+                 "the larger within-point p50-to-p95 spread AND the larger "
+                 "drift between a route's first and last sample at that "
+                 "point. The reported figure is a BRACKET, not a threshold."}};
 
             // ---------------------------------------------------------------
             // Step 7 and Step 8: decode, with the 128-token memory window

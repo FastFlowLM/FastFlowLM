@@ -862,5 +862,99 @@ class VScatterProvenanceTests(unittest.TestCase):
         )
 
 
+def _determ_with_localisation(route, step, differing):
+    record = _determ(route, 9, 17, 49.25)
+    record["failures"] = [f"{step}: logits differ by more than 2 BF16 ULP"]
+    record["first_divergence"] = step
+    record["localisation"] = {
+        "measured": True,
+        "step": step,
+        "lm_head_input_elements": 3072,
+        "lm_head_input_differing_elements": differing,
+        "source": "model_body",
+        "reason": "the two runs fed the LM head DIFFERENT rows",
+    }
+    return record
+
+
+class LocalisationPublicationTests(unittest.TestCase):
+    """The finding, not just the rate.
+
+    A reader of the benchmark document was learning that 2 runs in 41 were not
+    bit-identical, and nothing about the thing that matters: the two runs fed
+    the LM head different rows, so the divergence is upstream of it. That was
+    in the task report, the records README and the design spec, and in none of
+    the places a reader of the benchmarks would look.
+    """
+
+    def _document(self):
+        records = _determ_runs("append", 39) + [
+            _determ_with_localisation("append", "decode[8]", 2571),
+            _determ_with_localisation("append", "decode[6]", 2754),
+        ]
+        records += _determ_runs("reprefill", 41)
+        document = _baseline()
+        document["determinism"] = determinism_baseline(records)
+        return document
+
+    def test_the_localisation_is_aggregated_per_route(self):
+        entry = self._document()["determinism"]["routes"]["append"][
+            "localisation"
+        ]
+        self.assertEqual(entry["measured_runs"], 2)
+        self.assertEqual(entry["by_source"], {"model_body": 2})
+        self.assertEqual(
+            entry["lm_head_input_differing_elements"], [2571, 2754]
+        )
+        self.assertEqual(entry["steps"], ["decode[6]", "decode[8]"])
+
+    def test_an_unmeasured_localisation_is_not_counted(self):
+        # Records predating the per-step capture carry no localisation. They
+        # must not be counted as evidence of anything.
+        records = _determ_runs("append", 41) + _determ_runs("reprefill", 41)
+        entry = determinism_baseline(records)["routes"]["append"][
+            "localisation"
+        ]
+        self.assertEqual(entry["measured_runs"], 0)
+        self.assertEqual(entry["by_source"], {})
+
+    def test_the_document_states_the_finding(self):
+        text = render_markdown(self._document())
+        self.assertIn("Where the divergence enters", text)
+        self.assertIn("model_body", text)
+        self.assertIn("2,571", text)
+        self.assertIn("2,754", text)
+        self.assertIn("divergence therefore enters the model body", text)
+
+    def test_the_document_says_the_layer_is_unknown(self):
+        text = render_markdown(self._document())
+        self.assertIn("layer at which it enters is not known", text)
+
+    def test_a_document_with_no_measured_localisation_says_nothing(self):
+        document = _baseline()
+        document["determinism"] = determinism_baseline(
+            _determ_runs("append", 41) + _determ_runs("reprefill", 41)
+        )
+        text = render_markdown(document)
+        self.assertNotIn("Where the divergence enters", text)
+
+
+class DecisionRuleReconciliationTests(unittest.TestCase):
+    """Two live rules, one contradicting the other, is C-1's failure mode in a
+    subtler form: the reader cannot tell which number to act on."""
+
+    def test_the_2x_rule_is_scoped_to_cross_run_comparisons(self):
+        text = render_markdown(_baseline())
+        self.assertIn("Two different comparisons", text)
+        self.assertIn("roughly 2x as unresolved", text)
+        # And it must be visibly scoped, not stated unconditionally.
+        self.assertIn("DIFFERENT run", text)
+
+    def test_the_crossover_blurb_names_the_rule_it_actually_uses(self):
+        text = render_markdown(_baseline())
+        self.assertIn("interleaved within each point", text)
+        self.assertIn("drift between a route's first and last", text)
+
+
 if __name__ == "__main__":
     unittest.main()

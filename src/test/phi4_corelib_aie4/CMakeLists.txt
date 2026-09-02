@@ -236,6 +236,11 @@ target_link_libraries(test_phi4_e2e PRIVATE
     shell32
     ole32
     advapi32)
+# picosha2.h, for hashing the corelib the loader actually handed us. The same
+# header backs flm::pull::CalculateFileSha256, so the artifact's hash is
+# comparable with the ones the model catalog records.
+target_include_directories(test_phi4_e2e PRIVATE
+    ${FASTFLOW_SOURCE_DIR}/pull)
 target_compile_definitions(test_phi4_e2e PRIVATE
     FLM_REAL_CORELIB_RUNTIME_DIR="${RYZENAI_CORELIB_RUNTIME_DIR}"
     FLM_REAL_CORELIB_EXTRA_DLL_DIRS="${RYZENAI_CORELIB_EXTRA_DLL_DIRS_ESCAPED}")

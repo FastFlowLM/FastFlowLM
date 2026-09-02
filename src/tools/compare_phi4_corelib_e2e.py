@@ -81,6 +81,28 @@ def _argmax_lowest(values) -> int:
     return int(np.argmax(np.asarray(values)))
 
 
+def _narrow_bf16(values) -> list:
+    """FP32 -> raw BF16 bits, round-to-nearest-even.
+
+    Mirrors `phi4_driver.to_bf16`, reimplemented here so `compare` stays a pure
+    JSON-to-JSON operation that imports neither the driver nor the corelib
+    bindings and therefore cannot open a device context.
+    """
+    bits = np.ascontiguousarray(values, dtype=np.float32).view(np.uint32)
+    rounded = bits.astype(np.uint64) + 0x7FFF + ((bits >> 16) & 1)
+    return (rounded >> 16).astype(np.uint16).tolist()
+
+
+def _sha256_file(path) -> str:
+    import hashlib
+
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def _widen_bf16(bits) -> np.ndarray:
     """FastFlow emits raw BF16 bit patterns; the reference is already FP32.
 
@@ -136,11 +158,23 @@ def emit_reference(args) -> int:
     if not model_onnx.is_file():
         raise SystemExit(f"no model.onnx under {args.model_dir}")
 
+    # Which DLL the PYTHON side resolved.
+    #
+    # The C++ harness and this script find the library by different fallbacks,
+    # so "both used the same corelib" was an assumption rather than a recorded
+    # fact. Recording it on both sides makes the comparison state which two
+    # binaries it actually compared.
+    library = corelib.load_library()
+    library_path = str(getattr(library, "_dll", None)._name)
     record = {
         "continuation_route": args.continuation_route,
         "prefix_ids": prefix,
         "suffix_ids": suffix,
+        "corelib_loaded_path": library_path,
+        "corelib_sha256": _sha256_file(library_path),
     }
+    print(f"reference corelib: {library_path}")
+    print(f"sha256           : {record['corelib_sha256']}")
     try:
         model = driver.Phi4(model_onnx)
 
@@ -193,6 +227,13 @@ def emit_reference(args) -> int:
         record["final_position"] = position
         record["final_snapshot"] = {
             "position": position,
+            # Design 15.3 lists the final hidden state as a checkpoint. It is
+            # narrowed to BF16 here because that is what the device stores:
+            # FastFlow reads `lm_input_tensor` back as raw BF16, and the
+            # reference's FP32 array is the value corelib narrowed on the way
+            # in. Comparing the FP32 against the BF16 would be comparing two
+            # different things and would need a tolerance to hide it.
+            "last_hidden": _narrow_bf16(hidden),
             "layer0_k": _read_live_cache(model.k_cache[0], position, driver),
             "layer0_v": _read_live_cache(model.v_cache[0], position, driver),
             "layer31_k": _read_live_cache(model.k_cache[-1], position, driver),
@@ -316,6 +357,27 @@ def compare(args) -> int:
     theirs = json.loads(Path(args.reference_json).read_text(encoding="utf-8"))
     failures = Failures()
 
+    # Which two binaries are actually being compared. Reported always; if both
+    # sides recorded a hash they must agree, because a comparison between two
+    # different corelib builds is not the comparison anyone thinks it is.
+    mine_sha = mine.get("corelib_sha256")
+    theirs_sha = theirs.get("corelib_sha256")
+    if mine_sha and theirs_sha:
+        print(f"fastflow  corelib {mine_sha}  {mine.get('corelib_loaded_path')}")
+        print(f"reference corelib {theirs_sha}  {theirs.get('corelib_loaded_path')}")
+        failures.check(
+            mine_sha == theirs_sha,
+            "the two sides loaded DIFFERENT corelib builds:\n"
+            f"      fastflow  {mine_sha} {mine.get('corelib_loaded_path')}\n"
+            f"      reference {theirs_sha} {theirs.get('corelib_loaded_path')}",
+        )
+    else:
+        failures.check(
+            False,
+            "one side recorded no corelib SHA-256, so this comparison cannot "
+            "say which two binaries it compared",
+        )
+
     failures.check(
         mine["continuation_route"].replace("force_", "")
         == theirs["continuation_route"].replace("force_", ""),
@@ -328,11 +390,25 @@ def compare(args) -> int:
         "the two runs did not use the same explicit token IDs",
     )
 
+    # Bit-exactness is tracked as its own property, separate from the design
+    # 12.4 thresholds.
+    #
+    # The thresholds are the release gate. Bit-exactness is the claim the
+    # report makes, and until now no check produced it -- it was computed by
+    # hand from the artifacts and asserted in prose, which is exactly the kind
+    # of claim that quietly stops being true. `--require-bit-exact` makes it
+    # fail the run instead.
+    exact = {"logits": [], "kv": [], "last_hidden": None}
+
     _compare_step(
         failures,
         "continuation",
         mine["continuation"]["logits_bf16"],
         theirs["continuation"]["logits"],
+    )
+    exact["logits"].append(
+        mine["continuation"]["logits_bf16"]
+        == _narrow_bf16(theirs["continuation"]["logits"])
     )
 
     steps = min(len(mine["decode"]), len(theirs["decode"]))
@@ -355,6 +431,9 @@ def compare(args) -> int:
             mine_step["logits_bf16"],
             reference_step["logits"],
         )
+        exact["logits"].append(
+            mine_step["logits_bf16"] == _narrow_bf16(reference_step["logits"])
+        )
 
     # Live K/V only, and only where both sides reached the same position.
     # Comparing beyond `position` would compare uninitialised device memory.
@@ -373,15 +452,104 @@ def compare(args) -> int:
                 False,
                 f"{name}: live extent {left.shape} vs {right.shape}",
             )
+            exact["kv"].append(False)
             continue
         if left.size == 0:
             failures.check(False, f"{name}: no live rows to compare")
+            exact["kv"].append(False)
             continue
         correlation = _correlation(left, right)
         failures.check(
             correlation >= MIN_CORRELATION,
             f"{name}: live-cache correlation {correlation:.8f} < "
             f"{MIN_CORRELATION}",
+        )
+        identical = int(np.sum(left == right))
+        exact["kv"].append(identical == left.size)
+        print(
+            f"{name}: correlation {correlation:.8f}, "
+            f"{identical}/{left.size} elements identical"
+        )
+
+    # Design 15.3 lists the final hidden state as a checkpoint. It was emitted
+    # by the harness from the first version of this suite and never compared,
+    # which made it a payload rather than a check.
+    if "last_hidden" in reference_snapshot:
+        mine_hidden = mine_snapshot["last_hidden"]
+        reference_hidden = reference_snapshot["last_hidden"]
+        if len(mine_hidden) != len(reference_hidden):
+            failures.check(
+                False,
+                f"last_hidden: length {len(mine_hidden)} vs "
+                f"{len(reference_hidden)}",
+            )
+            exact["last_hidden"] = False
+        else:
+            widened_mine = _widen_bf16(mine_hidden)
+            widened_reference = _widen_bf16(reference_hidden)
+            correlation = _correlation(widened_mine, widened_reference)
+            failures.check(
+                correlation >= MIN_CORRELATION,
+                f"last_hidden: correlation {correlation:.8f} < "
+                f"{MIN_CORRELATION}",
+            )
+            identical = int(np.sum(widened_mine == widened_reference))
+            exact["last_hidden"] = identical == len(mine_hidden)
+            print(
+                f"last_hidden: correlation {correlation:.8f}, "
+                f"{identical}/{len(mine_hidden)} elements identical"
+            )
+    else:
+        failures.check(
+            False,
+            "the reference emitted no last_hidden, so the design 15.3 final "
+            "hidden checkpoint was not compared",
+        )
+
+    # The route's expected token sequence, from a file committed to the
+    # repository. Without this the golden is re-derived from the reference on
+    # every run, so the pair could drift together -- a corelib change that
+    # moved both sides identically would pass every check above.
+    if args.expected_tokens:
+        expected_document = json.loads(
+            Path(args.expected_tokens).read_text(encoding="utf-8")
+        )
+        route_key = mine["continuation_route"]
+        if route_key not in expected_document:
+            failures.check(
+                False,
+                f"no expected token sequence recorded for route "
+                f"'{route_key}' in {args.expected_tokens}",
+            )
+        else:
+            expected = expected_document[route_key]
+            observed = [mine["continuation"]["top1_id"]] + [
+                step["top1_id"] for step in mine["decode"]
+            ]
+            failures.check(
+                observed == expected,
+                f"route '{route_key}' emitted a different token sequence "
+                f"from the one recorded in {args.expected_tokens}:\n"
+                f"      expected {expected}\n"
+                f"      observed {observed}",
+            )
+
+    logits_exact = all(exact["logits"])
+    kv_exact = bool(exact["kv"]) and all(exact["kv"])
+    hidden_exact = exact["last_hidden"] is True
+    all_exact = logits_exact and kv_exact and hidden_exact
+    print(
+        "bit-exact vs the reference: logits "
+        f"{sum(1 for v in exact['logits'] if v)}/{len(exact['logits'])} steps, "
+        f"K/V {sum(1 for v in exact['kv'] if v)}/{len(exact['kv'])} tensors, "
+        f"last_hidden {hidden_exact}"
+    )
+    if args.require_bit_exact:
+        failures.check(
+            all_exact,
+            "--require-bit-exact was given and the result is not "
+            "bit-identical to the reference. Any report describing it as "
+            "bit-identical is now wrong.",
         )
 
     # Deliberately NOT compared: synchronize counts. FastFlow uses four
@@ -417,6 +585,37 @@ def self_consistency(args) -> int:
     left = json.loads(Path(args.a).read_text(encoding="utf-8"))
     right = json.loads(Path(args.b).read_text(encoding="utf-8"))
     failures = Failures()
+
+    # Same library, first. Without this the check cannot tell "the same binary
+    # twice" from "two runs that loaded different DLLs", and the second is a
+    # live hypothesis for the divergence in report section 5.1 -- so a pass
+    # here would have been evidence for a claim it never tested.
+    for field, label in (
+        ("corelib_sha256", "corelib SHA-256"),
+        ("corelib_loaded_path", "loaded corelib path"),
+    ):
+        a_value = left.get(field)
+        b_value = right.get(field)
+        failures.check(
+            a_value is not None and b_value is not None,
+            f"a run recorded no {label}, so this check cannot show the two "
+            f"runs used the same library",
+        )
+        if a_value is not None and b_value is not None:
+            failures.check(
+                a_value == b_value,
+                f"the two runs used a different {label}:\n"
+                f"      A {a_value}\n      B {b_value}",
+            )
+    if left.get("corelib_sha256"):
+        print(f"both runs loaded {left['corelib_sha256']}")
+
+    failures.check(
+        left.get("prefix_ids") == right.get("prefix_ids")
+        and left.get("suffix_ids") == right.get("suffix_ids")
+        and left.get("continuation_route") == right.get("continuation_route"),
+        "the two runs were not given the same input",
+    )
 
     def logit_steps(document):
         steps = [("continuation", document["continuation"]["logits_bf16"])]
@@ -459,6 +658,59 @@ def self_consistency(args) -> int:
     if first_divergence is not None:
         print(f"first divergence at {first_divergence}")
 
+    # The snapshot, not just the logits. The logits are one row out of the last
+    # LM-head dispatch; the K/V caches are the accumulated state of all 32
+    # layers over every step, so they are where an intermittent divergence
+    # shows up earliest and most visibly.
+    a_snapshot = left.get("final_snapshot", {})
+    b_snapshot = right.get("final_snapshot", {})
+    for name in (
+        "position",
+        "live_rows",
+        "last_hidden",
+        "layer0_k",
+        "layer0_v",
+        "layer31_k",
+        "layer31_v",
+    ):
+        a_value = a_snapshot.get(name)
+        b_value = b_snapshot.get(name)
+        if a_value is None or b_value is None:
+            failures.check(False, f"snapshot field {name} is missing")
+            continue
+        if a_value != b_value:
+            if isinstance(a_value, list) and len(a_value) == len(b_value):
+                differing = sum(1 for x, y in zip(a_value, b_value) if x != y)
+                failures.check(
+                    False,
+                    f"snapshot {name}: {differing}/{len(a_value)} elements "
+                    f"differ between two runs of the same binary",
+                )
+            else:
+                failures.check(
+                    False,
+                    f"snapshot {name}: {a_value!r} vs {b_value!r}",
+                )
+
+    # The counts too. These are the design 5.2 / 10.4 contract, and two runs
+    # that dispatched a different number of times are not the same run even if
+    # the numbers happened to land in the same place.
+    a_metrics = left.get("final_metrics", {})
+    b_metrics = right.get("final_metrics", {})
+    failures.check(
+        bool(a_metrics) and bool(b_metrics),
+        "a run recorded no final_metrics",
+    )
+    for key in sorted(set(a_metrics) | set(b_metrics)):
+        # Wall-clock fields are not reproducible and are not part of the
+        # contract; everything else is a count or an extent and must match.
+        if key.endswith("_ns"):
+            continue
+        failures.check(
+            a_metrics.get(key) == b_metrics.get(key),
+            f"metric {key}: {a_metrics.get(key)} vs {b_metrics.get(key)}",
+        )
+
     return failures.report(
         f"self-consistency[{left['continuation_route']}]"
     )
@@ -479,6 +731,18 @@ def main() -> int:
     check = subparsers.add_parser("compare")
     check.add_argument("--fastflow-json", required=True)
     check.add_argument("--reference-json", required=True)
+    check.add_argument(
+        "--expected-tokens",
+        help="JSON file of route-keyed expected top-1 token sequences, "
+        "committed to the repository so the golden is not re-derived from "
+        "the reference on every run",
+    )
+    check.add_argument(
+        "--require-bit-exact",
+        action="store_true",
+        help="fail unless every logit vector, every live K/V tensor and the "
+        "final hidden state are bit-identical to the reference",
+    )
     check.set_defaults(handler=compare)
 
     repeat = subparsers.add_parser("self-consistency")

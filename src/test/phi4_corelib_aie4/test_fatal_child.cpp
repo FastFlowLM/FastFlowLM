@@ -26,6 +26,7 @@
 
 #include <corelib/corelib_api.hpp>
 #include <corelib/corelib_fatal_record.hpp>
+#include <corelib/corelib_object.hpp>
 #include <corelib/corelib_runtime.hpp>
 #include <models/phi4/phi4_corelib_aie4.hpp>
 #include <models/phi4/phi4_corelib_constants.hpp>
@@ -57,12 +58,43 @@ using flm::corelib::StepSubmissionState;
 
 constexpr unsigned int kFatalExitCode = 0xE0040001u;
 
-// Printed by the child ONLY on the healthy shutdown path. Its ABSENCE from a
-// hard-exit child's output is an assertion in its own right: a process that
-// terminated after an irrevocable failure must not have run normal cleanup,
-// and "the record exists" alone would not show that.
-constexpr std::string_view kCleanupMarker = "FATAL_CHILD_CLEANUP_OK";
-constexpr std::string_view kSurvivedMarker = "FATAL_CHILD_SURVIVED";
+// Markers are FILES, not stdout lines, and each one is written, flushed and
+// closed before the child proceeds.
+//
+// The first version of this test looked for the absence of a `std::cout` line.
+// That check could not fail: `TerminateProcess` discards buffered stdout, so a
+// child that had run cleanup and printed the marker would still show no marker
+// once it was killed. "Absent" and "never written" were indistinguishable, and
+// the assertion passed for the wrong reason.
+//
+// A closed file survives `TerminateProcess`, so absence now means the child
+// really did not get there. `kReachedPolicy` is the positive control that
+// makes the absence meaningful: without it, a child that died during startup
+// would satisfy "no cleanup marker" just as well as one that was correctly
+// terminated mid-step.
+constexpr std::wstring_view kReachedPolicyMarker = L"reached-policy.marker";
+constexpr std::wstring_view kCleanupMarker = L"cleanup-ok.marker";
+constexpr std::wstring_view kSurvivedMarker = L"survived.marker";
+
+// Where the child drops its markers, passed on the command line so the parent
+// and child cannot disagree about it.
+std::filesystem::path g_marker_dir;
+
+void WriteMarker(std::wstring_view name, std::string_view contents) {
+    const auto path = g_marker_dir / std::filesystem::path(name);
+    std::ofstream stream(path, std::ios::binary | std::ios::trunc);
+    if (!stream) {
+        throw std::runtime_error(
+            "child could not write marker " + path.string());
+    }
+    stream << contents;
+    stream.flush();
+    stream.close();
+    if (!stream) {
+        throw std::runtime_error(
+            "child could not flush marker " + path.string());
+    }
+}
 
 #if !defined(FLM_REAL_CORELIB_RUNTIME_DIR)
 #define FLM_REAL_CORELIB_RUNTIME_DIR ""
@@ -158,6 +190,16 @@ int RunChild(std::string_view scenario) {
               << " status=" << static_cast<int>(failure.status)
               << " call=" << failure.call << '\n';
 
+    // The library's OWN status and message, handed to the parent so it can
+    // check the record against what corelib actually said rather than against
+    // a literal this test invented. Written before the policy runs, because
+    // two of the three scenarios never return from it.
+    WriteMarker(
+        L"expected-status.marker",
+        std::to_string(static_cast<int>(failure.status)));
+    WriteMarker(L"expected-detail.marker", failure.detail);
+    WriteMarker(L"expected-call.marker", failure.call);
+
     StepSubmissionState submission;
     bool synchronize_in_progress = false;
     std::string phase = "qkv";
@@ -178,6 +220,12 @@ int RunChild(std::string_view scenario) {
         throw std::runtime_error(
             "unknown child scenario: " + std::string(scenario));
     }
+
+    // The positive control. Written and closed immediately before the policy
+    // is entered, so the parent can tell "terminated inside the policy" from
+    // "died on the way there" -- both of which leave no cleanup marker, and
+    // only one of which is the behaviour under test.
+    WriteMarker(kReachedPolicyMarker, std::string(scenario));
 
     bool rethrown = false;
     try {
@@ -205,15 +253,62 @@ int RunChild(std::string_view scenario) {
     }
     CHECK(rethrown);
 
-    // The session clears and the process stays usable: admission is still
-    // open and the runtime is still healthy after a recoverable failure.
+    // Admission is still open and the runtime is still healthy.
     CHECK(runtime->admission_open());
     CHECK(runtime->state() == flm::corelib::ProcessState::Healthy);
-    std::cout << kSurvivedMarker << '\n';
+
+    // "The session clears" has to mean the session is USABLE again, not just
+    // that a flag says Healthy. So take a fresh execution lease and put a real
+    // operation through the real library: create a Stream and a DeviceTensor,
+    // write and read an element, and release them. If a recoverable failure
+    // had left the runtime wedged, this is where it would show.
+    {
+        auto execution = runtime->AcquireExecution();
+        const auto& api = runtime->api();
+        ryzenai_corelib_stream_ptr raw_stream = nullptr;
+        api->Check(
+            api->functions().create_stream(&raw_stream),
+            "ryzenai_corelib_create_stream");
+        flm::corelib::UniqueStream stream(api, raw_stream);
+
+        const std::array<std::int64_t, 2> shape{1, 64};
+        ryzenai_corelib_tensor_ptr raw_tensor = nullptr;
+        api->Check(
+            api->functions().create_device_tensor(
+                ryzenai_corelib_data_type_bf16,
+                shape.data(),
+                shape.size(),
+                &raw_tensor),
+            "ryzenai_corelib_create_device_tensor");
+        flm::corelib::UniqueTensor tensor(api, raw_tensor);
+
+        const std::array<float, 4> source{1.0f, 2.0f, 4.0f, 8.0f};
+        api->WriteElements(
+            tensor.get(),
+            ryzenai_corelib_data_type_fp32,
+            source.data(),
+            source.size(),
+            0);
+        std::array<float, 4> destination{};
+        api->ReadElements(
+            tensor.get(),
+            ryzenai_corelib_data_type_fp32,
+            destination.data(),
+            destination.size(),
+            0);
+        CHECK(destination == source);
+
+        api->Check(
+            api->functions().stream_synchronize(stream.get()),
+            "ryzenai_corelib_stream_synchronize");
+        tensor.reset();
+        stream.reset();
+    }
+    CHECK(runtime->api()->live_object_count() == 0);
+    WriteMarker(kSurvivedMarker, "session usable after a pre-submit failure");
 
     CorelibRuntime::ShutdownProcess();
-    std::cout << kCleanupMarker << '\n';
-    std::cout.flush();
+    WriteMarker(kCleanupMarker, "healthy shutdown completed");
     return 0;
 }
 
@@ -254,7 +349,14 @@ struct ChildResult {
 ChildResult RunScenario(
     const std::filesystem::path& executable,
     const std::filesystem::path& log_path,
+    const std::filesystem::path& marker_dir,
     std::string_view scenario) {
+    // Each scenario gets a fresh marker directory, so a marker left by an
+    // earlier scenario cannot be read as this one's evidence.
+    std::error_code error;
+    std::filesystem::remove_all(marker_dir, error);
+    std::filesystem::create_directories(marker_dir);
+
     SECURITY_ATTRIBUTES inheritable{};
     inheritable.nLength = sizeof(inheritable);
     inheritable.bInheritHandle = TRUE;
@@ -276,7 +378,8 @@ ChildResult RunScenario(
                            L"\" --child " +
                            std::wstring(
                                scenario.begin(),
-                               scenario.end());
+                               scenario.end()) +
+                           L" \"" + marker_dir.wstring() + L"\"";
     STARTUPINFOW startup{};
     startup.cb = sizeof(startup);
     startup.dwFlags = STARTF_USESTDHANDLES;
@@ -346,27 +449,99 @@ std::string FieldValue(
     auto cursor = start + needle.size();
     if (cursor < record.size() && record[cursor] == '"') {
         ++cursor;
-        const auto end = record.find('"', cursor);
-        return std::string(record.substr(cursor, end - cursor));
+        // Unescaped, because the record writer escapes what it stores and the
+        // library's own messages carry Windows paths full of backslashes. A
+        // raw comparison would fail on `C:\\Users\\...` against `C:\Users\...`
+        // and look like a content mismatch rather than an encoding one.
+        std::string value;
+        while (cursor < record.size() && record[cursor] != '"') {
+            if (record[cursor] == '\\' && cursor + 1 < record.size()) {
+                ++cursor;
+                switch (record[cursor]) {
+                    case 'n': value.push_back('\n'); break;
+                    case 'r': value.push_back('\r'); break;
+                    case 't': value.push_back('\t'); break;
+                    case 'b': value.push_back('\b'); break;
+                    case 'f': value.push_back('\f'); break;
+                    case 'u': {
+                        // The writer only emits \u for control characters.
+                        const auto digits = record.substr(cursor + 1, 4);
+                        value.push_back(static_cast<char>(
+                            std::stoi(std::string(digits), nullptr, 16)));
+                        cursor += 4;
+                        break;
+                    }
+                    default: value.push_back(record[cursor]); break;
+                }
+                ++cursor;
+                continue;
+            }
+            value.push_back(record[cursor]);
+            ++cursor;
+        }
+        return value;
     }
     const auto end = record.find_first_of(",}", cursor);
     return std::string(record.substr(cursor, end - cursor));
 }
 
+std::string ReadMarker(
+    const std::filesystem::path& marker_dir,
+    std::wstring_view name) {
+    std::ifstream stream(
+        marker_dir / std::filesystem::path(name),
+        std::ios::binary);
+    if (!stream) {
+        return {};
+    }
+    std::ostringstream buffer;
+    buffer << stream.rdbuf();
+    return buffer.str();
+}
+
+bool MarkerExists(
+    const std::filesystem::path& marker_dir,
+    std::wstring_view name) {
+    return std::filesystem::exists(
+        marker_dir / std::filesystem::path(name));
+}
+
 void CheckDetailedRecord(
     std::string_view record,
-    std::string_view expected_phase) {
+    std::string_view expected_phase,
+    const std::filesystem::path& marker_dir) {
     // "Complete" means every field design Section 12.1 lists is present and
-    // carries the value the child produced -- not merely that a file exists.
+    // carries the right value -- not merely that a file exists.
+    //
+    // `status`, `call` and `detail` are checked against what the LIBRARY
+    // produced, read out of markers the child wrote from the real
+    // CorelibError. Checking them for non-emptiness, as this did before, would
+    // pass for a record that carried the wrong diagnostic entirely.
+    const auto expected_status =
+        ReadMarker(marker_dir, L"expected-status.marker");
+    const auto expected_detail =
+        ReadMarker(marker_dir, L"expected-detail.marker");
+    const auto expected_call =
+        ReadMarker(marker_dir, L"expected-call.marker");
+    CHECK(!expected_status.empty());
+    CHECK(!expected_detail.empty());
+    CHECK(!expected_call.empty());
+
+    CHECK(FieldValue(record, "status") == expected_status);
+    CHECK(FieldValue(record, "call") == expected_call);
+    CHECK(FieldValue(record, "detail") == expected_detail);
+
+    // phase/layer/rows/position are values this test chose, so what they
+    // establish is narrower: that FailureContext survives serialisation
+    // intact, field for field, including the optional layer. They do NOT
+    // establish that the engine supplies the right ones -- reaching the
+    // production catch arm needs a fault injection point the engine does not
+    // have. See the report's note on I4.
     CHECK(FieldValue(record, "phase") == expected_phase);
     CHECK(FieldValue(record, "layer") == "7");
     CHECK(FieldValue(record, "rows") == "13");
     CHECK(FieldValue(record, "position") == "29");
-    CHECK(
-        FieldValue(record, "call") ==
-        "ryzenai_corelib_matmul_bf16_pad_shape");
-    CHECK(!FieldValue(record, "status").empty());
-    CHECK(!FieldValue(record, "detail").empty());
+
     CHECK(!FieldValue(record, "pid").empty());
     CHECK(!FieldValue(record, "failure_utc").empty());
     CHECK(!FieldValue(record, "process_start_utc").empty());
@@ -381,15 +556,21 @@ int RunParent(const std::filesystem::path& executable) {
     FatalRecordStore::DrainPriorRecords(discarded);
 
     {
+        const auto markers = logs.path() / "before_submit.markers";
         const auto result = RunScenario(
             executable,
             logs.path() / "before_submit.log",
+            markers,
             "before_submit");
         std::cout << "before_submit exit=0x" << std::hex
                   << result.exit_code << std::dec << '\n';
         CHECK(result.exit_code == 0);
-        CHECK(Contains(result.output, kSurvivedMarker));
-        CHECK(Contains(result.output, kCleanupMarker));
+        CHECK(MarkerExists(markers, kReachedPolicyMarker));
+        // The session is usable again: the child put a real Stream, tensor
+        // write, read and synchronize through the library after the
+        // recoverable failure.
+        CHECK(MarkerExists(markers, kSurvivedMarker));
+        CHECK(MarkerExists(markers, kCleanupMarker));
 
         // A recoverable failure writes NO record. The child's healthy
         // shutdown removes its own pending file, so a drain here must come
@@ -407,18 +588,31 @@ int RunParent(const std::filesystem::path& executable) {
     for (const auto& [scenario, phase] :
          std::array<std::pair<std::string_view, std::string_view>, 2>{
              {{"after_submit", "qkv"}, {"synchronize", "flat_mha"}}}) {
+        const auto markers =
+            logs.path() / (std::string(scenario) + ".markers");
         const auto result = RunScenario(
             executable,
             logs.path() / (std::string(scenario) + ".log"),
+            markers,
             scenario);
         std::cout << scenario << " exit=0x" << std::hex
                   << result.exit_code << std::dec << '\n';
         CHECK(result.exit_code == kFatalExitCode);
 
-        // Normal cleanup must NOT have run. Both markers are printed only on
-        // the healthy path, so their absence is the evidence.
-        CHECK(!Contains(result.output, kCleanupMarker));
-        CHECK(!Contains(result.output, kSurvivedMarker));
+        // The positive control first. Without it, "no cleanup marker" is also
+        // satisfied by a child that died before it ever reached the policy,
+        // and the absence below would prove nothing.
+        CHECK(MarkerExists(markers, kReachedPolicyMarker));
+        CHECK(
+            ReadMarker(markers, kReachedPolicyMarker) ==
+            std::string(scenario));
+
+        // Normal cleanup must NOT have run. These are closed files, so they
+        // survive TerminateProcess and their absence is real -- unlike the
+        // buffered stdout this check used to read, which TerminateProcess
+        // discards, making the assertion pass whether cleanup had run or not.
+        CHECK(!MarkerExists(markers, kCleanupMarker));
+        CHECK(!MarkerExists(markers, kSurvivedMarker));
         // The terminal diagnostic goes to stderr before the process dies,
         // and it must name the record it wrote.
         CHECK(Contains(result.output, "AIE4 terminal failure"));
@@ -433,7 +627,7 @@ int RunParent(const std::filesystem::path& executable) {
                 std::string(scenario) + ", drained " +
                 std::to_string(records.size()));
         }
-        CheckDetailedRecord(records.front(), phase);
+        CheckDetailedRecord(records.front(), phase, markers);
         // The drain reports what it removed, so the record reaches an
         // operator rather than only the filesystem.
         CHECK(Contains(drained.str(), "\"phase\":\"" + std::string(phase)));
@@ -479,7 +673,13 @@ int main(int argc, char** argv) {
     }
 
     try {
-        if (argc >= 3 && std::string_view(argv[1]) == "--child") {
+        if (argc >= 4 && std::string_view(argv[1]) == "--child") {
+            g_marker_dir = std::filesystem::path(argv[3]);
+            if (!std::filesystem::is_directory(g_marker_dir)) {
+                throw std::runtime_error(
+                    "child marker directory does not exist: " +
+                    g_marker_dir.string());
+            }
             return RunChild(argv[2]);
         }
         return RunParent(

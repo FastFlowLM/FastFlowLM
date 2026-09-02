@@ -26,6 +26,8 @@
 
 #include "test_support.hpp"
 
+#include "picosha2.h"
+
 #include <corelib/corelib_runtime.hpp>
 #include <models/phi4/phi4_corelib_aie4.hpp>
 #include <models/phi4/phi4_corelib_aie4_tuning.hpp>
@@ -76,6 +78,78 @@ static_assert(kSynchronizesPerStep == 129u);
 static_assert(kDispatchesPerStep == 193u);
 static_assert(kVReadsPerStep == 32u);
 static_assert(kVWritesPerStep == 256u);
+
+// Which DLL actually serviced these calls, asked of the OS loader.
+//
+// Not the configured path and not the path we asked to load: the module that
+// backs a resolved function pointer. `GetModuleHandleExW` from an address
+// inside `get_version` answers "whose code ran", which is the only form of the
+// question that can distinguish two runs that loaded different libraries.
+//
+// This exists because of an unexplained run-to-run divergence (report §5.1).
+// The candidate hypotheses all reduce to "the two runs may not have been
+// running the same code", and nothing in the artifacts could tell them apart.
+// Recording the resolved path and its SHA-256 makes that testable for free,
+// and the self-consistency check refuses to compare two runs that disagree
+// on it.
+struct LoadedModule {
+    std::string path;
+    std::string sha256;
+};
+
+LoadedModule DescribeLoadedCorelib(const flm::corelib::CorelibApi& api) {
+    HMODULE module = nullptr;
+    if (GetModuleHandleExW(
+            GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+            reinterpret_cast<LPCWSTR>(api.functions().get_version),
+            &module) == 0 ||
+        module == nullptr) {
+        throw std::runtime_error(
+            "could not identify the module backing corelib's entry points "
+            "(GetModuleHandleExW error " +
+            std::to_string(GetLastError()) + ")");
+    }
+
+    std::wstring buffer(32768, L'\0');
+    const DWORD length = GetModuleFileNameW(
+        module,
+        buffer.data(),
+        static_cast<DWORD>(buffer.size()));
+    if (length == 0 || length >= buffer.size()) {
+        throw std::runtime_error(
+            "could not read the loaded corelib module path "
+            "(GetModuleFileNameW error " +
+            std::to_string(GetLastError()) + ")");
+    }
+    buffer.resize(length);
+    const std::filesystem::path resolved(buffer);
+
+    // The loader's answer must agree with the path we asked for. If it does
+    // not, something on this machine redirected the load and every result
+    // below describes a library we did not choose.
+    const auto requested = api.library_path().lexically_normal();
+    if (
+        resolved.lexically_normal() != requested &&
+        !std::filesystem::equivalent(resolved, requested)) {
+        throw std::runtime_error(
+            "the loaded corelib is not the one that was requested: asked "
+            "for " + requested.string() + ", the loader supplied " +
+            resolved.string());
+    }
+
+    std::ifstream stream(resolved, std::ios::binary);
+    if (!stream) {
+        throw std::runtime_error(
+            "cannot open the loaded corelib to hash it: " +
+            resolved.string());
+    }
+    std::vector<unsigned char> digest(picosha2::k_digest_size);
+    picosha2::hash256(stream, digest.begin(), digest.end());
+    return LoadedModule{
+        resolved.string(),
+        picosha2::bytes_to_hex_string(digest.begin(), digest.end())};
+}
 
 struct Options {
     std::filesystem::path model_dir;
@@ -519,8 +593,15 @@ int main(int argc, char** argv) {
         config.model_path = options.model_dir.string();
         config.model_name = options.model_dir.filename().string();
 
+        const LoadedModule loaded =
+            DescribeLoadedCorelib(*runtime->api());
+        std::cout << "loaded corelib: " << loaded.path << '\n'
+                  << "sha256        : " << loaded.sha256 << '\n';
+
         json document;
         document["model_dir"] = options.model_dir.string();
+        document["corelib_loaded_path"] = loaded.path;
+        document["corelib_sha256"] = loaded.sha256;
         document["corelib_library"] =
             runtime->api()->library_path().string();
         document["corelib_version"] =

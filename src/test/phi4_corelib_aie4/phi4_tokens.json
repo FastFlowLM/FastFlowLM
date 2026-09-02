@@ -1,0 +1,24 @@
+{
+  "_comment": [
+    "Explicit token IDs for the Phi-4 AIE4 hardware goldens. Committed rather",
+    "than generated so that phi4_expected_tokens.json means something: an",
+    "expected output sequence is only a golden if the input that produced it",
+    "is fixed too.",
+    "",
+    "Never a tokenizer. Design 12.4 wants both sides to consume the SAME",
+    "integers; an encoder in the loop would make a mismatch ambiguous between",
+    "the model and the tokenizer.",
+    "",
+    "The prefix/suffix split is what makes a continuation route meaningful.",
+    "force_append establishes the prefix with one prefill and then walks the",
+    "suffix one token at a time at successive positions; force_reprefill",
+    "clears and recomputes prefix+suffix in a single pass from position zero.",
+    "With no suffix the two routes degenerate to the same single prefill and",
+    "the route coverage would be vacuous.",
+    "",
+    "Rendered Phi-4 chat turn: a user question and the opening of an assistant",
+    "reply, so the suffix is a natural continuation rather than arbitrary IDs."
+  ],
+  "prefix": [200022, 882, 200024, 3923, 374, 279, 6864, 315, 9822, 30, 200021, 200022, 78191, 200024],
+  "suffix": [791, 6864, 315, 9822, 374]
+}

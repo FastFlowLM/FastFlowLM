@@ -518,12 +518,32 @@ endif()
 option(FLM_WIN_STATIC_DEPS
        "Windows non-vcpkg dependencies are static archives (CI runner layout)"
        OFF)
-if(WIN32 AND NOT VCPKG_TOOLCHAIN AND FLM_WIN_STATIC_DEPS)
-    target_compile_definitions(flm PUBLIC
-        CURL_STATICLIB
-        BOOST_ALL_NO_LIB
-        BOOST_ALL_STATIC_LINK
-    )
+if(WIN32 AND NOT VCPKG_TOOLCHAIN)
+    if(FLM_WIN_STATIC_DEPS)
+        target_compile_definitions(flm PUBLIC
+            CURL_STATICLIB
+            BOOST_ALL_NO_LIB
+            BOOST_ALL_STATIC_LINK
+        )
+    else()
+        # Shared Boost needs BOOST_ALL_DYN_LINK, and needs it for a reason that
+        # is easy to misread as a missing library. Boost's headers declare
+        # symbols without __declspec(dllimport) unless this is set, so the
+        # FUNCTIONS still link -- the import library satisfies them -- while
+        # the exported DATA symbols do not. The failure is
+        #   LNK2019: boost::program_options::arg
+        #   LNK2019: options_description::m_default_line_length
+        # which names two variables and looks like the wrong Boost version
+        # rather than the wrong linkage.
+        #
+        # BOOST_ALL_NO_LIB stays: MSVC auto-linking would otherwise ask for
+        # decorated names like libboost_program_options-vc143-mt-x64-1_88.lib
+        # that a conda prefix does not ship, undoing the explicit search above.
+        target_compile_definitions(flm PUBLIC
+            BOOST_ALL_NO_LIB
+            BOOST_ALL_DYN_LINK
+        )
+    endif()
 endif()
 
 target_link_directories(flm PUBLIC

@@ -245,6 +245,31 @@ target_compile_definitions(test_phi4_e2e PRIVATE
     FLM_REAL_CORELIB_RUNTIME_DIR="${RYZENAI_CORELIB_RUNTIME_DIR}"
     FLM_REAL_CORELIB_EXTRA_DLL_DIRS="${RYZENAI_CORELIB_EXTRA_DLL_DIRS_ESCAPED}")
 
+# Task 13's performance and memory baseline. Like test_phi4_e2e it is NOT
+# registered with add_test: it needs a model directory, a token plan and two
+# revision identifiers that only the caller can supply, and design section 4
+# makes its output a record rather than a gate, so a ctest entry would either
+# fail everywhere for want of a flag or pass without measuring anything.
+# run_hardware_suite.ps1 owns the invocation.
+add_executable(benchmark_phi4_aie4 benchmark_phi4_aie4.cpp)
+target_link_libraries(benchmark_phi4_aie4 PRIVATE
+    flm_corelib_aie4_testlib
+    shell32
+    ole32
+    advapi32
+    # Step 5: GetProcessMemoryInfo with PROCESS_MEMORY_COUNTERS_EX.
+    psapi
+    # The NPU SKU and driver version, asked of the OS device tree rather than
+    # transcribed from a session transcript.
+    setupapi
+    # GetFileVersionInfo, for the DynamicDispatch / RyzenMM / XRT identities.
+    version)
+target_include_directories(benchmark_phi4_aie4 PRIVATE
+    ${FASTFLOW_SOURCE_DIR}/pull)
+target_compile_definitions(benchmark_phi4_aie4 PRIVATE
+    FLM_REAL_CORELIB_RUNTIME_DIR="${RYZENAI_CORELIB_RUNTIME_DIR}"
+    FLM_REAL_CORELIB_EXTRA_DLL_DIRS="${RYZENAI_CORELIB_EXTRA_DLL_DIRS_ESCAPED}")
+
 # The packaging and clean-environment checks run by default rather than only
 # when someone remembers the command. Every regression guard in that script --
 # the derived closure, the CLOSURE-2 negative control, the no-corelib-import

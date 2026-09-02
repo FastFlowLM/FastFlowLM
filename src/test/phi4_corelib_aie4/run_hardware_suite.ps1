@@ -63,7 +63,33 @@ param(
     # Rows the boundary sweep runs REAL prefills at. Off by default because a
     # 4096-row prefill is the slowest thing in the suite; the helper-table
     # half of Step 5 runs unconditionally inside test_phi4_hardware.
-    [switch]$BoundarySweep
+    [switch]$BoundarySweep,
+
+    # Task 13 / design DETERM-3. Extra run-to-run determinism samples per
+    # route, on top of the one each numeric golden already produces.
+    #
+    # DETERM-2 names "a bit-identity rate that degrades from the recorded
+    # baseline" as a failure condition, and until a baseline exists that
+    # clause enforces nothing. DETERM-3 requires at least 20 runs per route.
+    # Zero by default, because 20 samples per route is roughly 25 minutes of
+    # device time and the acceptance suite should not silently carry that.
+    [int]$DeterminismRuns = 0,
+
+    # Task 13. Run benchmark_phi4_aie4 and render the baseline document.
+    [switch]$Baseline,
+
+    # The revision the corelib under test was BUILT from. Derived from
+    # -CorelibSource when that is a git checkout, because
+    # ryzenai_corelib_get_version reports a hard-coded 0.1.0 spanning the
+    # whole 0.x history and therefore cannot identify a revision.
+    [string]$CorelibSourceRevision,
+
+    # Large per-run artifacts (reference-*.json is 28 MB of FP32 logits as
+    # JSON text, each fastflow-*.json is 21 MB) are deleted once the
+    # comparisons that consume them have PASSED. A failing comparison keeps
+    # its inputs, because that is the only run whose evidence anyone will
+    # want. Pass this to keep everything.
+    [switch]$KeepArtifacts
 )
 
 $ErrorActionPreference = 'Stop'
@@ -97,6 +123,26 @@ function Invoke-Checked {
     $code = $LASTEXITCODE
     if ($code -ne 0) {
         throw "$Label failed with exit code $code"
+    }
+}
+
+# Delete artifacts whose consumers have already succeeded.
+#
+# A run retains reference-<route>.json -- 17 x 200,064 FP32 logits as JSON
+# text -- plus two 21 MB FastFlow documents, roughly 90 MB per route. At the
+# >= 20 runs per route DETERM-3 needs that is several gigabytes, and the step
+# would succeed while leaving the build tree unusable. Only determ1-*.json and
+# compare-summary-*.json are needed afterwards.
+#
+# Called only on the success path, deliberately. The one run whose 21 MB of
+# logits anybody will ever want to read is the run that diverged.
+function Remove-ConsumedArtifact {
+    param([string[]]$Paths)
+    if ($KeepArtifacts) { return }
+    foreach ($path in $Paths) {
+        if ($path -and (Test-Path $path)) {
+            Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+        }
     }
 }
 
@@ -402,6 +448,8 @@ if (-not $ModelDir) {
     foreach ($route in @('force_reprefill', 'force_append')) {
       try {
         Write-Section "Numeric golden: $route"
+        $failuresAtRouteStart = $failures.Count
+        $routeDiverged = $false
         $referenceJson = Join-Path $artifacts "reference-$route.json"
         $fastflowJson = Join-Path $artifacts "fastflow-$route.json"
 
@@ -466,6 +514,8 @@ if (-not $ModelDir) {
                       "no DETERM-1 record at $determJson"
             }
             $d = Get-Content $determJson -Raw | ConvertFrom-Json
+            $routeDiverged =
+                ($d.logits_bit_exact_steps -lt $d.logits_total_steps)
             $dnote = ("run-to-run [$route]: logits bit-identical " +
                 "$($d.logits_bit_exact_steps)/$($d.logits_total_steps), " +
                 "max |diff| $($d.observed_max_abs_diff) " +
@@ -482,6 +532,7 @@ if (-not $ModelDir) {
             # summary line did not.
             if (Test-Path $determJson) {
                 $d = Get-Content $determJson -Raw | ConvertFrom-Json
+                $routeDiverged = $true
                 $bitExactNotes += ("run-to-run [$route] (FAILED): logits " +
                     "bit-identical " +
                     "$($d.logits_bit_exact_steps)/$($d.logits_total_steps), " +
@@ -550,6 +601,21 @@ if (-not $ModelDir) {
             Write-Output "REFERENCE COMPARISON FAILED ($route)"
             $failures += "numeric golden $route"
         }
+
+        # Both comparisons are done with these three documents. They are kept
+        # when something failed, and also when the two runs were not
+        # bit-identical -- a within-2-ULP divergence passes every DETERM-1
+        # gate by design and is exactly the sample Step 9b's host LM-head
+        # reference needs, so pruning on failure alone would throw away every
+        # usable one.
+        if ($failures.Count -eq $failuresAtRouteStart -and -not $routeDiverged) {
+            Remove-ConsumedArtifact @(
+                $referenceJson, $fastflowJson, $repeatJson)
+        } else {
+            Write-Output ("keeping the raw artifacts for $route " +
+                "(failed=$($failures.Count -ne $failuresAtRouteStart), " +
+                "diverged=$routeDiverged): $artifacts")
+        }
       } catch {
         Write-Output "NUMERIC GOLDEN FAILED ($route): $($_.Exception.Message)"
         $failures += "numeric golden $route"
@@ -580,6 +646,196 @@ if (-not $ModelDir) {
         }
     } else {
         $skipped += 'boundary sweep real prefills (-BoundarySweep not passed; the helper-table half still ran inside test_phi4_hardware)'
+    }
+
+    # -----------------------------------------------------------------------
+    # DETERM-3: the run-to-run bit-identity baseline
+    #
+    # Each sample is the SAME comparison the numeric golden already performs
+    # -- two processes, same binary, same explicit token IDs, compared by
+    # `self-consistency` -- repeated. Keeping the methodology identical is the
+    # point: a baseline assembled from a differently shaped measurement cannot
+    # be compared against the three post-instrumentation runs that preceded
+    # it, or against Task 16's acceptance runs.
+    #
+    # The reference driver is NOT run here. It contributes nothing to a
+    # run-to-run question and each invocation writes 28 MB of FP32 logits as
+    # JSON text.
+    #
+    # A sample whose hard gates fail is COUNTED and reported, not skipped.
+    # Dropping it would bias the rate upward, and silently, which is the exact
+    # species of error DETERM-2 exists to prevent.
+    # -----------------------------------------------------------------------
+    if ($DeterminismRuns -gt 0) {
+        Write-Section "DETERM-3 baseline: $DeterminismRuns extra sample(s) per route"
+        $determFailures = 0
+        $determCompleted = @{}
+        foreach ($route in @('force_reprefill', 'force_append')) {
+            $determCompleted[$route] = 0
+            for ($sample = 1; $sample -le $DeterminismRuns; $sample++) {
+                $tag = '{0}-{1:d3}' -f $route, $sample
+                $aJson = Join-Path $artifacts "determ-a-$tag.json"
+                $bJson = Join-Path $artifacts "determ-b-$tag.json"
+                $recordJson = Join-Path $artifacts "determ1-$tag.json"
+                $baseArgs = @(
+                    '--model-dir', $ModelDir,
+                    '--token-ids-json', $tokenPlan,
+                    '--decode-steps', "$DecodeSteps",
+                    '--continuation-route', $route
+                )
+                try {
+                    Invoke-Checked "determinism A ($tag)" $e2eExe `
+                        ($baseArgs + @('--output-json', $aJson))
+                    Invoke-Checked "determinism B ($tag)" $e2eExe `
+                        ($baseArgs + @('--output-json', $bJson))
+                } catch {
+                    Write-Output "DETERMINISM SAMPLE FAILED TO RUN ($tag): $($_.Exception.Message)"
+                    $failures += "DETERM-3 sample $tag did not produce two runs"
+                    continue
+                }
+
+                $gateFailed = $false
+                try {
+                    Invoke-Checked "self-consistency ($tag)" $Python @(
+                        $comparator, 'self-consistency',
+                        '--a', $aJson,
+                        '--b', $bJson,
+                        '--summary-json', $recordJson
+                    )
+                } catch {
+                    # A DETERM-2 hard-gate failure. Real, and it must reach
+                    # the exit code -- but the sample still counts toward the
+                    # rate, so the campaign continues.
+                    $gateFailed = $true
+                    $determFailures++
+                    Write-Output "DETERM-2 GATE FAILED on sample $tag"
+                }
+
+                if (-not (Test-Path $recordJson)) {
+                    # The record is the entire product of this sample. Its
+                    # absence is not a skip to note, it is a sample that did
+                    # not happen.
+                    $failures += "DETERM-3 sample $tag wrote no record"
+                    continue
+                }
+                $determCompleted[$route]++
+                $d = Get-Content $recordJson -Raw | ConvertFrom-Json
+                Write-Output ("  ${tag}: logits bit-identical " +
+                    "$($d.logits_bit_exact_steps)/$($d.logits_total_steps), " +
+                    "max |diff| $($d.observed_max_abs_diff)")
+                # Keep the raw pair whenever the two runs were NOT
+                # bit-identical, not only when a gate failed.
+                #
+                # A divergence within 2 ULP passes every DETERM-1 gate by
+                # design, and it is precisely the event Step 9b's host
+                # LM-head reference needs as input. Pruning on gate status
+                # alone would discard every usable sample and leave only the
+                # ones with nothing to look at.
+                $diverged = ($gateFailed -or
+                    ($d.logits_bit_exact_steps -lt $d.logits_total_steps))
+                if ($diverged) {
+                    Write-Output ("  keeping ${tag}'s two run documents: " +
+                        "the runs were not bit-identical, which is the " +
+                        "sample worth reading")
+                } else {
+                    Remove-ConsumedArtifact @($aJson, $bJson)
+                }
+            }
+        }
+        if ($determFailures -gt 0) {
+            $failures += ("DETERM-2 hard gate failed on $determFailures " +
+                "determinism sample(s); the records are kept and counted")
+        }
+        foreach ($route in @('force_reprefill', 'force_append')) {
+            $ran += ("DETERM-3 samples [$route]: " +
+                "$($determCompleted[$route])/$DeterminismRuns completed")
+        }
+    } else {
+        $skipped += ('DETERM-3 determinism campaign (-DeterminismRuns not ' +
+            'passed; only the one sample per route from the numeric goldens ' +
+            'was recorded)')
+    }
+
+    # -----------------------------------------------------------------------
+    # Task 13: the performance and memory baseline, and its report
+    # -----------------------------------------------------------------------
+    if ($Baseline) {
+        Write-Section 'Performance and memory baseline (Task 13)'
+        $benchmarkExe = Join-Path $binDir 'benchmark_phi4_aie4.exe'
+        if (-not (Test-Path $benchmarkExe)) {
+            throw "benchmark_phi4_aie4.exe was not built: $benchmarkExe"
+        }
+        # Both revisions are DERIVED from the checkouts under test rather than
+        # typed. A transcribed SHA in a baseline is a claim about a tree
+        # nobody can go back and check.
+        $repoRoot = Split-Path -Parent $sourceDir
+        function Get-GitRevision {
+            param([string]$Directory)
+            $revision = (& git -C $Directory rev-parse HEAD 2>$null)
+            if ($LASTEXITCODE -ne 0 -or -not $revision) { return '' }
+            $revision = ([string]$revision).Trim()
+            # A dirty tree is recorded as dirty. A SHA on its own would claim
+            # the baseline describes a committed revision when it does not,
+            # and that is a claim nobody can check later.
+            $status = (& git -C $Directory status --porcelain 2>$null)
+            if ($LASTEXITCODE -eq 0 -and
+                (@($status | Where-Object { $_ }).Count -gt 0)) {
+                $revision = "$revision-dirty"
+            }
+            return $revision
+        }
+        $fastflowRevision = Get-GitRevision $repoRoot
+        if (-not $fastflowRevision) {
+            throw ("cannot identify the FastFlow revision from $repoRoot; " +
+                'a baseline that does not say which tree produced it cannot ' +
+                'be compared against anything later')
+        }
+        if (-not $CorelibSourceRevision) {
+            $CorelibSourceRevision = Get-GitRevision $CorelibSource
+        }
+        if (-not $CorelibSourceRevision) {
+            throw ('cannot identify the corelib source revision. Pass ' +
+                '-CorelibSourceRevision: the DLL cannot supply it, because ' +
+                'ryzenai_corelib_get_version is a hard-coded 0.1.0 spanning ' +
+                'the whole 0.x history.')
+        }
+        $baselineJson = Join-Path $BuildDir 'phi4_aie4_baseline.json'
+        try {
+            Invoke-Checked 'baseline benchmark' $benchmarkExe @(
+                '--model-dir', $ModelDir,
+                '--token-ids-json', $tokenPlan,
+                '--output-json', $baselineJson,
+                '--fastflow-revision', $fastflowRevision,
+                '--corelib-source-revision', $CorelibSourceRevision
+            )
+            $ran += 'baseline benchmark (load, TTFT, prefill, continuation, decode, memory, V scatter)'
+        } catch {
+            Write-Output "BASELINE BENCHMARK FAILED: $($_.Exception.Message)"
+            $failures += 'baseline benchmark'
+        }
+
+        if (Test-Path $baselineJson) {
+            $reportTool = Join-Path $repoRoot 'tools/report_phi4_corelib_baseline.py'
+            $determGlob = Join-Path (Join-Path $BuildDir 'artifacts') '*/determ1-*.json'
+            try {
+                Invoke-Checked 'baseline report' $Python @(
+                    $reportTool,
+                    '--input', $baselineJson,
+                    '--determinism-glob', $determGlob,
+                    '--markdown', (Join-Path $repoRoot 'docs/docs/benchmarks/phi4_results.md'),
+                    '--output-json', (Join-Path $BuildDir 'phi4_aie4_baseline_merged.json')
+                )
+                $ran += 'baseline report rendered (validated, DETERM-3 baseline established)'
+            } catch {
+                # The tool fails when a route has fewer than DETERM-3's 20
+                # runs. That is not a tooling problem, it is the campaign not
+                # having happened, and it must reach the exit code.
+                Write-Output "BASELINE REPORT FAILED: $($_.Exception.Message)"
+                $failures += 'baseline report (validation or DETERM-3 minimum)'
+            }
+        }
+    } else {
+        $skipped += 'Task 13 performance and memory baseline (-Baseline not passed)'
     }
 }
 

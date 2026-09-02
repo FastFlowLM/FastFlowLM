@@ -426,10 +426,59 @@ if(NOT FLM_USE_HRX)
 endif()
 
 if(WIN32 AND NOT VCPKG_TOOLCHAIN)
-    # Bare CI runner: standalone Boost + vcpkg headers by absolute path.
+    # Headers for the native dependencies, found rather than hard-coded.
+    #
+    # This block used to add `C:/dev/boost_1_88_0` and
+    # `C:/dev/vcpkg/installed/x64-windows/include/` verbatim. Both are paths on
+    # one historical CI runner and exist on neither machine in use, so the
+    # build failed C1083 on `libavformat/avformat.h` with nothing to say about
+    # where it expected to find it. Searching for a representative header of
+    # each family gives an error at configure that names what is missing.
+    find_path(FLM_FFMPEG_INCLUDE_DIR
+              NAMES libavformat/avformat.h
+              DOC "Directory containing FFmpeg's libavformat/avformat.h")
+    if(NOT FLM_FFMPEG_INCLUDE_DIR)
+        message(FATAL_ERROR
+            "Could not find libavformat/avformat.h. flm.exe needs FFmpeg "
+            "headers; add the prefix that provides them to CMAKE_PREFIX_PATH "
+            "or configure with a vcpkg toolchain.")
+    endif()
+    find_path(FLM_FFTW_INCLUDE_DIR
+              NAMES fftw3.h
+              DOC "Directory containing fftw3.h")
+    if(NOT FLM_FFTW_INCLUDE_DIR)
+        message(FATAL_ERROR
+            "Could not find fftw3.h. Add the prefix that provides FFTW3 to "
+            "CMAKE_PREFIX_PATH or configure with a vcpkg toolchain.")
+    endif()
+    find_path(FLM_CURL_INCLUDE_DIR
+              NAMES curl/curl.h
+              DOC "Directory containing curl/curl.h")
+    if(NOT FLM_CURL_INCLUDE_DIR)
+        message(FATAL_ERROR
+            "Could not find curl/curl.h. Add the prefix that provides CURL to "
+            "CMAKE_PREFIX_PATH or configure with a vcpkg toolchain.")
+    endif()
+    # Boost: the same search flm_corelib_aie4 uses, so the two targets cannot
+    # end up with different Boost headers in one build.
+    find_path(FLM_BOOST_INCLUDE_DIR
+              NAMES boost/any.hpp
+              HINTS
+                  "$ENV{BOOST_INCLUDEDIR}"
+                  "$ENV{BOOST_ROOT}"
+                  "$ENV{CONDA_PREFIX}/Library/include"
+                  "C:/dev/boost_1_88_0"
+              DOC "Directory containing boost/any.hpp"
+              REQUIRED)
+    message(STATUS "  FFmpeg headers: ${FLM_FFMPEG_INCLUDE_DIR}")
+    message(STATUS "  FFTW3 headers:  ${FLM_FFTW_INCLUDE_DIR}")
+    message(STATUS "  CURL headers:   ${FLM_CURL_INCLUDE_DIR}")
+    message(STATUS "  Boost headers:  ${FLM_BOOST_INCLUDE_DIR}")
     target_include_directories(flm PUBLIC
-        C:/dev/boost_1_88_0
-        C:/dev/vcpkg/installed/x64-windows/include/
+        ${FLM_FFMPEG_INCLUDE_DIR}
+        ${FLM_FFTW_INCLUDE_DIR}
+        ${FLM_CURL_INCLUDE_DIR}
+        ${FLM_BOOST_INCLUDE_DIR}
     )
 endif()
 
@@ -457,8 +506,19 @@ if(WIN32)
     )
 endif()
 
-if(WIN32 AND NOT VCPKG_TOOLCHAIN)
-    # Bare CI runner: statically link the standalone Boost + curl.
+# Whether the Windows non-vcpkg dependencies are STATIC archives.
+#
+# The CI runner links a standalone Boost b2 build and a static curl, which need
+# CURL_STATICLIB and BOOST_ALL_STATIC_LINK. A conda prefix ships both as DLLs,
+# where those same macros are actively wrong: CURL_STATICLIB removes the
+# __declspec(dllimport) the import library expects. It was previously inferred
+# from "no vcpkg toolchain", which is not the same question, so the option now
+# says what it means. Default OFF, because a shared prefix is the common case
+# and a wrong static declaration fails at link rather than silently.
+option(FLM_WIN_STATIC_DEPS
+       "Windows non-vcpkg dependencies are static archives (CI runner layout)"
+       OFF)
+if(WIN32 AND NOT VCPKG_TOOLCHAIN AND FLM_WIN_STATIC_DEPS)
     target_compile_definitions(flm PUBLIC
         CURL_STATICLIB
         BOOST_ALL_NO_LIB
@@ -561,20 +621,55 @@ if(WIN32 AND VCPKG_TOOLCHAIN)
         FFTW3::fftw3l
     )
 elseif(WIN32)
-    # Bare CI runner: link the native deps by raw name from the standalone Boost
-    # + vcpkg lib dirs wired above (no CMake package configs there).
-    target_link_libraries(flm PUBLIC
-        avformat
-        avcodec
-        avutil
-        swscale
-        swresample
-        libcurl
-        libboost_program_options-vc143-mt-x64-1_88
-        libfftw3-3
-        libfftw3f-3
-        libfftw3l-3
-    )
+    # No vcpkg toolchain: resolve each native dependency by SEARCHING for it,
+    # rather than naming one machine's import libraries.
+    #
+    # This block used to link `libboost_program_options-vc143-mt-x64-1_88`,
+    # `libfftw3-3` and friends by raw name. Those are the artifact names of one
+    # specific standalone Boost b2 build and one specific vcpkg tree, and they
+    # exist on no other machine -- so the only Windows configuration that could
+    # build flm.exe without vcpkg was that one CI runner. A conda prefix, which
+    # is what the AIE4 target has, ships the same libraries as `fftw3.lib` and
+    # `boost_program_options.lib` and matched nothing here.
+    #
+    # `find_library` takes a list of accepted spellings and reports which one it
+    # picked, so a missing dependency fails at configure naming the library
+    # rather than at link naming a symbol. Point CMAKE_PREFIX_PATH at whichever
+    # prefix supplies them.
+    #
+    # This does NOT make an ambient prefix acceptable in place of proper target
+    # wiring (ENV-2). It makes the search explicit and its result auditable,
+    # which is the opposite of relying on whatever happens to be reachable.
+    set(_flm_win_libs "")
+    foreach(_flm_dep IN ITEMS
+            "avformat|avformat"
+            "avcodec|avcodec"
+            "avutil|avutil"
+            "swscale|swscale"
+            "swresample|swresample"
+            "curl|libcurl;libcurl_imp;curl"
+            "boost_program_options|boost_program_options;libboost_program_options-vc143-mt-x64-1_88;libboost_program_options-vc142-mt-x64-1_88"
+            "fftw3|fftw3;libfftw3-3"
+            "fftw3f|fftw3f;libfftw3f-3"
+            "fftw3l|fftw3l;libfftw3l-3")
+        string(REPLACE "|" ";" _flm_dep_parts "${_flm_dep}")
+        list(GET _flm_dep_parts 0 _flm_dep_key)
+        list(GET _flm_dep_parts 1 _flm_dep_names)
+        find_library(FLM_LIB_${_flm_dep_key}
+                     NAMES ${_flm_dep_names}
+                     DOC "Import library for ${_flm_dep_key}")
+        if(NOT FLM_LIB_${_flm_dep_key})
+            message(FATAL_ERROR
+                "Could not find an import library for '${_flm_dep_key}' "
+                "(tried: ${_flm_dep_names}). flm.exe needs FFmpeg, CURL, "
+                "Boost.program_options and FFTW3. Either configure with a "
+                "vcpkg toolchain, or add the prefix that provides them to "
+                "CMAKE_PREFIX_PATH.")
+        endif()
+        message(STATUS "  ${_flm_dep_key}: ${FLM_LIB_${_flm_dep_key}}")
+        list(APPEND _flm_win_libs "${FLM_LIB_${_flm_dep_key}}")
+    endforeach()
+    target_link_libraries(flm PUBLIC ${_flm_win_libs})
 elseif(FFMPEG_BUILT_FROM_SOURCE)
     # Portable Linux: link the static FFmpeg archives built above (plus zlib) so
     # flm carries no libav*/libsw* runtime dependency.

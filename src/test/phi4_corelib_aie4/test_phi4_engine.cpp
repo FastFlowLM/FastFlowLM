@@ -2255,6 +2255,70 @@ void TestRecoverablePreSubmitFailures(
     CHECK(fixture.engine->get_current_context_length() == 2);
 }
 
+// The engine's own guard on the token attention window.
+//
+// This is the layer that makes the crash survivable for ANY caller, including
+// one that never consults the frontend's aie4_active_cap() -- a different
+// frontend, a direct embedder, or a future endpoint. The frontend bound is the
+// one that produces a nice truncation; this one is the one that stops a
+// process kill, so it needs its own test rather than being covered by
+// implication.
+//
+// Measured on hardware: a rows=1 step at position 4095 asks for a 4096-token
+// window, which the shipped token attention kernel refuses. That refusal
+// arrives from flat_mha AFTER q, k and v are submitted in the same step, so
+// the failure policy correctly treats it as irrevocable and terminates. The
+// whole point of checking here is to reach the same conclusion BEFORE
+// anything is submitted, where it is merely an exception.
+void TestDecodeWindowRefusedBeforeSubmit(
+    const SyntheticPackage& package) {
+    EngineFixture fixture(package);
+
+    // Jump to the last position a decode step can legally run from. Prefill
+    // uses the prefill attention path, whose window does reach the full
+    // kMaxSequenceLength, so this itself is allowed.
+    const auto window =
+        static_cast<int>(flm::phi4::constants::kMaxDecodeWindow);
+    std::vector<int> prompt(static_cast<std::size_t>(window - 1), 1);
+    (void)fixture.engine->prefill(prompt);
+    CHECK(fixture.engine->get_current_context_length() == window - 1);
+
+    // Window == kMaxDecodeWindow exactly. Allowed: this is the boundary, not
+    // one past it, and an off-by-one in the guard would show up here as a
+    // spurious refusal rather than as a missing one.
+    const std::size_t dispatches_before = fixture.state.matmul_calls.size();
+    (void)fixture.engine->forward(2);
+    CHECK(fixture.engine->get_current_context_length() == window);
+    CHECK(fixture.state.matmul_calls.size() > dispatches_before);
+
+    // Window == kMaxDecodeWindow + 1. Refused.
+    const std::size_t dispatches_at_boundary =
+        fixture.state.matmul_calls.size();
+    const std::size_t syncs_at_boundary = fixture.state.synchronize_calls;
+    CheckThrowsContains(
+        [&] { (void)fixture.engine->forward(3); },
+        "attention window");
+
+    // PRE-SUBMIT is the whole claim. Not one dispatch, not one synchronize:
+    // if anything had been submitted the failure policy would be entitled to
+    // terminate, and this guard would have bought nothing.
+    CHECK(fixture.state.matmul_calls.size() == dispatches_at_boundary);
+    CHECK(fixture.state.synchronize_calls == syncs_at_boundary);
+    // And the session survives, at the position it had reached.
+    CHECK(fixture.runtime->state() == ProcessState::Healthy);
+    CHECK(!fixture.state.terminator_called);
+    CHECK(fixture.engine->get_current_context_length() == window);
+
+    // The same bound applies to a single-token prefill, which is a rows=1
+    // dispatch wearing a different name.
+    std::vector<int> one{4};
+    CheckThrowsContains(
+        [&] { (void)fixture.engine->prefill(one); },
+        "attention window");
+    CHECK(fixture.state.matmul_calls.size() == dispatches_at_boundary);
+    CHECK(fixture.runtime->state() == ProcessState::Healthy);
+}
+
 template <class CheckRecord>
 void CheckFatalFailure(
     const SyntheticPackage& package,
@@ -2562,6 +2626,7 @@ int wmain(int argc, wchar_t* argv[]) {
         TestOrderBuffersTailsStateAndMetrics(package);
         TestDivergentPaddingGrids(package);
         TestRecoverablePreSubmitFailures(package);
+        TestDecodeWindowRefusedBeforeSubmit(package);
         TestDestructorSynchronizeFailureChild(package);
         TestIrrevocableFailurePolicies(package);
         TestSynchronizeFailureTerminatesWithoutSubmissionFlag();

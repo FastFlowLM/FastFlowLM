@@ -67,8 +67,22 @@ function Start-Flm {
     throw 'server never became ready'
 }
 
+# `$MustContain` is not optional decoration on the 400 cases.
+#
+# Asserting only the status code means ANY 400 passes: malformed JSON, an
+# unknown model, a field name typo in this very script. The report claimed
+# the refusals carry the capacity message while nothing checked that it
+# did -- the same shape as the C2 over-claim, reappearing one layer down.
+# Matching the body is what makes these cases evidence that the AIE4
+# capacity rule fired, rather than evidence that something went wrong.
 function Invoke-Endpoint {
-    param([string]$Name, [string]$Path, [string]$Body, [int]$Expect)
+    param(
+        [string]$Name,
+        [string]$Path,
+        [string]$Body,
+        [int]$Expect,
+        [string]$MustContain = ''
+    )
     if (-not $script:server -or $script:server.HasExited) {
         Say '  (server not running -- restarting)'
         Start-Flm
@@ -91,13 +105,18 @@ function Invoke-Endpoint {
     $body = ($body -replace '\s+', ' ').Trim()
     $died = $script:server.HasExited
     $exitCode = if ($died) { '0x{0:X}' -f $script:server.ExitCode } else { '' }
-    $ok = ($code -eq "$Expect") -and (-not $died)
+    $bodyOk = ($MustContain -eq '') -or ($body -like "*$MustContain*")
+    $ok = ($code -eq "$Expect") -and (-not $died) -and $bodyOk
     Say ("{0,-56} expect {1} got {2}  {3}{4}" -f `
         $Name, $Expect, $code, $(if ($ok) { 'PASS' } else { 'FAIL' }), `
         $(if ($died) { "  SERVER DIED exit=$exitCode" } else { '' }))
     Say ("      " + $body.Substring(0, [Math]::Min(280, $body.Length)))
+    if (-not $bodyOk) {
+        Say ("      BODY MISMATCH: expected to contain '" + $MustContain + "'")
+    }
     $script:results += [pscustomobject]@{
-        Name = $Name; Ok = $ok; Code = $code; Died = $died; ExitCode = $exitCode }
+        Name = $Name; Ok = $ok; Code = $code; Died = $died;
+        ExitCode = $exitCode; BodyOk = $bodyOk }
 }
 
 Say "=== Step 7: flm serve $tag on port $port ==="
@@ -107,30 +126,30 @@ try {
     Say ''
 
     Invoke-Endpoint '/api/generate (default, no limit field)' '/api/generate' `
-        "{`"model`":`"$tag`",`"prompt`":`"What is the capital of France?`",`"stream`":false}" 200
+        "{`"model`":`"$tag`",`"prompt`":`"What is the capital of France?`",`"stream`":false}" 200 -MustContain '"response"'
     Invoke-Endpoint '/api/generate (over-limit max_tokens)' '/api/generate' `
-        "{`"model`":`"$tag`",`"prompt`":`"What is the capital of France?`",`"stream`":false,`"max_tokens`":100000}" 400
+        "{`"model`":`"$tag`",`"prompt`":`"What is the capital of France?`",`"stream`":false,`"max_tokens`":100000}" 400 -MustContain 'exceeds the active context cap'
 
     Invoke-Endpoint '/api/chat (default, no limit field)' '/api/chat' `
-        "{`"model`":`"$tag`",`"messages`":[{`"role`":`"user`",`"content`":`"What is the capital of France?`"}],`"stream`":false}" 200
+        "{`"model`":`"$tag`",`"messages`":[{`"role`":`"user`",`"content`":`"What is the capital of France?`"}],`"stream`":false}" 200 -MustContain '"message"'
     Invoke-Endpoint '/api/chat (over-limit options.num_predict)' '/api/chat' `
-        "{`"model`":`"$tag`",`"messages`":[{`"role`":`"user`",`"content`":`"What is the capital of France?`"}],`"stream`":false,`"options`":{`"num_predict`":100000}}" 400
+        "{`"model`":`"$tag`",`"messages`":[{`"role`":`"user`",`"content`":`"What is the capital of France?`"}],`"stream`":false,`"options`":{`"num_predict`":100000}}" 400 -MustContain 'exceeds the active context cap'
 
     Invoke-Endpoint '/v1/chat/completions (default, non-streaming)' '/v1/chat/completions' `
-        "{`"model`":`"$tag`",`"messages`":[{`"role`":`"user`",`"content`":`"What is the capital of France?`"}],`"stream`":false}" 200
+        "{`"model`":`"$tag`",`"messages`":[{`"role`":`"user`",`"content`":`"What is the capital of France?`"}],`"stream`":false}" 200 -MustContain '"choices"'
     Invoke-Endpoint '/v1/chat/completions (default, STREAMING)' '/v1/chat/completions' `
-        "{`"model`":`"$tag`",`"messages`":[{`"role`":`"user`",`"content`":`"What is the capital of France?`"}],`"stream`":true}" 200
+        "{`"model`":`"$tag`",`"messages`":[{`"role`":`"user`",`"content`":`"What is the capital of France?`"}],`"stream`":true}" 200 -MustContain 'data:'
     Invoke-Endpoint '/v1/chat/completions (over-limit max_tokens)' '/v1/chat/completions' `
-        "{`"model`":`"$tag`",`"messages`":[{`"role`":`"user`",`"content`":`"Hi`"}],`"stream`":false,`"max_tokens`":100000}" 400
+        "{`"model`":`"$tag`",`"messages`":[{`"role`":`"user`",`"content`":`"Hi`"}],`"stream`":false,`"max_tokens`":100000}" 400 -MustContain 'exceeds the active context cap'
     # The OpenAI chat endpoint accepts a SECOND spelling, parsed only when
     # max_tokens is absent, so it needs its own case.
     Invoke-Endpoint '/v1/chat/completions (over-limit max_completion_tokens)' '/v1/chat/completions' `
-        "{`"model`":`"$tag`",`"messages`":[{`"role`":`"user`",`"content`":`"Hi`"}],`"stream`":false,`"max_completion_tokens`":100000}" 400
+        "{`"model`":`"$tag`",`"messages`":[{`"role`":`"user`",`"content`":`"Hi`"}],`"stream`":false,`"max_completion_tokens`":100000}" 400 -MustContain 'exceeds the active context cap'
 
     Invoke-Endpoint '/v1/completions (default, no limit field)' '/v1/completions' `
-        "{`"model`":`"$tag`",`"prompt`":`"What is the capital of France?`",`"stream`":false}" 200
+        "{`"model`":`"$tag`",`"prompt`":`"What is the capital of France?`",`"stream`":false}" 200 -MustContain '"choices"'
     Invoke-Endpoint '/v1/completions (over-limit max_tokens)' '/v1/completions' `
-        "{`"model`":`"$tag`",`"prompt`":`"Hi`",`"stream`":false,`"max_tokens`":100000}" 400
+        "{`"model`":`"$tag`",`"prompt`":`"Hi`",`"stream`":false,`"max_tokens`":100000}" 400 -MustContain 'exceeds the active context cap'
 }
 finally { Stop-Flm }
 

@@ -64,6 +64,7 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $failures = @()
+$bitExactNotes = @()
 $suiteDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 # Nested rather than a three-argument Join-Path: Windows PowerShell 5.1 is the
 # shell on the AIE4 target and its Join-Path takes only -Path and -ChildPath,
@@ -242,11 +243,44 @@ foreach ($required in @('test_phi4_hardware', 'test_fatal_child')) {
 # closure derivation and the negative control were invisible in the suite's
 # output -- present or absent looked identical. Require the block by name from
 # the RAN lines it prints.
-if ($ctestText -match 'real-closure \(CLOSURE-1/2') {
+# Anchored on RAN, and self-checked.
+#
+# test_packaged_runtime prints the SAME block name on both its RAN line and its
+# SKIPPED line, so an unanchored match records the block as having run in
+# precisely the case this guard exists to catch: an empty
+# RYZENAI_CORELIB_RUNTIME_DIR, where the closure work is skipped. Matching a
+# substring of the summary is not the same question as "did it run".
+#
+# ctest -V prefixes each line with the test number, hence the leading `\d+:`.
+function Test-ClosureRan {
+    param([string]$CtestOutput)
+    return [bool]($CtestOutput -match
+        '(?m)^\s*\d+:\s*RAN\s+:\s*real-closure \(CLOSURE-1/2')
+}
+
+# The pattern this file is fixing has now shipped six times in this project,
+# once inside the fix for the fifth. So the matcher is checked against both
+# lines it has to tell apart, before it is trusted with a real result. The
+# CMakeLists in this directory guards its argv construction the same way.
+$closureRanProbe = "6: RAN     : real-closure (CLOSURE-1/2, 3 load-bearing DLLs proven)"
+$closureSkippedProbe = "6: SKIPPED : real-closure (CLOSURE-1/2): pass -CorelibRuntimeDir, and -DependencyDir where the corelib's own dependencies live"
+if (-not (Test-ClosureRan $closureRanProbe)) {
+    throw ('The CLOSURE-1/2 guard fails to recognise a RAN line, so it would ' +
+           'report the closure work as missing on every run.')
+}
+if (Test-ClosureRan $closureSkippedProbe) {
+    throw ('The CLOSURE-1/2 guard accepts a SKIPPED line as evidence the ' +
+           'closure ran. That is the defect this guard exists to prevent, ' +
+           'and it would fire in exactly the stale-cache case I6 covers.')
+}
+
+if (Test-ClosureRan $ctestText) {
     $ran += 'CLOSURE-1/CLOSURE-2 (derived closure and negative control)'
 } else {
     Write-Output 'CLOSURE-1/CLOSURE-2 DID NOT RUN inside test_packaged_runtime.'
-    Write-Output '  Re-run ctest with --verbose to see which blocks it skipped.'
+    Write-Output ('  It prints the same block name whether it ran or skipped; ' +
+                  'this guard requires the RAN line.')
+    Write-Output "  Full ctest log: $ctestLog"
     $failures += 'CLOSURE-1/CLOSURE-2 did not run'
 }
 
@@ -324,6 +358,15 @@ if (-not $ModelDir) {
     # pass every comparison in this suite. These are the design 12.4
     # "route-specific expected IDs".
     $expectedTokens = Join-Path $suiteDir 'phi4_expected_tokens.json'
+    # Absent means FAIL, not "run without it".
+    #
+    # This was appended only `if (Test-Path)`, so deleting the golden produced
+    # a full-green run with the strongest check in the suite silently not
+    # applied -- the same shape as the CLOSURE guard above. The token plan two
+    # lines up already throws on exactly this condition.
+    if (-not (Test-Path $expectedTokens)) {
+        throw "missing committed expected-token golden: $expectedTokens"
+    }
 
     $env:RYZENAI_CORELIB_SOURCE = $CorelibSource
     # The harness resolves the DLL through this, so it loads the staged
@@ -368,6 +411,7 @@ if (-not $ModelDir) {
         #    the inputs do not determine. No tolerance makes that acceptable,
         #    so this comparison is bit-exact.
         $repeatJson = Join-Path $artifacts "fastflow-$route-repeat.json"
+        $summaryJson = Join-Path $artifacts "compare-summary-$route.json"
         $repeatArgs = @(
             '--model-dir', $ModelDir,
             '--token-ids-json', $tokenPlan,
@@ -410,11 +454,35 @@ if (-not $ModelDir) {
                 # that is not a defect. Pass the flag by hand when
                 # investigating.
             )
-            if (Test-Path $expectedTokens) {
-                $compareArgs += @('--expected-tokens', $expectedTokens)
-            }
+            $compareArgs += @('--expected-tokens', $expectedTokens)
+            $compareArgs += @('--summary-json', $summaryJson)
             Invoke-Checked "compare ($route)" $Python $compareArgs
-            $ran += "numeric golden $route"
+            $ran += "numeric golden $route (expected-token golden applied)"
+            # The "reported" half of the gate split, made durable.
+            #
+            # The bit-exact counts were stdout prints: not in any artifact, not
+            # in the summary, never aggregated. The suite's last line read
+            # identically at 17/17 and 16/17, so a rising rate of LM-head
+            # divergence was undetectable. It is a reported property, so it has
+            # to survive the run.
+            if (Test-Path $summaryJson) {
+                $s = Get-Content $summaryJson -Raw | ConvertFrom-Json
+                $note = ("bit-exact vs reference [$route]: logits " +
+                    "$($s.logits_bit_exact_steps)/$($s.logits_total_steps), " +
+                    "K/V $($s.kv_bit_exact_tensors)/$($s.kv_total_tensors), " +
+                    "last_hidden $($s.last_hidden_bit_exact)")
+                $ran += $note
+                $bitExactNotes += $note
+                if ($s.logits_bit_exact_steps -lt $s.logits_total_steps) {
+                    # Not a failure -- see the comparator's note on why logit
+                    # bit-identity is reported rather than gated -- but it must
+                    # be impossible to miss in the summary.
+                    $bitExactNotes +=
+                        ("  NOTE [$route]: $($s.logits_total_steps - $s.logits_bit_exact_steps) " +
+                         "logit vector(s) differed from the reference inside " +
+                         "the LM head, within all design 12.4 thresholds.")
+                }
+            }
         } catch {
             Write-Output "REFERENCE COMPARISON FAILED ($route)"
             $failures += "numeric golden $route"
@@ -490,6 +558,7 @@ Write-Section 'Summary'
 foreach ($item in $ran) { Write-Output "RAN     : $item" }
 foreach ($item in $skipped) { Write-Output "SKIPPED : $item" }
 foreach ($item in $failures) { Write-Output "FAILED  : $item" }
+foreach ($item in $bitExactNotes) { Write-Output "BITEXACT: $item" }
 
 # Skipped work is visible in the EXIT CODE, not only in the log.
 #

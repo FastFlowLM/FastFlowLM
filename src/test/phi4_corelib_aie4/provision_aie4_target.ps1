@@ -20,10 +20,18 @@
 # test_phi4_e2e records the hash of the DLL the loader actually served into
 # every result artifact.
 #
-# Idempotent: re-running with the same inputs reproduces the same DLL. Measured
-# 2026-09-01: building the same source against this prefix and against the
-# original produced byte-identical DLLs, SHA-256
-# bc12a285af7bb92a5053fb2431abcfb3986fa1595c3d628a40e9f316a157fd1c.
+# NOT byte-reproducible, and do not expect it to be. An earlier version of this
+# comment claimed the same source built against this prefix and against the
+# original gave byte-identical DLLs with a specific SHA-256. That was wrong and
+# is retracted: measured 2026-09-02, the two are 846848 bytes each but hash to
+# a523b238...65ecdb and bc12a285...57fd1c. MSVC RelWithDebInfo embeds the PDB
+# path and signature and a build timestamp, so two builds of identical source
+# differ in bytes. That is expected and is not evidence of different source or
+# different dependencies.
+#
+# So the hash this script prints identifies THIS build, and its use is to show
+# that two runs loaded the same binary -- not to prove which revision it came
+# from. The revision is established by the checkout verification in step 2.
 
 [CmdletBinding()]
 param(

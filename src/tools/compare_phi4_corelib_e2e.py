@@ -593,6 +593,37 @@ def compare(args) -> int:
             "output match, which is a diagnostic rather than a release gate.",
         )
 
+    # A reported property has to outlive stdout.
+    #
+    # These counts were prints and nothing else: absent from every artifact and
+    # from the suite summary, and never aggregated, so a rising rate of
+    # LM-head divergence would have been invisible -- the suite's last line
+    # reads the same at 17/17 and at 16/17. Writing them where the runner can
+    # pick them up is what makes "reported rather than gated" an actual
+    # position rather than a way of not looking.
+    if args.summary_json:
+        Path(args.summary_json).write_text(
+            json.dumps(
+                {
+                    "route": mine["continuation_route"],
+                    "corelib_sha256": mine_sha,
+                    "logits_bit_exact_steps": sum(
+                        1 for value in exact["logits"] if value
+                    ),
+                    "logits_total_steps": len(exact["logits"]),
+                    "kv_bit_exact_tensors": sum(
+                        1 for value in exact["kv"] if value
+                    ),
+                    "kv_total_tensors": len(exact["kv"]),
+                    "last_hidden_bit_exact": hidden_exact,
+                    "all_bit_exact": all_exact,
+                    "failures": failures.messages,
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+
     # Deliberately NOT compared: synchronize counts. FastFlow uses four
     # synchronizes per layer by design and the reference still uses two, so
     # equality there would mean FastFlow had regressed to a schedule design
@@ -777,6 +808,11 @@ def main() -> int:
         help="JSON file of route-keyed expected top-1 token sequences, "
         "committed to the repository so the golden is not re-derived from "
         "the reference on every run",
+    )
+    check.add_argument(
+        "--summary-json",
+        help="write the bit-exactness counts here, so the reported (ungated) "
+        "half of the comparison survives the run and can be aggregated",
     )
     check.add_argument(
         "--require-bit-exact",

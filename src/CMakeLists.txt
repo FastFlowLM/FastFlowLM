@@ -424,6 +424,7 @@ target_link_libraries(flm PUBLIC
     lfm2_npu
     phi4_npu
     nanbeige_npu
+    hunyuan_npu
     dequant
     gemm
     lm_head

@@ -223,8 +223,12 @@ bool AutoModel::_shared_insert(chat_meta_info_t& meta_info, std::vector<int>& to
 
 buffer<bf16> AutoModel::_chunked_insert(chat_meta_info_t& meta_info, std::vector<int>& tokens, std::function<bool()> is_cancelled, void* payload, int first_len_run) {
     int max_prefill_len = meta_info.max_prefill_len;
-    // make max_prefill_len a 2^n
-    max_prefill_len = 1 << static_cast<int>(std::ceil(std::log2(max_prefill_len)));
+    // log2 of a non-positive length is not a number to shift by; an unset or
+    // degenerate limit means "no chunking", which the < 512 branch below is
+    if (max_prefill_len > 0) {
+        // make max_prefill_len a 2^n
+        max_prefill_len = 1 << static_cast<int>(std::ceil(std::log2(max_prefill_len)));
+    }
     buffer<bf16> y;
     if (max_prefill_len < 512) {
         y = this->lm_engine->prefill(tokens, payload);
@@ -320,7 +324,9 @@ std::string AutoModel::_shared_generate(chat_meta_info_t& meta_info, int length_
         this->token_history.push_back(sampled_token);
         if (this->is_eos(sampled_token)){
             meta_info.generated_tokens++;
-            this->lm_engine->forward(last_sampled_token);
+            if (this->forward_on_eos) {
+                this->lm_engine->forward(last_sampled_token);
+            }
             break;
         }
         meta_info.generated_tokens++;
@@ -334,8 +340,10 @@ std::string AutoModel::_shared_generate(chat_meta_info_t& meta_info, int length_
     if (this->total_tokens >= this->MAX_L){
         header_print("WARNING", "Max length reached, stopping generation...");
     }
-    std::cout << std::endl;
-    header_print("FLM", "Model RAW Output: \n" + result);
+    if (this->log_raw_output) {
+        std::cout << std::endl;
+        header_print("FLM", "Model RAW Output: \n" + result);
+    }
     return result;
 }
 

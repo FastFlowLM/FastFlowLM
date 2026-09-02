@@ -1,0 +1,12 @@
+# The toolchain these kernels were built and validated against.
+#
+# mlir-aie ships the `aie` Python package, the aiecc driver and the Peano
+# (LLVM-AIE) backend. It is not on PyPI under this name; install it from the
+# project's own wheels or a source build, then activate that environment before
+# configuring with -DFLM_BUILD_KERNELS=ON. See README.md.
+#
+# An .xclbin is only valid for the toolchain that produced it, which is why
+# these are pinned and why every build records them again in manifest.json.
+mlir-aie==1.4.2.dev16+g7e00b57
+ml_dtypes==0.6.0
+numpy==2.5.1

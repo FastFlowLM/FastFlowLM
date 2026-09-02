@@ -315,6 +315,44 @@ def _synthetic_document(
     }
 
 
+def _unclosed_document() -> dict:
+    """A record whose history-512 winner set is NOT downward-closed.
+
+    `W512 = {1, 8}` and `W2048 = {1, 2, 4}`: append loses at 512/2 and 512/4 and
+    wins again at 512/8. The intersection is `{1}`, which IS a prefix, so
+    Section 10.7's monotonicity assertion passes and the rule returns 1 -- while
+    `min` of the ceilings (8 and 4) would say 4. This is the review's I-1
+    counter-example as a loadable document.
+
+    It is also the only shape in which concessions can appear at BOTH histories.
+    With downward-closed winner sets the ceilings are nested, so everything
+    above the threshold belongs to whichever history has the larger ceiling and
+    the conceded band lives at exactly one history. Two-history ordering is
+    therefore only reachable through a record like this one.
+    """
+    append = {
+        (512, 1): 10_000_000,
+        (512, 2): 2_000_000_000,
+        (512, 4): 2_000_000_000,
+        (512, 8): 20_000_000,
+        (512, 32): 5_000_000_000,
+        (512, 128): 5_000_000_000,
+        (512, 256): 5_000_000_000,
+        (2048, 1): 10_000_000,
+        (2048, 2): 500_000_000,
+        (2048, 4): 800_000_000,
+        (2048, 8): 2_000_000_000,
+        (2048, 32): 5_000_000_000,
+        (2048, 128): 5_000_000_000,
+        (2048, 256): 5_000_000_000,
+    }
+    return _synthetic_document(
+        suffixes=(1, 2, 4, 8, 32, 128, 256),
+        append_ns=append,
+        reprefill_ns={512: 1_000_000_000, 2048: 1_000_000_000},
+    )
+
+
 class IngestionTest(unittest.TestCase):
     """Every rejection ingestion performs gets the record that triggers it."""
 
@@ -562,6 +600,89 @@ class MinIdentityTest(unittest.TestCase):
         self.assertEqual(loaded.unclosed_histories(), ())
 
 
+class UnclosedWinnersConsumersTest(unittest.TestCase):
+    """The three things that CONSUME `unclosed_histories()`.
+
+    The function itself was tested when it was written; its consumers were not,
+    and a review pointed out that the write-up claimed otherwise. Each of these
+    is a separate place the finding has to survive to: the exit code, the
+    rendered document, and the machine-readable summary. A finding that reaches
+    only one of them is the failure mode this whole branch keeps hitting.
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.directory = pathlib.Path(self._tmp.name)
+        self.baseline = self.directory / "baseline.json"
+        self.baseline.write_text(
+            json.dumps(_unclosed_document()), encoding="utf-8"
+        )
+        self.header = self.directory / "tuning.hpp"
+        self.header.write_text(_BARE_HEADER, encoding="utf-8")
+        self.document = self.directory / "results.md"
+        self.document.write_text("# heading\n", encoding="utf-8")
+        self.summary = self.directory / "summary.json"
+
+    def _run(self, extra=()):
+        return main(
+            [
+                "--baseline",
+                str(self.baseline),
+                "--crossover-history",
+                str(_HISTORY),
+                "--header",
+                str(self.header),
+                "--document",
+                str(self.document),
+                "--json",
+                str(self.summary),
+                *extra,
+            ]
+        )
+
+    def test_it_reaches_the_exit_code(self):
+        self.assertNotEqual(self._run(), 0)
+
+    def test_it_refuses_to_write_the_header_or_the_document(self):
+        self._run()
+        self.assertEqual(self.header.read_text(encoding="utf-8"), _BARE_HEADER)
+        self.assertEqual(self.document.read_text(encoding="utf-8"), "# heading\n")
+
+    def test_it_reaches_the_json_summary(self):
+        self._run()
+        payload = json.loads(self.summary.read_text(encoding="utf-8"))
+        self.assertFalse(payload["winners_downward_closed"])
+        self.assertTrue(
+            any("not a prefix" in line for line in payload["diagnostics"]),
+            payload["diagnostics"],
+        )
+
+    def test_it_reaches_the_rendered_document(self):
+        loaded = load_continuation_samples(_unclosed_document())
+        selection = select_threshold_detailed(loaded.samples())
+        agreement = history_agreement(
+            json.loads(_HISTORY.read_text(encoding="utf-8")), selection.threshold
+        )
+        section = build_document_section(loaded, selection, agreement)
+        self.assertIn("not all downward-closed", section)
+        self.assertIn("won again at a longer suffix", section)
+        self.assertNotIn("ARE downward-closed", section)
+
+    def test_a_closed_record_takes_the_other_branch_everywhere(self):
+        """Otherwise the four assertions above could pass for every input."""
+        self.baseline.write_text(
+            json.dumps(_synthetic_document()), encoding="utf-8"
+        )
+        self.assertEqual(self._run(), 0)
+        self.assertNotEqual(self.header.read_text(encoding="utf-8"), _BARE_HEADER)
+        payload = json.loads(self.summary.read_text(encoding="utf-8"))
+        self.assertTrue(payload["winners_downward_closed"])
+        self.assertIn(
+            "ARE downward-closed", self.document.read_text(encoding="utf-8")
+        )
+
+
 class ConcessionTest(unittest.TestCase):
     """What the single constant gives up, and which member of it is worst.
 
@@ -623,6 +744,37 @@ class ConcessionTest(unittest.TestCase):
         loaded = load_continuation_samples(_synthetic_document())
         selection = select_threshold_detailed(loaded.samples())
         self.assertEqual(conceded_points(loaded, selection.threshold), ())
+
+    def test_the_ordering_is_by_cost_across_histories_not_by_suffix(self):
+        """The one case a single-history fixture cannot see.
+
+        Within one history, slowdown-descending and suffix-ascending coincide,
+        so every other test here would still pass if the sort key reverted to
+        the suffix. With concessions at TWO histories they diverge: ordered by
+        cost the band is [(512, 8), (2048, 2), (2048, 4)] and ordered by suffix
+        it is [(2048, 2), (2048, 4), (512, 8)], which disagree on the very
+        first element -- the one the document quotes as the worst case.
+        """
+        loaded = load_continuation_samples(_unclosed_document())
+        selection = select_threshold_detailed(loaded.samples())
+        self.assertEqual(selection.threshold, 1)
+
+        rows = conceded_points(loaded, selection.threshold)
+        self.assertEqual(
+            [(row[0], row[1]) for row in rows],
+            [(512, 8), (2048, 2), (2048, 4)],
+        )
+        # Both histories are represented, which is what makes the orderings
+        # distinguishable at all.
+        self.assertEqual({row[0] for row in rows}, {512, 2048})
+
+        by_suffix = sorted(rows, key=lambda row: (row[1], row[0]))
+        self.assertNotEqual(rows, by_suffix)
+        self.assertNotEqual(rows[0], by_suffix[0])
+        # And not the narrowest suffix overall either: a naive "min suffix"
+        # fix would pick (2048, 2), which is 2.0x rather than 50.0x.
+        self.assertEqual(min(rows, key=lambda row: row[1])[:2], (2048, 2))
+        self.assertGreater(rows[0][3], 40.0)
 
     def test_the_committed_measurement_concedes_2048_at_8_worst(self):
         loaded = load_continuation_samples(
@@ -1052,6 +1204,104 @@ class CommandLineTest(unittest.TestCase):
         self.assertEqual(payload["threshold"], 4)
         self.assertTrue(payload["history_agreement"]["permits"])
         self.assertTrue(payload["winners_downward_closed"])
+
+
+class RetractedClaimsTest(unittest.TestCase):
+    """Retractions must reach the RENDERED artifacts, not just the code.
+
+    Four times on this branch a claim was retracted in the source and the
+    report while the rendered document went on asserting it, because nothing
+    read the rendered output back. These tests read it back.
+
+    The claims are matched by TEXT against the committed document and against a
+    freshly built section, not by line number: a line number stops meaning
+    anything the moment the generator's prose moves, and would then pass
+    vacuously.
+    """
+
+    # Each entry is (substring, why it is wrong). The substrings are the exact
+    # retracted wording, not a paraphrase and not a keyword: "would have
+    # selected", for instance, appears LEGITIMATELY in the corrected prose,
+    # which says the bound is not what that run would have selected. A matcher
+    # loose enough to catch the retracted claim by keyword would forbid its own
+    # correction.
+    _RETRACTED = (
+        (
+            "the constant is the smaller of those ceilings",
+            "Section 10.7 takes the largest suffix in the INTERSECTION of the "
+            "per-history winner sets. That coincides with the smaller ceiling "
+            "only when the sets are downward-closed, which is a property of "
+            "the data and not of the rule.",
+        ),
+        (
+            "recomputable from every recorded run",
+            "a crossover record stores edges and never winner sets, so it "
+            "BOUNDS what Section 10.7 would have selected and cannot "
+            "reproduce it.",
+        ),
+    )
+
+    def _violations(self, text):
+        return [
+            f"asserts a retracted claim ({claim!r}): {why}"
+            for claim, why in self._RETRACTED
+            if claim in text
+        ]
+
+    def _assert_clean(self, text, where):
+        violations = self._violations(text)
+        self.assertEqual(violations, [], f"{where} " + "; ".join(violations))
+
+    def test_the_committed_document_asserts_no_retracted_claim(self):
+        self._assert_clean(
+            _DOCUMENT.read_text(encoding="utf-8"), str(_DOCUMENT)
+        )
+
+    def test_a_freshly_rendered_section_asserts_no_retracted_claim(self):
+        loaded = load_continuation_samples(
+            json.loads(_BASELINE.read_text(encoding="utf-8"))
+        )
+        selection = select_threshold_detailed(loaded.samples())
+        agreement = history_agreement(
+            json.loads(_HISTORY.read_text(encoding="utf-8")),
+            selection.threshold,
+        )
+        self._assert_clean(
+            build_document_section(loaded, selection, agreement),
+            "a freshly rendered section",
+        )
+
+    def test_the_guard_would_notice_each_claim_coming_back(self):
+        """The matcher must actually match; otherwise the two tests above
+        pass for every possible document, including one that reinstates the
+        claim verbatim."""
+        for claim, _ in self._RETRACTED:
+            with self.subTest(claim=claim):
+                self.assertEqual(
+                    len(self._violations(f"prose prose {claim} prose")), 1
+                )
+                with self.assertRaises(AssertionError):
+                    self._assert_clean(
+                        f"prose prose {claim} prose", "a synthetic document"
+                    )
+
+    def test_the_corrected_wording_is_not_itself_flagged(self):
+        """"would have selected" appears in the correction. A matcher that
+        forbade it would make the fix unwritable."""
+        corrected = (
+            "The minimum of those ceilings is an upper bound on what Section "
+            "10.7 would have selected from that run, and in general only an "
+            "upper bound."
+        )
+        self.assertEqual(self._violations(corrected), [])
+
+    def test_the_intersection_is_stated_where_the_reader_meets_it(self):
+        """Removing the wrong claim is not enough; the right one must be
+        there, and above the paragraph that explains it."""
+        document = _DOCUMENT.read_text(encoding="utf-8")
+        intersection = document.index("INTERSECTION of those winner sets")
+        correction = document.index("only when each winner set is downward-closed")
+        self.assertLess(intersection, correction)
 
 
 class CheckedInArtefactsTest(unittest.TestCase):

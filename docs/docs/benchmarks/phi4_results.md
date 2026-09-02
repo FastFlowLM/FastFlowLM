@@ -261,7 +261,7 @@ inline constexpr std::uint32_t kContinuationAppendThreshold = 4;
 | 512 | [1, 2, 4] | 4 |
 | 2048 | [1, 2, 4, 8, 12] | 12 |
 
-The rule is a conjunction, so the constant is the smaller of those ceilings. It is NOT a per-history policy: Section 10.7 specifies one integer, and one integer cannot be optimal at two history lengths whose crossovers differ.
+The rule is a conjunction: the constant is the largest sampled length in the INTERSECTION of those winner sets — here [1, 2, 4], giving 4. It is not in general the smaller of the two ceilings; that holds only when each winner set is downward-closed, which is a property of the measurement rather than of the rule and is checked further down. It is also NOT a per-history policy: Section 10.7 specifies one integer, and one integer cannot be optimal at two history lengths whose crossovers differ.
 
 ### What the single constant gives up
 
@@ -273,9 +273,9 @@ The rule is a conjunction, so the constant is the smaller of those ceilings. It 
 | 2048 | 12 | 589.4 ms | 1,156.0 ms | re-prefill | +566.6 ms | 2.0x |
 | 512 | none | — | — | — | — | — |
 
-Those are measured losses taken deliberately. The alternative — a threshold above the smaller ceiling — is optimal for the longer history and WRONG for the shorter one, where it would append past the point at which append has already lost. Conceding measured throughput at one history is the cheaper error than routing against the measurement at the other.
+Those are measured losses taken deliberately. The alternative — a threshold above the selected one — is optimal for the longer history and WRONG for the shorter one, where it would append past the point at which append has already lost. Conceding measured throughput at one history is the cheaper error than routing against the measurement at the other.
 
-There is a second reason to prefer the smaller ceiling, and it is about confidence rather than cost. Task 13 measured this crossover three times and found the bracket's LOWER edge stable across runs and its UPPER edge not: the upper edge moves with how quiet the machine was, because that is what decides how many points near the crossover can be called at all. The threshold selected here sits at or below the lower edge at every measured history, so it is inside the append-wins region on every run. A threshold chosen from the upper edge would be supported by some runs and not others.
+There is a second reason to prefer the lower candidate, and it is about confidence rather than cost. Task 13 measured this crossover three times and found the bracket's LOWER edge stable across runs and its UPPER edge not: the upper edge moves with how quiet the machine was, because that is what decides how many points near the crossover can be called at all. The threshold selected here sits at or below the lower edge at every measured history, so it is inside the append-wins region on every run. A threshold chosen from the upper edge would be supported by some runs and not others.
 
 ### The measurement behind it
 

@@ -814,11 +814,22 @@ def build_document_section(
             f"{max(won) if won else 0} |"
         )
     add("")
+    # NOT "so the constant is the smaller of those ceilings". The rule takes
+    # the largest suffix in the INTERSECTION of the winner sets, which coincides
+    # with the smaller ceiling only when the sets are downward-closed -- a
+    # property of this run's data, checked below, and not a consequence of the
+    # rule. Stating it causally here is the inference the calibrator spent a
+    # review round removing, and this is the first prose a reader meets.
     add(
-        f"The rule is a conjunction, so the constant is the smaller of those "
-        f"ceilings. It is NOT a per-history policy: Section 10.7 specifies one "
-        f"integer, and one integer cannot be optimal at two history lengths "
-        f"whose crossovers differ."
+        f"The rule is a conjunction: the constant is the largest sampled length "
+        f"in the INTERSECTION of those winner sets — here "
+        f"{list(selection.winners) if selection.winners else 'empty'}, giving "
+        f"{selection.threshold}. It is not in general the smaller of the two "
+        f"ceilings; that holds only when each winner set is downward-closed, "
+        f"which is a property of the measurement rather than of the rule and is "
+        f"checked further down. It is also NOT a per-history policy: Section "
+        f"10.7 specifies one integer, and one integer cannot be optimal at two "
+        f"history lengths whose crossovers differ."
     )
     add("")
 
@@ -859,7 +870,7 @@ def build_document_section(
         add("")
         add(
             "Those are measured losses taken deliberately. The alternative — a "
-            "threshold above the smaller ceiling — is optimal for the longer "
+            "threshold above the selected one — is optimal for the longer "
             "history and WRONG for the shorter one, where it would append past "
             "the point at which append has already lost. Conceding measured "
             "throughput at one history is the cheaper error than routing "
@@ -867,7 +878,7 @@ def build_document_section(
         )
         add("")
         add(
-            "There is a second reason to prefer the smaller ceiling, and it is "
+            "There is a second reason to prefer the lower candidate, and it is "
             "about confidence rather than cost. Task 13 measured this crossover "
             "three times and found the bracket's LOWER edge stable across runs "
             "and its UPPER edge not: the upper edge moves with how quiet the "

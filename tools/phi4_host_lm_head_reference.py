@@ -536,7 +536,7 @@ def main(argv: list[str] | None = None) -> int:
             f"({run['max_deviation_ulp']:.3f} ULP), mean |dev| "
             f"{run['mean_abs_deviation']:.6g} "
             f"({run['mean_abs_deviation_ulp']:.4f} ULP), correctly rounded "
-            f"{run['correctly_rounded']}/{run['total']}, signed mean "
+            f"{run['within_half_ulp']}/{run['total']}, signed mean "
             f"{run['mean_signed_deviation_ulp']:+.4f} ULP"
         )
     if straddle is not None:

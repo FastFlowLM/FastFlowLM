@@ -427,6 +427,10 @@ class DeterminismBaselineTests(unittest.TestCase):
             any("gate" in problem.lower() for problem in baseline["problems"]),
             baseline["problems"],
         )
+        # A gate failure is a FINDING, not a structural defect in the
+        # baseline. It must not block the record from being written; see the
+        # blocking/non-blocking split in determinism_baseline.
+        self.assertEqual(baseline["blocking_problems"], [])
 
     def test_runs_that_loaded_different_libraries_are_flagged(self):
         odd = _determ("append", 17, 17, 0.0)
@@ -559,6 +563,38 @@ class MainTests(unittest.TestCase):
             self.assertNotEqual(code, 0)
             self.assertIn("DETERM-3", output)
             self.assertEqual(markdown.read_text(encoding="utf-8"), before)
+
+    def test_a_gate_failure_is_published_and_still_fails_the_exit_code(self):
+        # The distinction this test pins: "there is no baseline" blocks the
+        # render, "the baseline contains a hard-gate failure" does not.
+        # Suppressing the whole record because the campaign found something
+        # would discard the measurement and leave only an exit code, which is
+        # the opposite of what this baseline is for.
+        with tempfile.TemporaryDirectory() as raw:
+            directory = Path(raw)
+            baseline, glob, markdown = self._fixture(directory, 20)
+            broken = _determ("append", 0, 17, 48.34375)
+            broken["failures"] = ["decode[7]: emitted token sequences differ"]
+            first = sorted((directory / "artifacts").glob("*"))[0]
+            (first / "determ1-force_append.json").write_text(
+                json.dumps(broken), encoding="utf-8"
+            )
+            code, output = self._run(
+                [
+                    "--input",
+                    str(baseline),
+                    "--determinism-glob",
+                    glob,
+                    "--markdown",
+                    str(markdown),
+                ]
+            )
+            self.assertNotEqual(code, 0)
+            self.assertIn("gate", output.lower())
+            text = markdown.read_text(encoding="utf-8")
+            self.assertIn("DETERM-3", text)
+            self.assertIn("HARD GATE", text)
+            self.assertIn("n = 20", text)
 
     def test_an_unstable_memory_window_fails_the_exit_code(self):
         with tempfile.TemporaryDirectory() as raw:

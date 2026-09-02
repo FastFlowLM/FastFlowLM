@@ -233,15 +233,29 @@ def determinism_baseline(records: list[dict]) -> dict:
     and produces a problem. That combination is the point: the numbers are
     still visible, so the campaign's progress is legible, but nothing
     downstream can cite them as a baseline.
+
+    Two kinds of problem, kept apart on purpose.
+
+    `blocking_problems` are the ones that mean there is NO baseline: too few
+    runs, no records at all, or records from more than one binary. Those stop
+    the report being rendered, because a document that implies a baseline
+    exists when it does not is the exact defect `DETERM-3` names.
+
+    `problems` also includes hard-gate failures, and those must NOT block
+    rendering. A run that breached `DETERM-2` is a finding, and suppressing
+    the whole record because the campaign found something is the opposite of
+    what this task is for. It is counted in the rate, called out in the
+    document, and it reaches the exit code.
     """
     problems: list[str] = []
+    blocking: list[str] = []
     routes: dict[str, dict] = {}
 
     by_route: dict[str, list[dict]] = {}
     for record in records:
         route = record.get("route")
         if route not in DETERMINISM_ROUTES:
-            problems.append(
+            blocking.append(
                 f"a DETERM-1 record names an unknown route {route!r}; it is "
                 f"not counted toward any baseline"
             )
@@ -254,19 +268,19 @@ def determinism_baseline(records: list[dict]) -> dict:
         if record.get("corelib_sha256")
     }
     if len(hashes) > 1:
-        problems.append(
+        blocking.append(
             "the records do not all share one corelib SHA-256 "
             f"({len(hashes)} distinct values), so they do not describe one "
             "binary and cannot be pooled into a baseline: "
             + ", ".join(sorted(value[:16] for value in hashes))
         )
     if not records:
-        problems.append("no DETERM-1 records were supplied")
+        blocking.append("no DETERM-1 records were supplied")
 
     for route in DETERMINISM_ROUTES:
         entries = by_route.get(route, [])
         if not entries:
-            problems.append(
+            blocking.append(
                 f"route {route!r}: no DETERM-1 records at all, so DETERM-3's "
                 f"minimum of {MIN_DETERMINISM_RUNS_PER_ROUTE} runs is not met"
             )
@@ -345,7 +359,7 @@ def determinism_baseline(records: list[dict]) -> dict:
             "is_baseline": runs >= MIN_DETERMINISM_RUNS_PER_ROUTE,
         }
         if runs < MIN_DETERMINISM_RUNS_PER_ROUTE:
-            problems.append(
+            blocking.append(
                 f"route {route!r}: {runs} run(s), below DETERM-3's minimum of "
                 f"{MIN_DETERMINISM_RUNS_PER_ROUTE}. No baseline is established "
                 f"for this route; the figures above are what has been measured "
@@ -370,9 +384,11 @@ def determinism_baseline(records: list[dict]) -> dict:
         "min_runs_per_route": MIN_DETERMINISM_RUNS_PER_ROUTE,
         "routes": routes,
         "route_dependent": route_dependent,
-        "is_baseline": not problems
+        "is_baseline": not blocking
+        and bool(routes)
         and all(entry["is_baseline"] for entry in routes.values()),
-        "problems": problems,
+        "blocking_problems": blocking,
+        "problems": blocking + problems,
     }
 
 
@@ -609,6 +625,20 @@ def render_markdown(document: dict) -> str:
             for entry in determinism.get("routes", {}).values()
         ):
             add("")
+        gate_failures = sum(
+            entry.get("runs_with_gate_failures", 0)
+            for entry in determinism.get("routes", {}).values()
+        )
+        if gate_failures:
+            add(
+                f"> **{gate_failures} run(s) in this window breached a "
+                f"`DETERM-2` HARD GATE.** They are counted in the rates above "
+                f"-- dropping them would bias the figures upward, and "
+                f"silently -- and they are not a wobble within the recorded "
+                f"tolerance. Read the run records before citing anything here "
+                f"as a settled baseline."
+            )
+            add("")
         if determinism.get("route_dependent"):
             add(
                 "**The rate is route-dependent.** The two routes are reported "
@@ -706,7 +736,12 @@ def main(argv: list[str] | None = None) -> int:
             json.dumps(document, indent=2), encoding="utf-8"
         )
 
-    determinism_incomplete = bool(determinism["problems"]) or not records
+    # Rendering is blocked by a structural problem with the baseline itself,
+    # never by a finding IN it. A DETERM-2 hard-gate failure among the samples
+    # is a result this document exists to carry; refusing to write the
+    # document because the campaign found something would discard the
+    # measurement and leave only an exit code.
+    determinism_incomplete = bool(determinism["blocking_problems"]) or not records
     render_blocked = bool(
         [
             problem

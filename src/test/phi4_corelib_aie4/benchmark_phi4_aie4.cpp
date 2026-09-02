@@ -282,7 +282,10 @@ std::string CpuSku() {
             "could not read ProcessorNameString; the baseline would not say "
             "which CPU produced it");
     }
-    return name;
+    // The registry pads this to a fixed width. Trailing spaces in an identity
+    // field make two records of the same machine compare unequal.
+    const auto end = name.find_last_not_of(" 	");
+    return end == std::string::npos ? name : name.substr(0, end + 1);
 }
 
 struct NpuIdentity {
@@ -1234,6 +1237,15 @@ int main(int argc, char** argv) {
                 window["private_bytes_at_end"] =
                     memory_samples.back().private_bytes;
                 window["private_bytes_growth"] = growth;
+                // The SIGNED change as well. `growth` is clamped at zero
+                // because that is what the stability bound is written
+                // against, and a run whose private bytes FELL would otherwise
+                // report the same 0 as one that stayed exactly flat -- two
+                // different observations reading identically.
+                window["private_bytes_delta"] =
+                    static_cast<std::int64_t>(
+                        memory_samples.back().private_bytes) -
+                    static_cast<std::int64_t>(warm_memory.private_bytes);
                 // Rounded away from zero, so a fractional slope can never
                 // become a reported zero. A leak of 0.6 bytes per token is
                 // not a leak, but reporting it as exactly none is a claim the

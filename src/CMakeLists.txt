@@ -694,6 +694,22 @@ elseif(WIN32)
     # the long-double variant at all -- MSVC's long double is a double -- and
     # failing the build over a library nothing calls would be a self-inflicted
     # portability limit.
+    # Self-check on the split, against a synthetic entry with two alternative
+    # spellings. The real entries are easy to get wrong in a way that still
+    # configures -- dropping a fallback name only shows up on a machine that
+    # needs it -- so the parsing is verified before it is used, the way the
+    # test suite's CMakeLists verifies its argv construction.
+    string(REPLACE "|" ";" _flm_dep_probe "optional|probe|alpha;beta")
+    list(SUBLIST _flm_dep_probe 2 -1 _flm_dep_probe_names)
+    list(LENGTH _flm_dep_probe_names _flm_dep_probe_count)
+    if(NOT _flm_dep_probe_count EQUAL 2)
+        message(FATAL_ERROR
+            "Windows dependency name parsing dropped alternative spellings: "
+            "expected 2 names, got ${_flm_dep_probe_count} "
+            "[${_flm_dep_probe_names}]. Every fallback library name would be "
+            "silently ignored.")
+    endif()
+
     set(_flm_win_libs "")
     foreach(_flm_dep IN ITEMS
             "required|avformat|avformat"
@@ -709,7 +725,17 @@ elseif(WIN32)
         string(REPLACE "|" ";" _flm_dep_parts "${_flm_dep}")
         list(GET _flm_dep_parts 0 _flm_dep_need)
         list(GET _flm_dep_parts 1 _flm_dep_key)
-        list(GET _flm_dep_parts 2 _flm_dep_names)
+        # SUBLIST, not GET.
+        #
+        # The names field is itself a `;`-separated list, so the REPLACE above
+        # flattens it into the SAME list: "optional|fftw3l|fftw3l;libfftw3l-3"
+        # becomes four elements, not three. `list(GET ... 2)` therefore
+        # returned only the FIRST spelling and silently discarded every
+        # alternative -- which is why libfftw3f-3.lib and libfftw3l-3.lib in
+        # this repository were never found, and why fftw3l looked absent when
+        # it is committed at src/lib/libfftw3l-3.lib. Everything from index 2
+        # onward is the name list.
+        list(SUBLIST _flm_dep_parts 2 -1 _flm_dep_names)
         # The TREE's own libraries first, and not merely as a HINTS entry.
         #
         # This repository vendors libfftw3-3.lib, libfftw3f-3.lib and

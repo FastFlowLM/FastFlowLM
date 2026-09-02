@@ -115,15 +115,33 @@ void RmsNorm(
          row < static_cast<std::size_t>(rows);
          ++row) {
         const std::size_t base = row * row_width;
-        float sum_of_squares = 0.0f;
+        // Accumulated in double, then rounded once.
+        //
+        // A serial FP32 sum of 3072 squares is the least accurate reduction
+        // available here, and the error is not academic: measured on the AIE4
+        // target against the corelib reference driver, it moved the layer-0
+        // input by up to 4.8e-6 relative, which is enough to land 25 of 58368
+        // values on a DIFFERENT BF16 number once `tensor_write` narrows them.
+        // Thirty-two layers of BF16 arithmetic amplify those 25 seeds into a
+        // logit correlation of 0.9991 against the reference, below the 0.9999
+        // design Section 12.4 requires, and into different sampled tokens
+        // within six steps.
+        //
+        // A double accumulator costs one row-length pass per forward pass --
+        // this norm runs once per model step, not once per layer, because
+        // ssmlp absorbs every other one -- and brings the count of differing
+        // BF16 values to zero against the same reference. The rest of the
+        // computation stays in FP32 so the result is still exactly what
+        // design Section 10.2 specifies the host to produce.
+        double sum_of_squares = 0.0;
         for (std::size_t column = 0;
              column < row_width;
              ++column) {
-            const float value = input[base + column];
+            const double value = input[base + column];
             sum_of_squares += value * value;
         }
-        const float mean_square =
-            sum_of_squares / static_cast<float>(width);
+        const float mean_square = static_cast<float>(
+            sum_of_squares / static_cast<double>(width));
         const float denominator =
             std::sqrt(mean_square + epsilon);
         for (std::size_t column = 0;

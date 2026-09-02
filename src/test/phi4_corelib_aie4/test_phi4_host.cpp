@@ -360,7 +360,19 @@ void TestGatherEmbeddingStopsAtAGuardPage() {
     CHECK(all_one);
 }
 
-void TestRmsNormUsesFp32AccumulationAndSharedEpsilon() {
+// The reduction is accumulated in DOUBLE and the result is FP32.
+//
+// This golden previously pinned a serial FP32 accumulator, and on the AIE4
+// target that turned out to be the source of a measured divergence from the
+// corelib reference driver: up to 4.8e-6 relative error in the layer-0 norm,
+// which moved 25 of 58368 values onto a different BF16 number and, through 32
+// layers, produced a logit correlation of 0.9991 against a required 0.9999. A
+// double accumulator brings the differing count to zero.
+//
+// The four-element case below is regenerated but barely discriminating -- two
+// of its four words move by one ULP. TestRmsNormReductionSurvivesALongRow is
+// the one that actually fails if the accumulator goes back to FP32.
+void TestRmsNormUsesDoubleAccumulationAndSharedEpsilon() {
     const std::array<float, 4> input{
         std::bit_cast<float>(0xBE8BBBACu),
         std::bit_cast<float>(0xBCCC9DE0u),
@@ -384,13 +396,44 @@ void TestRmsNormUsesFp32AccumulationAndSharedEpsilon() {
 
     constexpr std::array<std::uint32_t, 4> expected{
         0xBBAE75DBu,
-        0xB9FF781Fu,
+        0xB9FF7820u,
         0xBD143451u,
-        0xBFFFF509u};
+        0xBFFFF50Bu};
     for (std::size_t index = 0; index < output.size(); ++index) {
         CHECK(std::bit_cast<std::uint32_t>(output[index]) ==
               expected[index]);
     }
+}
+
+// A full 3072-wide row, which is the width the model actually uses.
+//
+// One large square followed by 3071 small ones is the case a serial FP32 sum
+// loses outright: each small addend is far below the running total's ULP, so
+// almost all of them vanish. Every one of the 3072 outputs differs between the
+// two accumulators here, so this fails loudly if the reduction is ever
+// narrowed back to FP32 -- unlike the four-element case above, where the two
+// disagree in only two words and a reviewer could plausibly wave it through.
+void TestRmsNormReductionSurvivesALongRow() {
+    constexpr std::size_t kWidth = 3072;
+    std::vector<float> input(kWidth, 0.03125f);
+    input[0] = 1024.0f;
+    const std::vector<float> scale(kWidth, 1.0f);
+    std::vector<float> output(kWidth);
+
+    RmsNorm(
+        input,
+        scale,
+        1,
+        static_cast<std::int64_t>(kWidth),
+        static_cast<float>(flm::phi4::constants::kRmsEpsilon),
+        output);
+
+    // Produced by a double accumulator; 0x425DB3D8 and 0x3ADDB3D8 are what a
+    // serial FP32 accumulator produces for the same two elements.
+    CHECK(std::bit_cast<std::uint32_t>(output[0]) == 0x425DB3C3u);
+    CHECK(std::bit_cast<std::uint32_t>(output[1]) == 0x3ADDB3C3u);
+    CHECK(std::bit_cast<std::uint32_t>(output[0]) != 0x425DB3D8u);
+    CHECK(std::bit_cast<std::uint32_t>(output[1]) != 0x3ADDB3D8u);
 }
 
 void TestStageFp32ZerosOnlyInitialInputPrefixes() {
@@ -680,7 +723,8 @@ int main() {
         TestNarrowFp32ToBf16MatchesTheReferenceDriverBitForBit();
         TestGatherEmbeddingWidensWithoutCorelib();
         TestGatherEmbeddingStopsAtAGuardPage();
-        TestRmsNormUsesFp32AccumulationAndSharedEpsilon();
+        TestRmsNormUsesDoubleAccumulationAndSharedEpsilon();
+        TestRmsNormReductionSurvivesALongRow();
         TestStageFp32ZerosOnlyInitialInputPrefixes();
         TestScatterVReadsOnlyLiveRowsWithoutHiddenSynchronize(api);
         TestArgmaxLowestChoosesLowestTokenOnTie();

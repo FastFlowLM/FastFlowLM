@@ -38,7 +38,7 @@ its catalog entry: the prompt and the generated tokens together are capped at
 **the largest prompt this tag will accept is 4,094 tokens** — it needs at least
 one token of room to answer in. Sizing a prompt to the advertised 4,096 gets
 HTTP 400 before any work is submitted. The rule is
-`Phi4::validate_aie4_capacity` (`src/common/AutoModel/modeling_phi4.cpp:437`),
+`Phi4::validate_aie4_capacity` (`src/common/AutoModel/modeling_phi4.cpp:420`),
 which refuses when the rendered prompt length reaches the cap; see
 [Known limitations](#known-limitations) for why the cap is what it is.
 
@@ -240,10 +240,10 @@ alone.
   with the previous turn's message and reply absent, so each turn replaces the
   history rather than appending to it. This is **not specific to this model or
   to the AIE4 backend, and it is not an AIE4 defect.** `Phi4::insert`
-  (`common/AutoModel/modeling_phi4.cpp:559`) wraps `input.prompt` in a fresh
+  (`common/AutoModel/modeling_phi4.cpp:576`) wraps `input.prompt` in a fresh
   single-message array whenever `input.messages` is empty, which is every CLI
-  turn, and that happens at lines 569–573 — *above* the
-  `#if defined(FLM_ENABLE_CORELIB_AIE4)` branch that starts at line 579. The
+  turn, and that happens at line 589 — *above* the
+  `#if defined(FLM_ENABLE_CORELIB_AIE4)` branch that starts at line 596. The
   history is already gone before any AIE4 code runs. The identical construction
   is in the Llama 3, Qwen 2, Qwen 3, Gemma 3, LFM2, GPT-OSS and Nanbeige
   frontends: it is the shared CLI path for every text model. Supply the whole
@@ -354,7 +354,7 @@ alone.
   the usable cap is one less, because no token-attention kernel ships for a
   4096-token window; and a prompt that fills the cap exactly leaves no room to
   answer, so `Phi4::validate_aie4_capacity`
-  (`src/common/AutoModel/modeling_phi4.cpp:437`) refuses at 4,095 rendered
+  (`src/common/AutoModel/modeling_phi4.cpp:420`) refuses at 4,095 rendered
   tokens rather than at 4,096. Requests over the cap are refused before any work
   is submitted, with HTTP 400 on the server and a message naming the cap and the
   rendered prompt length. The acceptance run verifies the enforcement exactly:

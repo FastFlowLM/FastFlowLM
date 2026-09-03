@@ -1,0 +1,129 @@
+---
+layout: docs
+title: Phi-4 AIE4 Implementation
+nav_order: 5
+---
+
+# Phi-4 on AIE4 — what was built
+
+FastFlowLM had no AIE4 backend. This work adds one: Phi-4-mini runs on an AMD
+AIE4 NPU by calling `ryzenai-corelib`'s C ABI. Everything below describes what
+ships, not what was attempted.
+
+For what to watch out for, read [Phi-4 AIE4 Caveats](../phi4_aie4_caveats/).
+
+---
+
+## The shape of it
+
+```
+flm.exe ──(runtime, absolute path)──► ryzenai_corelib.dll ──► AIE4 NPU
+   │
+   └── phi4_corelib_aie4  ── the backend added by this work
+```
+
+`flm.exe` **never links** `ryzenai_corelib.lib`. The DLL is resolved at run
+time by absolute path, so a build without the AIE4 component installed starts
+normally and reports the backend as unavailable. **There is no silent
+fallback** — a Phi-4 AIE4 tag either runs on the NPU or fails loudly.
+
+## The corelib surface actually used
+
+Pinned to corelib `e5258d2`, ABI version **0.1.0**, gated on an exact
+`major.minor.patch` match while the major version is 0.
+
+| Group | Entry points |
+|---|---|
+| Compute | `matmul_bf16`, `flat_mha_bf16`, `ssmlp_bf16` |
+| Padding | `matmul_bf16_pad_shape`, `flat_mha_bf16_pad_rows`, `ssmlp_bf16_pad_rows` |
+| Weights | `matmul_bf16_weights_create_onnx` / `_get_data`, `ssmlp_bf16_weights_create_onnx` / `_get_data` |
+| Tensors | `create_device_tensor`, `tensor_write`, `tensor_read`, `tensor_get_byte_size`, `tensor_get_data_type` |
+| Stream | `create_stream`, `stream_synchronize` |
+| Lifecycle | `get_version`, `has_device_context`, `selftest_dependencies`, `object_release`, `cleanup` |
+| Errors | `get_last_error_message`, `status_to_string` |
+
+Two conventions that bite if forgotten:
+
+- **Counts and offsets are elements, never bytes.** `tensor_write` and
+  `tensor_read` take element counts and convert dtype on the way.
+- **Exactly two host-side conversions exist.** FP16 → FP32 widening (lossless,
+  bounds-checked), and FP32 → BF16 round-to-nearest-even for the SSMLP epsilon
+  and the two norm weights. Everything else crosses the boundary unconverted.
+
+## Model constants
+
+From `src/include/models/phi4/phi4_corelib_constants.hpp`, all validated
+against the published ONNX:
+
+| | |
+|---|---|
+| Layers | 32 |
+| Hidden / intermediate | 3072 / 8192 |
+| Query heads / KV heads | 24 / 8 |
+| Head size | 128 |
+| Query dim / KV dim | 3072 / 1024 |
+| Vocabulary | 200064 |
+| Quantisation group | 128 |
+| RoPE dimension | 96 |
+| RMS epsilon | 1e-5 |
+| Max sequence | 4096 |
+| **Max decode window** | **4095** (`kMaxSequenceLength - 1`) |
+
+The last row is not a typo — see the caveats page.
+
+## What ships
+
+**Model tag** `phi4-mini-it-aie4:4b`, built from
+[`amd/phi-4-mini-instruct-oga-dml`](https://huggingface.co/amd/phi-4-mini-instruct-oga-dml)
+at revision `e751fb68`, plus four overlay files whose SHA-256 values are pinned
+in the catalog.
+
+**Installer**: the AIE4 runtime is an **optional MSI feature**
+(`Aie4Feature`). It stages `ryzenai_corelib.dll`, DynamicDispatch and RyzenMM
+into an `aie4` directory beside `flm.exe`, together with `aie4-closure.txt` —
+a manifest naming the corelib version, the corelib DLL's SHA-256, and the name
+and SHA-256 of every DLL staged with it.
+
+## Execution notes
+
+- **Four stream synchronizes per layer.** AIE4 completion is not ordered by
+  submission, so a dispatch whose input another dispatch is still writing must
+  be separated by an explicit synchronize.
+- **RoPE is applied host-side** as a strided gather followed by a single
+  `tensor_write`. FP32 scale tensors are rejected rather than silently narrowed.
+- **The host stays FP32**; corelib narrows on write.
+- **Unbounded generation is capped.** `kMaxDecodeWindow` bounds every decode
+  path, which closed a defect where an ungated generation could exhaust the
+  server.
+
+## What was verified
+
+**On `xcomedusad-43`** — a 20-step acceptance run against the real model in one
+uninterrupted pass. Five single-turn probes, five coherent and factually
+correct, roughly ten seconds each after a ~20 s model load. Recorded step by
+step and criterion by criterion in the
+[acceptance record](../benchmarks/phi4_aie4_acceptance/), with its own
+corrections in the
+[provenance page](../benchmarks/phi4_aie4_acceptance_provenance/).
+
+Final acceptance tally: **16 steps met, 1 not met, 3 not exercised**;
+**12 of 52 criteria met, 12 partial, 2 not met, 26 not exercised**.
+
+**On `xcomedusad-44`** — a machine that took no part in development, given the
+shipped MSI, the model package, and a conda environment reproduced from an
+explicit package list. The model loads and generates. Read the caveats page
+before concluding what this does and does not prove.
+
+## Scale
+
+| | |
+|---|---|
+| Commits | 112 |
+| Files changed | 273 (**188 of them tests**) |
+| Lines | +73,416 / −289 |
+| `ctest` | 17 passed, 0 failed, 4 skipped |
+| Python tooling | 312 passed |
+| Offline acceptance guards | 72 assertions, both PowerShell hosts |
+
+The test share is the point rather than an accident: most real defects in this
+work were found by tests and review, not by the compiler.

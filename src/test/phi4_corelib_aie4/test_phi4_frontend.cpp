@@ -963,6 +963,178 @@ void TestEndpointLimitsAtLoweredCap() {
     }
 }
 
+// I13. The same /api/chat body must be admitted the same way whichever
+// backend serves it.
+//
+// `num_predict` is Ollama's field and it carries sentinels: -1 is "generate
+// forever" and -2 is "fill context". GenerationLoopLimit returns both
+// verbatim, and BOTH generation loops -- generate_aie4 and the shared legacy
+// one -- gate on `length_limit > 0`, so both already read them as "no bound".
+//
+// RequestedMaxNewTokens used to hand that same -1 to validate_aie4_capacity
+// as an output token COUNT, and the count guard refuses anything negative.
+// So POST /api/chat {"options":{"num_predict":-1}} answered HTTP 400 on the
+// AIE4 tag and HTTP 200 on every other backend -- and asking explicitly for
+// the unbounded behaviour was refused where OMITTING the field allowed it.
+//
+// This pins the observable outcome -- admitted, or the 400 -- for every
+// sentinel, against a real AIE4-backed Phi4 and a real legacy-backed Phi4
+// built in the same process from the same package, driven from request
+// bodies rather than from hand-built ParsedGenerationLimit values. The
+// over-cap positive case is here so that a "fix" which simply removed the
+// admission rule would fail this test rather than pass it.
+void TestNumPredictSentinelsAdmitIdenticallyOnBothBackends() {
+    TempModelPackage package;
+    FactoryScope factory;
+
+    auto aie4 = Load(
+        package,
+        ModelInfo(4096, "corelib_aie4"),
+        -1,
+        false,
+        nullptr);
+    auto legacy = Load(package, ModelInfo(4096));
+    CHECK(aie4->uses_corelib_aie4());
+    CHECK(!legacy->uses_corelib_aie4());
+
+    struct Case {
+        std::string_view description;
+        std::optional<int> num_predict;
+        bool aie4_admits;
+        int aie4_loop_limit;
+        int legacy_loop_limit;
+    };
+
+    // A 10-token prompt plus 4090 requested output exceeds the 4095 active
+    // cap, so 4090 is the one value here that must still be refused on AIE4.
+    const Case cases[] = {
+        {"absent", std::nullopt, true, -1, 4096},
+        {"-1 (Ollama: generate forever)", -1, true, -1, -1},
+        {"-2 (Ollama: fill context)", -2, true, -2, -2},
+        {"0", 0, true, 0, 0},
+        {"64", 64, true, 64, 64},
+        {"4090 (over the AIE4 active cap)", 4090, false, 4090, 4090},
+    };
+
+    for (const Case& test_case : cases) {
+        nlohmann::ordered_json options =
+            nlohmann::ordered_json::object();
+        if (test_case.num_predict.has_value()) {
+            options["num_predict"] = *test_case.num_predict;
+        }
+        const nlohmann::ordered_json request = {
+            {"options", std::move(options)},
+        };
+        const ParsedGenerationLimit parsed =
+            ParseGenerationLimit(
+                request,
+                RequireGenerationEndpoint("POST", "/api/chat"));
+        CHECK(
+            parsed.explicit_limit ==
+            test_case.num_predict.has_value());
+        CHECK(
+            GenerationLoopLimit(parsed, true) ==
+            test_case.aie4_loop_limit);
+        CHECK(
+            GenerationLoopLimit(parsed, false) ==
+            test_case.legacy_loop_limit);
+
+        g_encoded_tokens.assign(10, 7);
+        g_sample_tokens.clear();
+        g_sample_token = 7;
+
+        // The legacy backend serves every one of these. That is the
+        // baseline the AIE4 tag has to match, so it is asserted rather
+        // than assumed.
+        auto legacy_meta = Meta();
+        auto legacy_input = Prompt(RequestedMaxNewTokens(parsed));
+        if (!legacy->insert(legacy_meta, legacy_input)) {
+            throw std::runtime_error(
+                "legacy backend refused num_predict " +
+                std::string(test_case.description));
+        }
+        legacy->clear_context();
+
+        auto meta = Meta();
+        auto input = Prompt(RequestedMaxNewTokens(parsed));
+        if (test_case.aie4_admits) {
+            if (!aie4->insert(meta, input)) {
+                throw std::runtime_error(
+                    "AIE4 refused num_predict " +
+                    std::string(test_case.description) +
+                    " that the legacy backend served");
+            }
+            aie4->clear_context();
+        } else {
+            CheckRequestError(
+                [&] { (void)aie4->insert(meta, input); },
+                400,
+                false,
+                "exceeds the active context cap");
+        }
+    }
+}
+
+// 0 is in the non-positive bucket deliberately, not by accident.
+//
+// Both generation loops test `length_limit > 0`, so an explicit 0 is read as
+// "no bound" exactly like -1 and -2 and runs to the backend's cap. Whether
+// an explicit 0 OUGHT to mean "emit nothing" is a question about those two
+// loops and about the legacy backend, not about the AIE4 admission rule, and
+// this change does not decide it. What it does do is write the behaviour
+// down: if either loop's treatment of 0 moves, this fails.
+void TestNonPositiveLimitsGenerateToTheCapOnBothBackends() {
+    TempModelPackage package;
+    FactoryScope factory;
+
+    constexpr int kCap = 16;
+    auto aie4 = Load(
+        package,
+        ModelInfo(kCap, "corelib_aie4"),
+        -1,
+        false,
+        nullptr);
+    auto legacy = Load(package, ModelInfo(kCap));
+
+    for (const int num_predict : {-1, -2, 0}) {
+        const nlohmann::ordered_json request = {
+            {"options", {{"num_predict", num_predict}}},
+        };
+        const ParsedGenerationLimit parsed =
+            ParseGenerationLimit(
+                request,
+                GenerationEndpoint::OllamaChat);
+        CHECK(parsed.explicit_limit);
+        CHECK(parsed.value == num_predict);
+        // The admission rule sees no budget at all -- same as omission.
+        CHECK(!RequestedMaxNewTokens(parsed).has_value());
+
+        for (Phi4* model : {aie4.get(), legacy.get()}) {
+            model->clear_context();
+            g_encoded_tokens = {41};
+            // Never an end token: only the cap can stop these loops.
+            g_sample_tokens.clear();
+            g_sample_token = 7;
+
+            auto meta = Meta();
+            auto input = Prompt(RequestedMaxNewTokens(parsed));
+            CHECK(model->insert(meta, input));
+            std::ostringstream output;
+            (void)model->generate(
+                meta,
+                GenerationLoopLimit(
+                    parsed,
+                    model->uses_corelib_aie4()),
+                output);
+            CHECK(model->get_current_context_length() == kCap);
+        }
+        // The AIE4 loop reports the truncation; the legacy one leaves
+        // stop_reason at EOT_DETECTED when it exits on MAX_L, which is a
+        // pre-existing legacy quirk this change does not touch.
+        CHECK(aie4->uses_corelib_aie4());
+    }
+}
+
 void TestLengthStopCommitsTokensBeforeForcedAppend() {
     TempModelPackage package;
     FactoryScope factory;
@@ -1046,9 +1218,9 @@ void TestEosStopCommitsTokenBeforeCapUpdateAndAppend() {
 // Measured on the AIE4 target 2026-09-02: a default /api/chat request with no
 // limit field ran the decode loop to position 4095, where the token attention
 // kernel has no 4096-wide window. The refusal arrives from flat_mha after q, k
-// and v have been submitted in the same step, so it is past the irrevocable
-// boundary and the process was TERMINATED, taking the server with it. The
-// fatal record read:
+// and v have been submitted in the same step, so under the then-current
+// per-step irrevocable boundary the process was TERMINATED, taking the server
+// with it. The fatal record read:
 //
 //   {"status":3,"call":"flat_mha","phase":"flat_mha","layer":0,"rows":1,
 //    "position":4095,
@@ -1063,6 +1235,12 @@ void TestEosStopCommitsTokenBeforeCapUpdateAndAppend() {
 // This pins the boundary WITHOUT relying on EOS arriving: the sampler here
 // never emits an end token, which is exactly the condition under which the
 // defect fired.
+//
+// The boundary is now per submission group, so the same refusal would be
+// recoverable rather than fatal. That does not make this bound optional: the
+// refusal still arrives after the step's V scatter, so the caller still loses
+// the whole conversation to a 500 where this stops one step earlier and
+// returns an ordinary MAX_LENGTH_REACHED truncation.
 void TestDecodeStopsBelowTheTokenAttentionWindow() {
     TempModelPackage package;
     FactoryScope factory;
@@ -1623,6 +1801,8 @@ int main() {
         TestRenderedCapacityIsAtomic();
         TestDefaultChatLimitWithoutExplicitRequestIsAdmitted();
         TestEndpointLimitsAtLoweredCap();
+        TestNumPredictSentinelsAdmitIdenticallyOnBothBackends();
+        TestNonPositiveLimitsGenerateToTheCapOnBothBackends();
         TestLengthStopCommitsTokensBeforeForcedAppend();
         TestEosStopCommitsTokenBeforeCapUpdateAndAppend();
         TestDecodeStopsBelowTheTokenAttentionWindow();

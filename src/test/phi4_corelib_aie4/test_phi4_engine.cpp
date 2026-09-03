@@ -745,11 +745,20 @@ enum class FailurePoint {
     None,
     FirstQ,
     KAfterQ,
+    // Layer 1's k, i.e. a dispatch rejected after layer 0's q has been
+    // submitted and AFTER four completed synchronizes have cleared the
+    // submission flag. Proves the flag re-arms.
+    KAfterQLayerOne,
     Synchronize,
     DestructionSynchronize,
     StageBadAlloc,
     ScatterBadAlloc,
-    ScatterUnknown
+    ScatterUnknown,
+    // The V read of layer 3, thirteen synchronizes into the step.
+    ScatterBadAllocDeepLayer,
+    // flat_mha refused at layer 0, after the q/k/v synchronize. This is the
+    // shape of the 4096-token-window refusal seen on hardware.
+    MhaRefusedAfterSynchronize
 };
 
 struct UnknownFailure final {};
@@ -1155,6 +1164,11 @@ ryzenai_corelib_status RecordingTensorRead(
         if (state.failure == FailurePoint::ScatterBadAlloc) {
             throw std::bad_alloc{};
         }
+        if (
+            state.failure == FailurePoint::ScatterBadAllocDeepLayer &&
+            state.active_layer == 3) {
+            throw std::bad_alloc{};
+        }
         if (state.failure == FailurePoint::ScatterUnknown) {
             throw UnknownFailure{};
         }
@@ -1303,6 +1317,12 @@ ryzenai_corelib_status RecordingMatMul(
         flm::test::SetLastErrorMessage("injected k failure");
         return ryzenai_corelib_status_failure;
     }
+    if (
+        state.failure == FailurePoint::KAfterQLayerOne &&
+        weight->label == "k_1") {
+        flm::test::SetLastErrorMessage("injected layer-1 k failure");
+        return ryzenai_corelib_status_failure;
+    }
 
     const std::int64_t padded_rows =
         MatMulPaddedRows(state, weight->desc, rows);
@@ -1424,6 +1444,17 @@ ryzenai_corelib_status RecordingFlatMha(
     if (v_cache->label.starts_with("tensor_")) {
         v_cache->label =
             "v_cache_" + std::to_string(state.active_layer);
+    }
+    if (
+        state.failure == FailurePoint::MhaRefusedAfterSynchronize &&
+        state.active_layer == 0) {
+        // The refusal corelib raises for an unservable attention window.
+        // It is raised before flat_mha touches the device, so nothing was
+        // enqueued -- and the q/k/v synchronize has already completed, so
+        // nothing earlier is outstanding either.
+        flm::test::SetLastErrorMessage(
+            "no token attention kernel ships for a 4096-token window");
+        return ryzenai_corelib_status_unsupported;
     }
     state.events.emplace_back("flat_mha");
     state.mha_calls.push_back(
@@ -2257,19 +2288,20 @@ void TestRecoverablePreSubmitFailures(
 
 // The engine's own guard on the token attention window.
 //
-// This is the layer that makes the crash survivable for ANY caller, including
-// one that never consults the frontend's aie4_active_cap() -- a different
-// frontend, a direct embedder, or a future endpoint. The frontend bound is the
-// one that produces a nice truncation; this one is the one that stops a
-// process kill, so it needs its own test rather than being covered by
-// implication.
+// This is the layer that protects ANY caller, including one that never
+// consults the frontend's aie4_active_cap() -- a different frontend, a direct
+// embedder, or a future endpoint. The frontend bound is the one that produces
+// a nice truncation; this one is the backstop, so it needs its own test rather
+// than being covered by implication.
 //
 // Measured on hardware: a rows=1 step at position 4095 asks for a 4096-token
 // window, which the shipped token attention kernel refuses. That refusal
-// arrives from flat_mha AFTER q, k and v are submitted in the same step, so
-// the failure policy correctly treats it as irrevocable and terminates. The
-// whole point of checking here is to reach the same conclusion BEFORE
-// anything is submitted, where it is merely an exception.
+// arrives from flat_mha mid-step, after q, k and v have been submitted and
+// this layer's V cache has been scattered. It used to take the whole process
+// with it; since the irrevocable boundary became per submission group it is
+// recoverable, but the caller still loses the conversation. The whole point
+// of checking here is to reach the same conclusion BEFORE anything is
+// submitted, where it costs nothing at all.
 void TestDecodeWindowRefusedBeforeSubmit(
     const SyntheticPackage& package) {
     EngineFixture fixture(package);
@@ -2338,6 +2370,120 @@ void CheckFatalFailure(
     check_record(fixture.FatalRecord());
 }
 
+// I14. The irrevocable boundary is per submission group, not per step.
+//
+// `submission` answers exactly one question: is there dispatched work whose
+// completion state this process cannot know? A successful stream_synchronize
+// is a full barrier -- corelib waits every outstanding command and empties
+// its own outstanding list -- so past one, the answer is no.
+//
+// It used to be latched for the whole of RunRows. After layer 0's first
+// matmul, ~100 further dispatches and every host operation between them were
+// classified irrevocable, so a bad_alloc in the V scatter or an overflow in a
+// padding write killed the server (exit 0xE0040001) at a point where the
+// stream was provably quiescent. The four cases below are the ones that used
+// to terminate and must not.
+//
+// The engine's only lasting state at these points is partially-updated KV
+// caches, and the recoverable contract is that the caller throws the session
+// away -- which the frontend does, via clear_after_corelib_error(). So each
+// case also asserts that the process survives, that no fatal record was
+// written, that the logical position did NOT advance, and that a clean
+// prefill still works on the same engine afterwards.
+void TestFailuresPastACompletedSynchronizeAreRecoverable(
+    const SyntheticPackage& package) {
+    const auto check_recoverable =
+        [&](FailurePoint failure, auto&& run) {
+            EngineFixture fixture(package);
+            fixture.state.failure = failure;
+            std::vector<int> prompt{1, 2};
+            run(fixture, prompt);
+            CHECK(!fixture.state.terminator_called);
+            CHECK(fixture.runtime->state() == ProcessState::Healthy);
+            // Nothing was committed: RunRows advances `position` only on a
+            // clean return.
+            CHECK(fixture.engine->get_current_context_length() == 0);
+
+            // And the engine is still usable. The caller is expected to
+            // clear the session, but a recoverable classification that left
+            // the engine wedged would be a lie.
+            fixture.state.failure = FailurePoint::None;
+            std::vector<int> retry{3, 4};
+            (void)fixture.engine->prefill(retry);
+            CHECK(fixture.engine->get_current_context_length() == 2);
+        };
+
+    // A host allocation failure in the V scatter, one synchronize into the
+    // step. Previously terminated with a v_scatter fatal record.
+    check_recoverable(
+        FailurePoint::ScatterBadAlloc,
+        [](EngineFixture& fixture, std::vector<int>& prompt) {
+            bool threw = false;
+            try {
+                (void)fixture.engine->prefill(prompt);
+            } catch (const std::bad_alloc&) {
+                threw = true;
+            }
+            CHECK(threw);
+        });
+
+    // The same, thirteen synchronizes in: the flag must stay clear across
+    // every one of them, not just the first.
+    check_recoverable(
+        FailurePoint::ScatterBadAllocDeepLayer,
+        [](EngineFixture& fixture, std::vector<int>& prompt) {
+            bool threw = false;
+            try {
+                (void)fixture.engine->prefill(prompt);
+            } catch (const std::bad_alloc&) {
+                threw = true;
+            }
+            CHECK(threw);
+            CHECK(fixture.state.synchronize_calls == 13u);
+        });
+
+    // A non-standard exception takes the same route through catch(...).
+    check_recoverable(
+        FailurePoint::ScatterUnknown,
+        [](EngineFixture& fixture, std::vector<int>& prompt) {
+            bool threw = false;
+            try {
+                (void)fixture.engine->prefill(prompt);
+            } catch (const UnknownFailure&) {
+                threw = true;
+            }
+            CHECK(threw);
+        });
+
+    // A REJECTED DISPATCH after a completed synchronize. This is the wider
+    // half of the change and it is deliberate: checked_submit sets the flag
+    // only after api->Check succeeds, because a rejected dispatch enqueued
+    // nothing -- the same reason a rejected FIRST dispatch of a step has
+    // always been recoverable. Confirmed against the corelib sources: every
+    // refusal in matmul_bf16, ssmlp_bf16 and flat_mha_bf16 precedes that
+    // call's enqueue point, and the 4096-token-window refusal modelled here
+    // is the first statement of flat_mha's Execute().
+    check_recoverable(
+        FailurePoint::MhaRefusedAfterSynchronize,
+        [](EngineFixture& fixture, std::vector<int>& prompt) {
+            bool threw = false;
+            try {
+                (void)fixture.engine->prefill(prompt);
+            } catch (const CorelibError& error) {
+                threw = true;
+                CHECK(error.call == "flat_mha");
+                CHECK(
+                    error.status ==
+                    ryzenai_corelib_status_unsupported);
+                CHECK(
+                    error.detail.find("4096-token window") !=
+                    std::string::npos);
+            }
+            CHECK(threw);
+            CHECK(fixture.state.synchronize_calls == 1u);
+        });
+}
+
 void TestIrrevocableFailurePolicies(
     const SyntheticPackage& package) {
     CheckFatalFailure(
@@ -2372,35 +2518,24 @@ void TestIrrevocableFailurePolicies(
             CHECK(record.at("position") == 0);
         });
 
+    // The flag RE-ARMS. Clearing it on synchronize would be a much worse
+    // defect than the one it fixes if it disarmed the boundary for the rest
+    // of the step: layer 1's q is submitted after four completed
+    // synchronizes have cleared it, and layer 1's k is then rejected with
+    // that q outstanding and unsynchronized. That must still terminate.
     CheckFatalFailure(
         package,
-        FailurePoint::ScatterBadAlloc,
+        FailurePoint::KAfterQLayerOne,
         [](const json& record) {
             CHECK(record.at("status") ==
                   ryzenai_corelib_status_failure);
-            CHECK(record.at("call") == "host_exception");
+            CHECK(record.at("call") == "k");
             CHECK(
-                record.at("detail")
-                    .get<std::string>()
-                    .find("alloc") != std::string::npos);
-            CHECK(record.at("phase") == "v_scatter");
-            CHECK(record.at("layer") == 0);
+                record.at("detail") == "injected layer-1 k failure");
+            CHECK(record.at("phase") == "qkv");
+            CHECK(record.at("layer") == 1);
             CHECK(record.at("rows") == 2);
             CHECK(record.at("position") == 0);
-        });
-
-    CheckFatalFailure(
-        package,
-        FailurePoint::ScatterUnknown,
-        [](const json& record) {
-            CHECK(record.at("status") ==
-                  ryzenai_corelib_status_failure);
-            CHECK(record.at("call") == "unknown_exception");
-            CHECK(
-                record.at("detail") ==
-                "non-standard exception after the irrevocable boundary");
-            CHECK(record.at("phase") == "v_scatter");
-            CHECK(record.at("layer") == 0);
         });
 }
 
@@ -2628,6 +2763,7 @@ int wmain(int argc, wchar_t* argv[]) {
         TestRecoverablePreSubmitFailures(package);
         TestDecodeWindowRefusedBeforeSubmit(package);
         TestDestructorSynchronizeFailureChild(package);
+        TestFailuresPastACompletedSynchronizeAreRecoverable(package);
         TestIrrevocableFailurePolicies(package);
         TestSynchronizeFailureTerminatesWithoutSubmissionFlag();
         std::cout << "test_phi4_engine: PASS\n";

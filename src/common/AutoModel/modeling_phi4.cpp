@@ -401,7 +401,11 @@ std::string Phi4::apply_chat_template(nlohmann::ordered_json& messages, nlohmann
 // token attention kernel supports no window above kMaxDecodeWindow -- one
 // below kMaxSequenceLength. Admitting a request against MAX_L therefore
 // admits one that cannot finish, and the step that cannot finish fails inside
-// flat_mha after q/k/v have been submitted, which terminates the process.
+// flat_mha, mid-step, after this layer's V cache has already been scattered.
+// Measured on hardware that took the whole server down; the engine's
+// irrevocable boundary is now per submission group so the same refusal is
+// recoverable, but it still costs the caller the entire conversation. This
+// bound is what turns it into an ordinary MAX_LENGTH_REACHED truncation.
 //
 // Design 11.2 / SEQ-4 require an unbounded request to stop before the
 // user-visible total would exceed the cap. That bound existed for the explicit
@@ -416,6 +420,19 @@ size_t Phi4::aie4_active_cap() const {
 void Phi4::validate_aie4_capacity(
     size_t rendered_tokens,
     std::optional<int> requested_max_new_tokens) const {
+    // An engaged optional is a POSITIVE token budget. Both entry points --
+    // RequestedMaxNewTokens for REST and CliRequestedMaxNewTokens for the
+    // console -- now normalize every non-positive value to nullopt, because
+    // num_predict/max_tokens of -1, -2 and 0 are sentinels the generation
+    // loops read as "no bound", not counts.
+    //
+    // This guard used to be the whole of the divergence reported against
+    // this branch: it turned Ollama's documented "generate forever"
+    // sentinel into HTTP 400 on the AIE4 tag while every other backend
+    // served it 200, and it refused explicitly what omitting the field
+    // allowed. It stays as a contract check on the optional's invariant so
+    // a future caller that hands the engine a raw parsed value fails here
+    // rather than reserving a negative amount of cap.
     if (
         requested_max_new_tokens.has_value() &&
         *requested_max_new_tokens < 0) {
@@ -480,8 +497,8 @@ std::string Phi4::generate_aie4(
         this->last_token != -1 &&
         // aie4_active_cap(), not MAX_L: the last position MAX_L would
         // allow is one the token attention kernel cannot serve, and the
-        // resulting failure lands past the irrevocable boundary and kills
-        // the process. Stopping one step earlier turns that into an
+        // resulting failure arrives mid-step and costs the caller the whole
+        // conversation. Stopping one step earlier turns that into an
         // ordinary MAX_LENGTH_REACHED truncation.
         this->total_tokens < this->aie4_active_cap()) {
         if (is_cancelled()) {

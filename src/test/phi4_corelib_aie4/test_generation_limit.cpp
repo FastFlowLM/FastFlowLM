@@ -128,6 +128,102 @@ void TestEndpointDefaultsAndPropagation() {
     CHECK(RequestedMaxNewTokens(explicit_limit) == std::optional<int>(73));
 }
 
+// I13. The two readers of the same parsed field must not disagree about what
+// a non-positive value means.
+//
+// GenerationLoopLimit returns an explicit value verbatim and both generation
+// loops gate on `length_limit > 0`, so -1, -2 and 0 all mean "no bound" to
+// the loop. RequestedMaxNewTokens is the ADMISSION rule's reading -- how much
+// output the AIE4 cap must reserve room for -- and it used to hand the same
+// -1 on as a count, which validate_aie4_capacity then refused with HTTP 400.
+// The result was Ollama's documented "generate forever" sentinel answering
+// 400 on the AIE4 tag and 200 on every other backend.
+//
+// This pins the mapping for every sentinel. The end-to-end consequence --
+// admitted or 400 against a real AIE4 Phi4 and a real legacy Phi4 -- is
+// pinned by TestNumPredictSentinelsAdmitIdenticallyOnBothBackends in
+// test_phi4_frontend.cpp, which is the binary that links modeling_phi4.cpp.
+void TestNonPositiveLimitSentinelsRequestNoBudget() {
+    struct Case {
+        int num_predict;
+        std::optional<int> requested;
+    };
+    // -1 is Ollama's "generate forever", -2 its "fill context". 0 is here
+    // deliberately and not by omission: the loops read it as "no bound" too,
+    // so the admission rule must not reserve a budget for it either.
+    const Case cases[] = {
+        {-2, std::nullopt},
+        {-1, std::nullopt},
+        {0, std::nullopt},
+        {1, std::optional<int>(1)},
+        {73, std::optional<int>(73)},
+    };
+
+    for (const Case& test_case : cases) {
+        const ordered_json request = {
+            {"options", {{"num_predict", test_case.num_predict}}},
+        };
+        const ParsedGenerationLimit parsed =
+            ParseGenerationLimit(
+                request,
+                GenerationEndpoint::OllamaChat);
+        CHECK(parsed.explicit_limit);
+        CHECK(parsed.value == test_case.num_predict);
+
+        // The loop limit is unchanged: the sentinel still reaches the loop,
+        // which is what makes it mean "generate until stop".
+        CHECK(
+            GenerationLoopLimit(parsed, true) ==
+            test_case.num_predict);
+        CHECK(
+            GenerationLoopLimit(parsed, false) ==
+            test_case.num_predict);
+
+        CHECK(RequestedMaxNewTokens(parsed) == test_case.requested);
+
+        // And the REST reading now agrees with the console reading of the
+        // same number, which is where this idiom already lived.
+        CHECK(
+            RequestedMaxNewTokens(parsed) ==
+            CliRequestedMaxNewTokens(test_case.num_predict));
+    }
+
+    // Asking explicitly for the unbounded behaviour must reach the admission
+    // rule exactly as omitting the field does. That equivalence is the whole
+    // finding: omission was allowed, the explicit sentinel was refused.
+    const ParsedGenerationLimit omitted =
+        ParseGenerationLimit(
+            ordered_json{{"options", ordered_json::object()}},
+            GenerationEndpoint::OllamaChat);
+    const ParsedGenerationLimit forever =
+        ParseGenerationLimit(
+            ordered_json{{"options", {{"num_predict", -1}}}},
+            GenerationEndpoint::OllamaChat);
+    CHECK(
+        RequestedMaxNewTokens(omitted) ==
+        RequestedMaxNewTokens(forever));
+
+    // The same rule on every other endpoint's own field, so /api/chat is not
+    // special-cased into agreement.
+    for (const auto& [endpoint, field] :
+         std::vector<std::pair<GenerationEndpoint, std::string>>{
+             {GenerationEndpoint::Generate, "max_tokens"},
+             {GenerationEndpoint::OpenAiCompletion, "max_tokens"},
+             {GenerationEndpoint::OpenAiChatCompletion, "max_tokens"},
+             {GenerationEndpoint::OpenAiChatCompletion,
+              "max_completion_tokens"}}) {
+        for (const int value : {-2, -1, 0}) {
+            ordered_json request;
+            request[field] = value;
+            const ParsedGenerationLimit parsed =
+                ParseGenerationLimit(request, endpoint);
+            CHECK(parsed.explicit_limit);
+            CHECK(!RequestedMaxNewTokens(parsed).has_value());
+            CHECK(GenerationLoopLimit(parsed, true) == value);
+        }
+    }
+}
+
 // Legacy behaviour on /api/chat must not change: an omitted num_predict
 // is still the 4096 soft bound, and an explicit one is still honoured.
 void TestOllamaChatLegacyLimitIsUnchanged() {
@@ -744,6 +840,7 @@ int main() {
     try {
         TestHandlerSpecificPresence();
         TestEndpointDefaultsAndPropagation();
+        TestNonPositiveLimitSentinelsRequestNoBudget();
         TestOllamaChatLegacyLimitIsUnchanged();
         TestOllamaChatAie4LimitAndAdmission();
         TestEveryGenerationRouteIsDeclared();

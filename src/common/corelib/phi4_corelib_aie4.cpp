@@ -731,13 +731,26 @@ struct phi4_corelib_aie4::Impl final {
         }
     }
 
-    // Refused BEFORE anything is submitted, which is what makes it survivable.
+    // Refused here, before the step starts, rather than one dispatch later
+    // inside flat_mha.
     //
-    // The same condition detected one dispatch later -- inside flat_mha, after
-    // q/k/v have been submitted for this step -- is past the irrevocable
-    // boundary, and the failure policy correctly terminates the process. So
-    // this is not a duplicate of a check corelib already performs; it is the
-    // difference between a recoverable std::out_of_range and a dead server.
+    // Measured on the AIE4 target: letting the step run to flat_mha at
+    // position 4095 killed the server (exit 0xE0040001), because the whole
+    // step past its first successful submit was classified irrevocable. That
+    // classification is now per submission group -- see the note in
+    // checked_synchronize -- and the flat_mha refusal, which corelib raises
+    // before it touches the device, lands on the recoverable side. So this
+    // guard is no longer the difference between an exception and a dead
+    // server.
+    //
+    // It is still the difference between a clean refusal and a wrecked
+    // session. Reaching flat_mha means the V cache for this layer has already
+    // been scattered and the caller has to throw the whole conversation away;
+    // refusing here costs nothing, names the actual limit, and leaves the
+    // session usable at the position it had reached. It is also the only
+    // layer that protects a caller which never consults the frontend's
+    // aie4_active_cap() -- a different frontend, a direct embedder, or a
+    // future endpoint.
     void EnsureDecodeWindow(std::size_t token_count) const {
         const auto window =
             static_cast<std::int64_t>(position) +
@@ -1062,6 +1075,50 @@ struct phi4_corelib_aie4::Impl final {
                         stream.get()),
                     kSynchronizeCall);
                 synchronize_in_progress = false;
+                // The irrevocable boundary is per SUBMISSION GROUP, not per
+                // step.
+                //
+                // `submission` answers one question: is there dispatched work
+                // whose completion state this process cannot know? A
+                // successful stream_synchronize is a full barrier -- corelib
+                // waits every outstanding command and empties its own
+                // outstanding list -- so the answer becomes "no", and the
+                // classification has to say so.
+                //
+                // Latching it for the whole step meant that after the first
+                // matmul of layer 0, all ~100 remaining dispatches AND every
+                // host operation between them were treated as irrevocable.
+                // A bad_alloc in the V scatter, a CheckedElements overflow in
+                // a padding write, or a rejected tensor_write killed the
+                // server (exit 0xE0040001) at points where the stream was
+                // provably quiescent and clearing the session would have
+                // sufficed. The only lasting state at those points is
+                // partially-updated KV caches, which the frontend already
+                // discards via clear_after_corelib_error().
+                //
+                // This deliberately also moves a REJECTED DISPATCH that
+                // follows a completed synchronize -- flat_mha, o, ssmlp,
+                // lm_head -- onto the recoverable side, which is a wider
+                // change than "host failures only". It is the same rule
+                // checked_submit already applies to the first dispatch of a
+                // step: the flag is set only after api->Check succeeds,
+                // because a rejected dispatch enqueued nothing. Verified
+                // against the corelib sources rather than assumed: every
+                // refusal in matmul_bf16, ssmlp_bf16 and flat_mha_bf16
+                // precedes that call's single enqueue point, and a failed
+                // Stream::Submit pops the command back off the outstanding
+                // list. In particular the 4096-token-window refusal is the
+                // first statement of flat_mha's Execute(), ahead of the
+                // kernel lookup, the rope rebuild and the K-cache write, so
+                // it leaves the device untouched.
+                //
+                // A FAILED synchronize is not cleared: the Check above throws
+                // first, `synchronize_in_progress` stays true, and the policy
+                // terminates. That is not conservatism -- corelib clears its
+                // outstanding list on a throwing Wait() too, releasing runs
+                // and buffers whose work may still be executing, so the
+                // process genuinely cannot continue.
+                submission = corelib::StepSubmissionState{};
                 ++metrics.synchronize_count;
             };
 

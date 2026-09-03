@@ -95,9 +95,39 @@ int GenerationLoopLimit(
                : kLegacyDefaultGenerationLimit;
 }
 
+// The admission rule's view of the same parsed field. This is NOT the loop
+// limit: it is "how many output tokens must the AIE4 cap reserve room for",
+// and the only consumer is Phi4::validate_aie4_capacity.
+//
+// CHOSEN BEHAVIOUR: a non-positive value is not a token budget, so it is
+// reported as "no budget requested" -- exactly as if the field had been
+// omitted. Positive values pass through unchanged.
+//
+// Why, rather than passing the number through:
+//
+//   * Ollama documents num_predict = -1 as "generate forever" and -2 as
+//     "fill context". Both are sentinels, not counts. GenerationLoopLimit
+//     already returns them verbatim and both generation loops gate on
+//     `length_limit > 0`, so the loops correctly read them as "unbounded".
+//     Passing -1 on to the admission rule as a *count* made
+//     POST /api/chat {"options":{"num_predict":-1}} return HTTP 400 on the
+//     AIE4 tag and 200 on every other backend -- and made explicitly asking
+//     for the unbounded behaviour refuse where omitting the field allows it.
+//
+//   * 0 is deliberately in the same bucket rather than there by accident.
+//     Both loops test `length_limit > 0`, so an explicit 0 means "no bound"
+//     to the generation loop; reserving 0 output tokens at admission and
+//     then generating to the cap would be the admission rule and the loop
+//     disagreeing about the same request. Whether an explicit 0 *ought* to
+//     mean "emit nothing" is a separate question about both backends'
+//     generation loops, not about this function, and is not decided here.
+//
+//   * CliRequestedMaxNewTokens below already maps <= 0 to nullopt. The REST
+//     path did not, so the same request was admitted differently depending
+//     on which entry point it arrived through.
 std::optional<int> RequestedMaxNewTokens(
     const ParsedGenerationLimit& parsed) noexcept {
-    if (!parsed.explicit_limit) {
+    if (!parsed.explicit_limit || parsed.value <= 0) {
         return std::nullopt;
     }
     return parsed.value;

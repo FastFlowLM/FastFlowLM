@@ -90,10 +90,11 @@ the last category is large.
   take a full `messages` array and behave correctly — until this is fixed.
 - **Generation can run to the context cap.** A request with no generation
   limit is bounded only by the model emitting an end token. When it does not,
-  generation continues to the 4096-token cap; one measured turn took 182
-  seconds and produced a repeating phrase. Set an explicit limit for
-  predictable latency.
-- The context limit is 4096 tokens for the prompt and the generated tokens
-  together, counted over the complete rendered conversation. Requests over
-  that are refused before any work is submitted, with HTTP 400 on the server
-  and a message naming the cap.
+  generation continues to the cap; one measured turn took 182 seconds and
+  produced a repeating phrase. Set an explicit limit for predictable latency.
+- **The limit is 4095, not 4096**, for the prompt and the generated tokens
+  together, counted over the complete rendered conversation. The KV window is
+  4096 rows; the usable cap is one less because no token-attention kernel
+  ships for a 4096-token window. Requests over the cap are refused before any
+  work is submitted, with HTTP 400 on the server and a message naming the cap
+  and the rendered prompt length.

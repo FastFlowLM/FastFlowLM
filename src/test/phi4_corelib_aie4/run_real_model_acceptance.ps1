@@ -1984,7 +1984,13 @@ if (Test-Selected '8') {
                 continuation_route = (Get-Field $t 'continuation_route')
             }
         }
-        $ev3['per_turn'] = $rows
+        # NOT `per_turn`: Step 8 already uses that name for conversational
+        # turns, and the document's verbatim renderer keys off it. Two
+        # different row shapes under one field name crashed the renderer on
+        # `.index`, and because the renderer ran last the run still exited
+        # with its real verdict while quietly leaving the previous document
+        # in place -- a stale artifact contradicting the fresh record.
+        $ev3['positions_per_turn'] = $rows
         $missing = @($rows | Where-Object { $null -eq $_.engine_logical_position })
         $ev3['turns_without_a_position'] = $missing.Count
         if ($missing.Count -gt 0) {
@@ -3122,7 +3128,9 @@ Write-Output "  record:   $OutJson"
 # Markdown
 # ---------------------------------------------------------------------------
 
+$script:renderError = $null
 if ($Markdown) {
+  try {
     $md = New-Object System.Collections.Generic.List[string]
     $md.Add('---')
     $md.Add('layout: docs')
@@ -3280,11 +3288,11 @@ if ($Markdown) {
             $md.Add("### Step $($st.id): $($st.title)")
             $md.Add('')
             foreach ($t in @($e.per_turn)) {
-                $md.Add("**Turn $($t.index)** ($($t.seconds) s, continuation route ``$($t.continuation_route)``)")
+                $md.Add("**Turn $(Get-Field $t 'index')** ($(Get-Field $t 'seconds') s, continuation route ``$(Get-Field $t 'continuation_route')``)")
                 $md.Add('')
                 $md.Add('```')
-                $md.Add("> $($t.prompt)")
-                foreach ($line in ([string]$t.reply_verbatim -split "`r?`n")) { $md.Add($line) }
+                $md.Add("> $(Get-Field $t 'prompt')")
+                foreach ($line in ([string](Get-Field $t 'reply_verbatim') -split "`r?`n")) { $md.Add($line) }
                 $md.Add('```')
                 $md.Add('')
             }
@@ -3319,16 +3327,51 @@ if ($Markdown) {
     $md.Add('')
     $md.Add("Generated $((Get-Date).ToUniversalTime().ToString('u')) from ``$OutJson``.")
 
+    $md.Add('')
+    $md.Add("<!-- run-stamp: $script:runStamp -->")
+
     $mdDir = Split-Path -Parent $Markdown
     if ($mdDir -and -not (Test-Path $mdDir)) { New-Item -ItemType Directory -Force -Path $mdDir | Out-Null }
+    # Deleted first, then written, then READ BACK and checked for this run's
+    # stamp.
+    #
+    # The renderer runs last, so an exception in it leaves the previous
+    # document on disk while the run still exits with its real verdict. That
+    # happened: a field-name collision crashed rendering, and the committed
+    # document went on asserting a Step 9b claim the record had already
+    # retracted -- the exact "the fix reached the code but not the rendered
+    # artifact" failure this project has hit four times. A stale document must
+    # be impossible to mistake for a fresh one, so absence is the failure mode
+    # rather than staleness, and the stamp proves which run wrote it.
+    Remove-Item -LiteralPath $Markdown -Force -ErrorAction SilentlyContinue
     ($md -join "`n") | Set-Content -Path $Markdown -Encoding utf8
-    Write-Output "  document: $Markdown"
+    $written = Get-Content -LiteralPath $Markdown -Raw -ErrorAction SilentlyContinue
+    if (-not $written -or $written -notmatch [regex]::Escape("run-stamp: $script:runStamp")) {
+        throw "the acceptance document at $Markdown was not written by this run"
+    }
+    Write-Output "  document: $Markdown (run-stamp $script:runStamp)"
+  } catch {
+    # Recorded in the artifact and pushed into the exit code. A document that
+    # could not be rendered is a failed run, not a footnote.
+    $script:renderError = $_.Exception.Message
+    Set-Field 'document_render_error' $script:renderError
+    Save-Record
+    Write-Output ''
+    Write-Output "  DOCUMENT NOT RENDERED: $script:renderError"
+    Write-Output '  The JSON record is complete; the human-readable document is not.'
+  }
 }
 
 # ---------------------------------------------------------------------------
 # Exit code. Skipped work reaches it.
 # ---------------------------------------------------------------------------
 
+if ($script:renderError) {
+    Write-Output ''
+    Write-Output 'RESULT: FAILED -- the acceptance document could not be rendered, so the'
+    Write-Output 'human-readable artifact does not reflect this run.'
+    exit 1
+}
 if ($stepsNotMet -gt 0 -or $notMet -gt 0) {
     Write-Output ''
     Write-Output 'RESULT: FAILED -- at least one acceptance step or criterion is NOT MET.'

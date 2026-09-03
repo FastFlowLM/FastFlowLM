@@ -987,6 +987,25 @@ if (Test-Selected '3') {
             $ev['version_without_aie4_exit'] = $ver.ExitCode
             $ev['version_without_aie4_output'] = $ver.Text
             if ($ver.ExitCode -ne 0) { $problems += "flm version failed (exit $($ver.ExitCode)) after removing the aie4 directory" }
+
+            # The reported version must have all three components.
+            #
+            # The binary this acceptance first ran against printed "FLM v1",
+            # because an unquoted -DFLM_VERSION=1.0.4 in a PowerShell build
+            # script reaches CMake as -DFLM_VERSION=1. Nothing failed: the
+            # build succeeded and the binary ran. src/CMakeLists.txt now
+            # refuses such a value at configure time, and this asserts the
+            # same property from the other end, on the shipped artifact, so
+            # a binary built by some path that bypasses the CMake guard still
+            # cannot pass this acceptance.
+            if ($ver.Text -match 'FLM v(\S+)') {
+                $ev['reported_version'] = $Matches[1]
+                if ($Matches[1] -notmatch '^[0-9]+\.[0-9]+\.[0-9]+') {
+                    $problems += "flm version reports '$($Matches[1])', which is not a major.minor.patch version; the build's FLM_VERSION was truncated"
+                }
+            } else {
+                $problems += 'flm version printed no "FLM v<version>" line, so the compiled-in version could not be checked'
+            }
         } finally {
             if ($savedPath) { $env:RYZENAI_CORELIB_PATH = $savedPath }
         }
@@ -994,11 +1013,9 @@ if (Test-Selected '3') {
         $problems += 'could not stage a copy of the product directory to test aie4 removal'
     }
 
-    # get_version / API-5 is asserted inside test_phi4_hardware
-    # (CheckVersionIdentity), which the hardware suite runs. Recorded as a
-    # pointer, not re-implemented, and NOT claimed here as though this step
-    # checked it.
-    $ev['api5_version_gate'] = 'asserted by test_phi4_hardware CheckVersionIdentity; see the hardware suite result, not this step'
+    # API-5 is NOT claimed by this step. It is measured by Step 3b, which runs
+    # test_phi4_hardware here rather than citing a run that did not happen.
+    $ev['api5_version_gate'] = 'measured by step 3b in this same run; this step does not claim it'
 
     if ($problems.Count -eq 0) {
         Add-StepResult -Id '3' -Title 'Runtime closure on this box''s DD linkage' -Status 'met' `
@@ -1539,7 +1556,8 @@ if (Test-Selected '6') {
         # against the REAL library by test_phi4_hardware / test_real_corelib,
         # which compare the running kernel set to the fake's table. Named here,
         # not re-derived, and not claimed by this step.
-        $ev['padding_and_transition_assertions'] = 'asserted by test_phi4_hardware CheckHelperBoundaries and test_real_corelib against the fake transition list; see the hardware suite result'
+        # NOT claimed by this step. Measured by Step 6b, in this same run.
+        $ev['padding_and_transition_assertions'] = 'measured by step 6b in this same run; this step does not claim it'
 
         if ($problems.Count -eq 0) {
             Add-StepResult -Id '6' -Title 'First real load' -Status 'met' `
@@ -1553,6 +1571,132 @@ if (Test-Selected '6') {
     }
 } else {
     Add-UnselectedStep -Id '6' -Title 'First real load'
+}
+
+# ---------------------------------------------------------------------------
+# test_phi4_hardware, run here rather than pointed at
+#
+# Steps 3 and 6 used to note that the API-5 version gate and the padded-K/N and
+# row-transition assertions "are asserted by test_phi4_hardware" and carry on
+# to a `met` verdict. That is a citation, not a result: the binary was never
+# invoked by this harness, so those two criteria rested on a run that had not
+# happened. It runs once here and both steps read its output.
+#
+# It takes no arguments, requires FLM_AIE4_HARDWARE=1, holds an AIE4 device
+# context for its whole life and calls cleanup() at the end -- so it must not
+# overlap any other step that touches the device.
+# ---------------------------------------------------------------------------
+
+$script:hwRun = $null
+function Invoke-HardwareChecks {
+    if ($null -ne $script:hwRun) { return $script:hwRun }
+    $exe = Join-Path $BuildDir 'Release/test_phi4_hardware.exe'
+    if (-not (Test-Path $exe)) {
+        $script:hwRun = @{ Available = $false; Reason = "test_phi4_hardware.exe not found at $exe"; Text = ''; ExitCode = $null; Log = $null }
+        return $script:hwRun
+    }
+    $saved = $env:FLM_AIE4_HARDWARE
+    $env:FLM_AIE4_HARDWARE = '1'
+    try {
+        $r = Invoke-Capture -Exe $exe -Arguments @() -LogName 'hardware-checks.log'
+    } finally {
+        if ($saved) { $env:FLM_AIE4_HARDWARE = $saved } else { Remove-Item Env:\FLM_AIE4_HARDWARE -ErrorAction SilentlyContinue }
+    }
+    # 77 is CTest's SKIP_RETURN_CODE. A skip is not a pass and must not be
+    # read as one.
+    $script:hwRun = @{
+        Available = $true
+        Skipped = ($r.ExitCode -eq 77)
+        Reason = ''
+        Text = $r.Text
+        ExitCode = $r.ExitCode
+        Log = $r.Log
+    }
+    return $script:hwRun
+}
+
+if (Test-Selected '3') {
+    Write-Section 'Step 3b: the corelib version gate (API-5)'
+    $ev = [ordered]@{}
+    $hw = Invoke-HardwareChecks
+    $ev['exit_code'] = $hw.ExitCode
+    $ev['log'] = $hw.Log
+    if (-not $hw.Available) {
+        Add-StepResult -Id '3b' -Title 'Corelib version gate (API-5)' -Status 'not_exercised' `
+            -Detail $hw.Reason -Evidence $ev -Criteria @()
+    } elseif ($hw.Skipped) {
+        Add-StepResult -Id '3b' -Title 'Corelib version gate (API-5)' -Status 'not_exercised' `
+            -Detail "test_phi4_hardware skipped (exit 77); its own output says why" -Evidence $ev -Criteria @()
+    } else {
+        # CorelibApi::Load enforces the exact major.minor.patch match BEFORE
+        # resolving any other symbol, so loading at all means the gate passed;
+        # CheckVersionIdentity then restates it and prints both sides.
+        $line = $null
+        foreach ($l in ($hw.Text -split "`r?`n")) {
+            if ($l -match 'runtime corelib version (\S+), compiled against (\S+)') {
+                $line = $l.Trim()
+                $ev['runtime_version'] = $Matches[1]
+                $ev['compiled_against_version'] = $Matches[2]
+            }
+        }
+        $ev['version_line_verbatim'] = $line
+        $problems = @()
+        if (-not $line) { $problems += 'test_phi4_hardware printed no version identity line' }
+        elseif ($ev['runtime_version'] -ne $ev['compiled_against_version']) {
+            $problems += "runtime corelib $($ev['runtime_version']) does not equal the compiled-against $($ev['compiled_against_version'])"
+        }
+        if ($hw.ExitCode -ne 0) { $problems += "test_phi4_hardware exited $($hw.ExitCode)" }
+        if ($problems.Count -eq 0) {
+            Add-StepResult -Id '3b' -Title 'Corelib version gate (API-5)' -Status 'met' `
+                -Detail "the runtime corelib reports $($ev['runtime_version']), exactly matching the compiled-against version, and the gate runs inside CorelibApi::Load before any other symbol is resolved" `
+                -Evidence $ev -Criteria @()
+        } else {
+            $ev['problems'] = $problems
+            Add-StepResult -Id '3b' -Title 'Corelib version gate (API-5)' -Status 'not_met' `
+                -Detail ($problems -join '; ') -Evidence $ev -Criteria @()
+        }
+    }
+} else {
+    Add-UnselectedStep -Id '3b' -Title 'Corelib version gate (API-5)'
+}
+
+if (Test-Selected '6') {
+    Write-Section 'Step 6b: padded K/N and the discovered row transitions'
+    $ev = [ordered]@{}
+    $hw = Invoke-HardwareChecks
+    $ev['exit_code'] = $hw.ExitCode
+    $ev['log'] = $hw.Log
+    if (-not $hw.Available) {
+        Add-StepResult -Id '6b' -Title 'Padded K/N and row transitions against the real library' -Status 'not_exercised' `
+            -Detail $hw.Reason -Evidence $ev -Criteria @()
+    } elseif ($hw.Skipped) {
+        Add-StepResult -Id '6b' -Title 'Padded K/N and row transitions against the real library' -Status 'not_exercised' `
+            -Detail "test_phi4_hardware skipped (exit 77); its own output says why" -Evidence $ev -Criteria @()
+    } else {
+        $ev['transition_lines'] = @(($hw.Text -split "`r?`n") |
+            Where-Object { $_ -match 'transitions,' } | ForEach-Object { $_.Trim() })
+        $ev['boundaries_line'] = @(($hw.Text -split "`r?`n") |
+            Where-Object { $_ -match 'helper boundaries agree with the running kernel set' })
+        $problems = @()
+        if ($hw.ExitCode -ne 0) { $problems += "test_phi4_hardware exited $($hw.ExitCode)" }
+        if (@($ev['boundaries_line']).Count -eq 0) {
+            $problems += 'test_phi4_hardware did not report that the helper boundaries agree with the running kernel set'
+        }
+        if (@($ev['transition_lines']).Count -eq 0) {
+            $problems += 'test_phi4_hardware printed no row-transition summary'
+        }
+        if ($problems.Count -eq 0) {
+            Add-StepResult -Id '6b' -Title 'Padded K/N and row transitions against the real library' -Status 'met' `
+                -Detail "against the real library: every required MatMul padded K/N equals its logical K/N, rows = 1 stays unpadded, and the discovered row transitions agree with the running kernel set ($(@($ev['transition_lines']).Count) row uses reported)" `
+                -Evidence $ev -Criteria @()
+        } else {
+            $ev['problems'] = $problems
+            Add-StepResult -Id '6b' -Title 'Padded K/N and row transitions against the real library' -Status 'not_met' `
+                -Detail ($problems -join '; ') -Evidence $ev -Criteria @()
+        }
+    }
+} else {
+    Add-UnselectedStep -Id '6b' -Title 'Padded K/N and row transitions against the real library'
 }
 
 # ---------------------------------------------------------------------------
@@ -1680,11 +1824,17 @@ if (Test-Selected '8') {
         'I also have a cat named Mabel. What is my favourite colour?',
         'What is my cat called?',
         'In one line, name my favourite colour and my cat.')
-    # /status after every turn, so the selected continuation route and the
-    # profile are captured per turn rather than once at the end. (`/show` is
-    # the model card; `/status` is the profile. See Step 6.)
+    # /status AND /history after every turn.
+    #
+    # /status carries the continuation route and the logical KV position;
+    # /history prints the conversation the frontend believes it has, token
+    # count and all. The history probe is what turns "the model did not recall
+    # turn 1" from an observation about text into an observation about state,
+    # and an earlier version of this report cited that evidence from an ad-hoc
+    # session that was not in the record. Evidence a claim depends on belongs
+    # in the artifact.
     $interleaved = @()
-    foreach ($t in $turns) { $interleaved += $t; $interleaved += '/status' }
+    foreach ($t in $turns) { $interleaved += $t; $interleaved += '/status'; $interleaved += '/history' }
     $ev['turns_verbatim'] = $turns
     $session = Invoke-FlmConsoleSession -Turns $interleaved -Name 'step8-multiturn'
     $ev['driver_result'] = $session.Path
@@ -1695,21 +1845,44 @@ if (Test-Selected '8') {
     } else {
         $all = @($session.Json.turns)
         $perTurn = @()
-        for ($i = 0; $i -lt $all.Count; $i += 2) {
+        # Three driver turns per conversational turn: the prompt, /status,
+        # /history.
+        for ($i = 0; $i -lt $all.Count; $i += 3) {
             $reply = $all[$i].reply_raw
             $profile = if (($i + 1) -lt $all.Count) { $all[$i + 1].reply_raw } else { '' }
+            $historyText = if (($i + 2) -lt $all.Count) { $all[$i + 2].reply_raw } else { '' }
             $route = if ($profile -match 'Continuation route:\s+(\S+)') { $Matches[1] } else { $null }
             $contNs = if ($profile -match 'Continuation time:\s+(\d+) ns') { [int64]$Matches[1] } else { $null }
             $appendNs = if ($profile -match 'Warm append total:\s+(\d+) ns') { [int64]$Matches[1] } else { $null }
             $reNs = if ($profile -match 'Warm reprefill total:\s+(\d+) ns') { [int64]$Matches[1] } else { $null }
+            # The logical KV position, printed by the product.
+            #
+            # `/status` renders "Total tokens: N (M)" where N is the
+            # frontend's count and M is lm_engine->get_current_context_length(),
+            # the engine's own logical position. An earlier version of this
+            # harness recorded Step 8c as not exercised on the grounds that the
+            # product never prints the position -- while this very field sat in
+            # its own evidence for all four turns. It is parsed now.
+            $frontendPos = $null
+            $enginePos = $null
+            if ($profile -match 'Total tokens:\s*(\d+)\s*\((\d+)\)') {
+                $frontendPos = [int]$Matches[1]
+                $enginePos = [int]$Matches[2]
+            }
+            $historyTokens = $null
+            if ($historyText -match '(?m)^Tokens:\s*(\d+)') { $historyTokens = [int]$Matches[1] }
             $judged = Test-LooksLikeEnglish -Text $reply
-            $idx = [int]($i / 2) + 1
+            $idx = [int]($i / 3) + 1
             $perTurn += [ordered]@{
                 index = $idx
                 prompt = $all[$i].prompt
                 reply_verbatim = $reply
                 seconds = $all[$i].seconds
                 status_profile_verbatim = $profile
+                history_verbatim = $historyText
+                history_tokens = $historyTokens
+                frontend_position = $frontendPos
+                engine_logical_position = $enginePos
                 continuation_route = $route
                 continuation_ns = $contNs
                 warm_append_total_ns = $appendNs
@@ -1733,6 +1906,31 @@ if (Test-Selected '8') {
             if ($perTurn[3].reply_verbatim -notmatch '(?i)mabel') { $problems += 'turn 4 did not recall the name' }
         }
         $ev['routes_selected'] = @($perTurn | ForEach-Object { $_.continuation_route })
+
+        # The mechanism, not just the symptom.
+        #
+        # "The model did not recall turn 1" is an observation about text and a
+        # reader is entitled to ask whether it is just a weak model. /history
+        # answers that: it prints the conversation the frontend believes it
+        # has. If the history were accumulating, its token count would grow
+        # monotonically across turns. If each turn replaces it, the count
+        # tracks the length of the current turn instead.
+        $historyCounts = @($perTurn | ForEach-Object { $_.history_tokens })
+        $ev['history_tokens_per_turn'] = $historyCounts
+        $ev['history_verbatim_per_turn'] = @($perTurn | ForEach-Object { $_.history_verbatim })
+        $growing = $true
+        for ($k = 1; $k -lt $historyCounts.Count; $k++) {
+            if ($null -ne $historyCounts[$k] -and $null -ne $historyCounts[$k-1] -and
+                $historyCounts[$k] -le $historyCounts[$k-1]) { $growing = $false }
+        }
+        $ev['history_grows_monotonically'] = $growing
+        if (@($historyCounts | Where-Object { $null -ne $_ }).Count -lt 2) {
+            $problems += '/history reported fewer than two token counts, so history accumulation could not be measured'
+        } elseif (-not $growing) {
+            $problems += ("the conversation history is not accumulating: /history reported " +
+                          ($historyCounts -join ' then ') +
+                          ' tokens across the turns, so each turn replaces the previous history rather than appending to it')
+        }
 
         if ($problems.Count -eq 0) {
             Add-StepResult -Id '8' -Title 'Real multi-turn conversation' -Status 'met' `
@@ -1762,23 +1960,94 @@ if (Test-Selected '8') {
         -Detail 'the product exposes no control surface for the continuation route; both routes are forced and gated at the engine level in the hardware suite' `
         -Evidence $ev2 -Criteria @('C21')
 
-    Write-Section 'Step 8c: logical position tracks the rendered history'
+    Write-Section 'Step 8c: the logical KV position the product reports'
     $ev3 = [ordered]@{}
-    $ev3['why'] = @(
-        'The engine logical KV position is get_current_context_length(). It is',
-        'asserted against the rendered history by test_phi4_frontend_on',
-        '(TestEnginePositionIsAuthoritativeForCapUpdate and the forced-route',
-        'alignment tests) and by test_phi4_e2e final_position. The product CLI',
-        'does not print it -- /status reports timings, counters and byte totals,',
-        'but no position -- so this run cannot observe it per turn through the',
-        'product.')
-    Add-StepResult -Id '8c' -Title 'Logical position tracks the rendered history per turn' -Status 'not_exercised' `
-        -Detail 'the product prints no logical KV position; the invariant is asserted at the frontend and engine level, not observable here' `
-        -Evidence $ev3 -Criteria @('C22')
+    $problems3 = @()
+    $step8 = @($script:record['steps'] | Where-Object { (Get-Field $_ 'id') -eq '8' })
+    $turnsSeen = @()
+    if ($step8.Count -gt 0) { $turnsSeen = @((Get-Field (Get-Field $step8[0] 'evidence') 'per_turn')) }
+    if ($turnsSeen.Count -eq 0) {
+        Add-StepResult -Id '8c' -Title 'Logical KV position per turn' -Status 'not_exercised' `
+            -Detail 'Step 8 recorded no turns, so there is no position data to read' -Evidence $ev3 -Criteria @()
+    } else {
+        # `/status` prints "Total tokens: N (M)". N is the frontend's count and
+        # M is lm_engine->get_current_context_length() -- the engine's own
+        # logical KV position, which for this backend is impl_->position.
+        # Both are the product's own output; nothing here is inferred.
+        $rows = @()
+        foreach ($t in $turnsSeen) {
+            $rows += [ordered]@{
+                turn = (Get-Field $t 'index')
+                frontend_position = (Get-Field $t 'frontend_position')
+                engine_logical_position = (Get-Field $t 'engine_logical_position')
+                history_tokens = (Get-Field $t 'history_tokens')
+                continuation_route = (Get-Field $t 'continuation_route')
+            }
+        }
+        $ev3['per_turn'] = $rows
+        $missing = @($rows | Where-Object { $null -eq $_.engine_logical_position })
+        $ev3['turns_without_a_position'] = $missing.Count
+        if ($missing.Count -gt 0) {
+            $problems3 += "$($missing.Count) turn(s) reported no logical position"
+        }
+        # 1. Frontend and engine must agree at every turn.
+        $disagree = @($rows | Where-Object {
+            $null -ne $_.engine_logical_position -and $_.frontend_position -ne $_.engine_logical_position })
+        $ev3['turns_where_frontend_and_engine_disagree'] = @($disagree | ForEach-Object { $_.turn })
+        if ($disagree.Count -gt 0) {
+            $problems3 += "the frontend and engine positions disagree on turn(s) $(@($disagree | ForEach-Object { $_.turn }) -join ', ')"
+        }
+        # 2. The position must equal what the frontend actually rendered, and
+        #    /history reports exactly that. If they match, the position tracks
+        #    the rendered prompt faithfully -- which is the invariant. Whether
+        #    the rendered prompt is the whole CONVERSATION is Step 8's
+        #    question, and a different one.
+        $posVsHistory = @()
+        foreach ($r in $rows) {
+            if ($null -eq $r.history_tokens -or $null -eq $r.engine_logical_position) { continue }
+            $posVsHistory += [ordered]@{
+                turn = $r.turn
+                engine_position = $r.engine_logical_position
+                history_tokens = $r.history_tokens
+                equal = ($r.engine_logical_position -eq $r.history_tokens)
+            }
+        }
+        $ev3['position_vs_rendered_history'] = $posVsHistory
+        $mismatch = @($posVsHistory | Where-Object { -not $_.equal })
+        if ($posVsHistory.Count -eq 0) {
+            $problems3 += '/history reported no token counts, so the position could not be compared against the rendered history'
+        } elseif ($mismatch.Count -gt 0) {
+            $problems3 += "the logical position does not equal the rendered history length on turn(s) $(@($mismatch | ForEach-Object { $_.turn }) -join ', ')"
+        }
+        # 3. Recorded, not gated: is the position monotonic across turns? It
+        #    should be for a growing conversation, and it is not here -- but
+        #    that is Step 8's defect showing through, not a separate failure of
+        #    this invariant. Failing it twice would double-count one bug.
+        $sequence = @($rows | ForEach-Object { $_.engine_logical_position })
+        $ev3['position_sequence'] = $sequence
+        $monotonic = $true
+        for ($k = 1; $k -lt $sequence.Count; $k++) {
+            if ($null -ne $sequence[$k] -and $null -ne $sequence[$k-1] -and $sequence[$k] -lt $sequence[$k-1]) { $monotonic = $false }
+        }
+        $ev3['position_monotonic_across_turns'] = $monotonic
+        if (-not $monotonic) {
+            $ev3['non_monotonic_note'] = "the position falls between turns ($($sequence -join ' -> ')) instead of growing. That is the Step 8 history defect visible in a second, independent measurement: the frontend renders only the current turn, so the position it reaches is the length of that turn alone. It is recorded here and gated in Step 8, not gated twice."
+        }
+
+        if ($problems3.Count -eq 0) {
+            Add-StepResult -Id '8c' -Title 'Logical KV position per turn' -Status 'met' `
+                -Detail ("the product reports the engine's logical position every turn and it equals both the frontend count and the rendered history length at each of $($rows.Count) turns (sequence $($sequence -join ', ')); it is NOT monotonic, which is the Step 8 defect seen a second way") `
+                -Evidence $ev3 -Criteria @()
+        } else {
+            $ev3['problems'] = $problems3
+            Add-StepResult -Id '8c' -Title 'Logical KV position per turn' -Status 'not_met' `
+                -Detail ($problems3 -join '; ') -Evidence $ev3 -Criteria @()
+        }
+    }
 } else {
     Add-UnselectedStep -Id '8' -Title 'Real multi-turn conversation'
     Add-UnselectedStep -Id '8b' -Title 'Forcing the other continuation route from the product'
-    Add-UnselectedStep -Id '8c' -Title 'Logical position tracks the rendered history per turn'
+    Add-UnselectedStep -Id '8c' -Title 'Logical KV position per turn'
 }
 
 # ---------------------------------------------------------------------------
@@ -1890,13 +2159,13 @@ if (Test-Selected '9') {
         # the wrong fact comes back -- which a status-code check would miss
         # entirely.
         $bodyA = '{"model":"' + $ModelTag + '","messages":[' +
-            '{"role":"user","content":"My password word is ELEPHANT. Reply OK."},' +
+            '{"role":"user","content":"Remember this codeword: ELEPHANT. Reply OK."},' +
             '{"role":"assistant","content":"OK"},' +
-            '{"role":"user","content":"What is my password word? Answer with the single word."}],"stream":false}'
+            '{"role":"user","content":"What was the codeword? Answer with the single word."}],"stream":false}'
         $bodyB = '{"model":"' + $ModelTag + '","messages":[' +
-            '{"role":"user","content":"My password word is TROMBONE. Reply OK."},' +
+            '{"role":"user","content":"Remember this codeword: TROMBONE. Reply OK."},' +
             '{"role":"assistant","content":"OK"},' +
-            '{"role":"user","content":"What is my password word? Answer with the single word."}],"stream":false}'
+            '{"role":"user","content":"What was the codeword? Answer with the single word."}],"stream":false}'
         $fa = Join-Path $script:artifactDir 'step9b-a.req.json'
         $fb = Join-Path $script:artifactDir 'step9b-b.req.json'
         $ra = Join-Path $script:artifactDir 'step9b-a.resp.json'
@@ -1931,19 +2200,62 @@ if (Test-Selected '9') {
         if ($ev2['a_http'] -ne '200') { $problems2 += "concurrent client A returned HTTP $($ev2['a_http'])" }
         if ($ev2['b_http'] -ne '200') { $problems2 += "concurrent client B returned HTTP $($ev2['b_http'])" }
         if ($script:server.HasExited) { $problems2 += "the server terminated during the concurrent run (exit 0x{0:X})" -f $script:server.ExitCode }
-        # KV corruption is the real failure mode, and it is silent.
-        if ($textA -match '(?i)TROMBONE') { $problems2 += 'conversation A''s reply contains conversation B''s secret: KV state leaked between requests' }
-        if ($textB -match '(?i)ELEPHANT') { $problems2 += 'conversation B''s reply contains conversation A''s secret: KV state leaked between requests' }
+
+        # ISOLATION is the gate. RECALL is reported and never assumed.
+        #
+        # These are two different claims and an earlier version of this step
+        # collapsed them, hard-coding "each recalled only its own secret" into
+        # the success message while the run had already recorded
+        # b_recalled_own_secret = false. The reply was a safety refusal -- the
+        # question was phrased as "what is my password word", which the model
+        # declines -- so the recall half simply did not happen, and the record
+        # asserted that it had. The prompt is now a neutral codeword so that
+        # recall is answerable, but the important change is structural: the
+        # gate is leakage, the recall result is computed and reported whatever
+        # it is, and the success message is BUILT from the measurements rather
+        # than written next to them.
+        $leakAintoB = ($textB -match '(?i)ELEPHANT')
+        $leakBintoA = ($textA -match '(?i)TROMBONE')
         $ev2['a_recalled_own_secret'] = ($textA -match '(?i)ELEPHANT')
         $ev2['b_recalled_own_secret'] = ($textB -match '(?i)TROMBONE')
-        # Serialization, observed rather than asserted: if the two requests had
-        # run concurrently the wall clock would be about max(a,b); serialized it
-        # is about a+b. Reported with that reasoning attached, because this is
-        # an inference from timing and not a direct observation of the lock.
+        $ev2['a_contains_b_secret'] = $leakBintoA
+        $ev2['b_contains_a_secret'] = $leakAintoB
+        if ($leakBintoA) { $problems2 += 'conversation A''s reply contains conversation B''s codeword: KV state leaked between requests' }
+        if ($leakAintoB) { $problems2 += 'conversation B''s reply contains conversation A''s codeword: KV state leaked between requests' }
+
+        # A conversation that answered nothing cannot demonstrate isolation.
+        #
+        # If NEITHER reply recalls its own codeword, "no leakage" is vacuous --
+        # two refusals contain no secrets and would pass a leak check while
+        # showing nothing about whether the histories were kept apart. At least
+        # one side has to have actually used its own history.
+        $recallCount = @(@($ev2['a_recalled_own_secret'], $ev2['b_recalled_own_secret']) | Where-Object { $_ }).Count
+        $ev2['own_recall_count'] = $recallCount
+        if ($recallCount -eq 0) {
+            $problems2 += 'neither reply recalled its own codeword, so the absence of the other conversation''s codeword shows nothing about isolation'
+        }
+        $ev2['isolation_basis'] = "client A recalled its own codeword: $($ev2['a_recalled_own_secret']); client B: $($ev2['b_recalled_own_secret']); neither reply contained the other's. Isolation is demonstrated by at least one side using its own history while showing no trace of the other's."
+
+        # Serialization is NOT established by these numbers, and this step no
+        # longer pretends otherwise.
+        #
+        # The previous version reasoned that serialized execution predicts the
+        # wall clock tracking the later completion. Its own measurements matched
+        # neither that prediction nor its opposite -- wall 10.56 s against
+        # max(a,b) 8.19 s and a+b 12.95 s -- because the two requests do
+        # different amounts of work and each client's timer includes the time it
+        # spent queued. Two unequal requests cannot separate "serialized" from
+        # "interleaved" by wall clock at all.
+        #
+        # Timings are still recorded, because they are real and someone may want
+        # them. What is removed is the inference. Measuring serialization
+        # properly needs equal-work requests compared against a single-request
+        # baseline, or instrumentation inside the server; Step 9c below does the
+        # former.
         if ($null -ne $ev2['a_seconds'] -and $null -ne $ev2['b_seconds']) {
             $sum = $ev2['a_seconds'] + $ev2['b_seconds']
             $max = [math]::Max($ev2['a_seconds'], $ev2['b_seconds'])
-            $ev2['serialization_evidence'] = "wall $($ev2['wall_seconds'])s vs max(a,b) $([math]::Round($max,3))s and a+b $([math]::Round($sum,3))s; serialized execution predicts the wall clock tracks the LATER completion, and both clients' own durations overlap because each waits its turn"
+            $ev2['timings_note'] = "wall $($ev2['wall_seconds'])s, max(a,b) $([math]::Round($max,3))s, a+b $([math]::Round($sum,3))s. These do not distinguish serialized from interleaved execution: the two requests are not equal work and each client's timer includes its queue wait. Recorded, not interpreted."
         }
     } catch {
         $problems2 += "concurrent client run failed: $($_.Exception.Message)"
@@ -1951,17 +2263,87 @@ if (Test-Selected '9') {
         Stop-FlmServer
     }
     if ($problems2.Count -eq 0) {
-        Add-StepResult -Id '9b' -Title 'Two concurrent clients, serialized, no KV leakage' -Status 'met' `
-            -Detail 'both conversations completed with HTTP 200, each recalled only its own secret, and neither reply contained the other conversation''s' `
-            -Evidence $ev2 -Criteria @('C36')
+        Add-StepResult -Id '9b' -Title 'Two concurrent conversations stay isolated' -Status 'met' `
+            -Detail ("both conversations returned HTTP 200 with the server alive; own-codeword recall was A=$($ev2['a_recalled_own_secret']) B=$($ev2['b_recalled_own_secret']) ($recallCount of 2), and neither reply contained the other conversation's codeword") `
+            -Evidence $ev2 -Criteria @()
     } else {
         $ev2['problems'] = $problems2
-        Add-StepResult -Id '9b' -Title 'Two concurrent clients, serialized, no KV leakage' -Status 'not_met' `
-            -Detail ($problems2 -join '; ') -Evidence $ev2 -Criteria @('C36')
+        Add-StepResult -Id '9b' -Title 'Two concurrent conversations stay isolated' -Status 'not_met' `
+            -Detail ($problems2 -join '; ') -Evidence $ev2 -Criteria @()
+    }
+
+    # -----------------------------------------------------------------------
+    # Step 9c: serialization, measured against a single-request baseline
+    # -----------------------------------------------------------------------
+    Write-Section 'Step 9c: are complete requests serialized?'
+    $ev3 = [ordered]@{}
+    $problems3 = @()
+    try {
+        Start-FlmServer
+        # Equal work on both sides, and a baseline for one of them alone.
+        #
+        # With identical requests, serialized execution predicts the two
+        # concurrent requests together take about twice a single one, and
+        # genuinely parallel execution predicts about the same as one. Those
+        # two predictions are far enough apart to tell apart, which is the
+        # property the previous attempt lacked.
+        $body = '{"model":"' + $ModelTag + '","prompt":"Count from one to twenty in words.","stream":false,"max_tokens":48}'
+        $single = Invoke-Rest -Path '/api/generate' -Body $body -Name 'step9c-baseline'
+        $ev3['baseline_http'] = $single.Code
+        $ev3['baseline_seconds'] = $single.Seconds
+        if ($single.Code -ne '200') { $problems3 += "the single-request baseline returned HTTP $($single.Code)" }
+
+        $f1 = Join-Path $script:artifactDir 'step9c.req.json'
+        Set-Content -Path $f1 -Value $body -Encoding utf8
+        $m1 = Join-Path $script:artifactDir 'step9c-1.meta'
+        $m2 = Join-Path $script:artifactDir 'step9c-2.meta'
+        $t0 = Get-Date
+        $p1 = Start-Process -FilePath 'curl.exe' -PassThru -NoNewWindow -ArgumentList @(
+            '-s', '-o', 'NUL', '-w', '%{http_code}', '-X', 'POST',
+            "http://127.0.0.1:$Port/api/generate", '-H', 'Content-Type: application/json',
+            '--data-binary', "@$f1", '--max-time', '900') -RedirectStandardOutput $m1
+        $p2 = Start-Process -FilePath 'curl.exe' -PassThru -NoNewWindow -ArgumentList @(
+            '-s', '-o', 'NUL', '-w', '%{http_code}', '-X', 'POST',
+            "http://127.0.0.1:$Port/api/generate", '-H', 'Content-Type: application/json',
+            '--data-binary', "@$f1", '--max-time', '900') -RedirectStandardOutput $m2
+        $p1.WaitForExit(); $p2.WaitForExit()
+        $ev3['concurrent_wall_seconds'] = [math]::Round(((Get-Date) - $t0).TotalSeconds, 3)
+        $ev3['c1_http'] = (Get-Content $m1 -Raw -ErrorAction SilentlyContinue)
+        $ev3['c2_http'] = (Get-Content $m2 -Raw -ErrorAction SilentlyContinue)
+        if ($ev3['c1_http'] -notmatch '200' -or $ev3['c2_http'] -notmatch '200') {
+            $problems3 += "concurrent equal-work requests returned $($ev3['c1_http']) and $($ev3['c2_http'])"
+        }
+        if ($single.Seconds -gt 0) {
+            $ratio = $ev3['concurrent_wall_seconds'] / $single.Seconds
+            $ev3['concurrent_over_single_ratio'] = [math]::Round($ratio, 3)
+            $ev3['prediction'] = 'serialized predicts about 2.0; genuinely parallel predicts about 1.0'
+            # A generous band. The point is to separate 1 from 2, not to
+            # measure the constant.
+            if ($ratio -lt 1.5) {
+                $problems3 += ("two equal-work requests completed in {0}x the time of one, which is not consistent with serialization" -f $ev3['concurrent_over_single_ratio'])
+            }
+        } else {
+            $problems3 += 'the baseline took no measurable time, so the ratio means nothing'
+        }
+    } catch {
+        $problems3 += "serialization probe failed: $($_.Exception.Message)"
+        $ev3['error'] = $_.Exception.Message
+    } finally {
+        Stop-FlmServer
+    }
+    if ($problems3.Count -eq 0) {
+        Add-StepResult -Id '9c' -Title 'Complete requests are serialized' -Status 'met' `
+            -Detail ("two equal-work concurrent requests took $($ev3['concurrent_over_single_ratio'])x a single one (serialized predicts ~2.0, parallel ~1.0)") `
+            -Evidence $ev3 -Criteria @()
+    } else {
+        $ev3['problems'] = $problems3
+        Add-StepResult -Id '9c' -Title 'Complete requests are serialized' -Status 'not_met' `
+            -Detail ($problems3 -join '; ') -Evidence $ev3 -Criteria @()
     }
 } else {
     Add-UnselectedStep -Id '9' -Title 'Server: four generation endpoints'
-    Add-UnselectedStep -Id '9b' -Title 'Two concurrent clients, serialized, no KV leakage'
+    Add-UnselectedStep -Id '9b' -Title 'Two concurrent conversations stay isolated'
+    Add-UnselectedStep -Id '9c' -Title 'Complete requests are serialized'
 }
 
 # ---------------------------------------------------------------------------
@@ -2435,70 +2817,76 @@ if (Test-Selected '12') {
 # artifact.
 # ---------------------------------------------------------------------------
 
-# id, text, and the step(s) that exercise it in THIS harness. An empty step
-# list is not an oversight to be filled in with a verdict: it means this
-# acceptance run does not exercise the criterion, and the table must say so.
+# id, text, the step(s) that exercise it, and -- where the steps establish only
+# part of what the criterion says -- an explicit `gap`.
+#
+# `gap` exists because a two-valued roll-up lies by rounding. A criterion whose
+# mapped steps cover half of it renders MET, and a reader has no way to tell
+# that from one covered end to end. Any criterion with a non-empty `gap`
+# renders PARTIAL and can never render MET, however green its steps are.
+#
+# An empty step list is not an oversight to be filled in with a verdict: it
+# means this acceptance run does not exercise the criterion, and the table must
+# say so.
 $criteria = @(
-  @{ id='C01'; text='A new phi4-mini-it-aie4:4b tag selects only corelib_aie4.'; steps=@('1','6') }
-  @{ id='C02'; text='Its catalog entry uses existing context fields and measured size and on-disk footprint; no nonexistent maximum-context field is assumed.'; steps=@('1','5') }
-  @{ id='C03'; text='Existing phi4-mini-it:4b Q4NX/NPU2 selection is unchanged.'; steps=@('1') }
-  @{ id='C04'; text='FastFlow invokes corelib from native C++ with no Python runtime.'; steps=@() }
-  @{ id='C05'; text='The executable does not link the corelib import library.'; steps=@('2') }
-  @{ id='C06'; text='Missing corelib DLLs do not prevent non-AIE4 FastFlow startup.'; steps=@('3') }
-  @{ id='C07'; text='An unwritable fatal-log directory rejects the AIE4 tag with an actionable error but does not block non-AIE4 startup.'; steps=@('4') }
-  @{ id='C08'; text='The exact Phi-4 model contract is validated before packing.'; steps=@('1','1c','5') }
-  @{ id='C09'; text='Every MatMul descriptor has has_bias = false.'; steps=@('5') }
-  @{ id='C10'; text='All 161 weights load from ONNX-layout components.'; steps=@('5') }
-  @{ id='C11'; text='Exact component shapes are validated; scales passed to corelib are contiguous FP16.'; steps=@('5') }
-  @{ id='C12'; text='Source ONNX mappings and derived scale/norm buffers remain alive and unmodified for every weight object.'; steps=@() }
-  @{ id='C13'; text='One persistent Stream is reused across tokens and requests.'; steps=@('6') }
-  @{ id='C14'; text='Every layer executes q, k, v, MHA, o, and SSMLP on AIE4.'; steps=@() }
-  @{ id='C15'; text='Embedding, layer-0 input RMSNorm, V scatter, last-row extraction, and sampling are the only planned host islands.'; steps=@() }
-  @{ id='C16'; text='Fresh multi-row prefill runs only at position zero.'; steps=@() }
-  @{ id='C17'; text='Nonzero-position prompt continuation uses only one-row calls.'; steps=@() }
-  @{ id='C18'; text='Prefix hits choose between one-row suffix append and full fresh re-prefill using the measured release-fixed suffix threshold, and both routes meet the same Section 15.3 gates.'; steps=@('8b') }
-  @{ id='C19'; text='Append-winning sampled suffix lengths are prefix-monotonic; otherwise the published threshold is zero.'; steps=@() }
-  @{ id='C20'; text='User-visible prompt plus generated tokens and logical KV position are each bounded at 4096, with over-limit requests rejected before submit.'; steps=@('10') }
-  @{ id='C21'; text='Limits count complete rendered multi-turn history; no partial append, eviction, or sliding window occurs.'; steps=@('8','10') }
-  @{ id='C22'; text='set_context_length and update_max_length obey the fixed-pitch behavior in Section 7.3.'; steps=@() }
-  @{ id='C23'; text='Lowering the soft cap below live logical context is rejected atomically; clearing first permits the lower cap.'; steps=@() }
-  @{ id='C24'; text='Invalid CLI/REST context requests return without mutating either cap; REST over-limit admission is HTTP 400.'; steps=@('9','10') }
-  @{ id='C25'; text='An omitted REST generation limit is not interpreted as an explicit 4096; all three handlers admit a nonempty default request and stop at the active soft cap, including after that cap is lowered.'; steps=@('9') }
-  @{ id='C26'; text='K/V caches are separate BF16 [8,4096,128] tensors per layer.'; steps=@('6') }
-  @{ id='C27'; text='Only live V rows are scattered.'; steps=@() }
-  @{ id='C28'; text='Every allocation row extent is derived from the three pad helpers, and every required MatMul padded K/N equals its logical K/N.'; steps=@() }
-  @{ id='C29'; text='SSMLP uses four distinct buffers; input and normalized output never alias.'; steps=@() }
-  @{ id='C30'; text='RoPE is gathered on the host from its actual source shape/dtype and written once into the contiguous FP32 [4096,48] device tensor.'; steps=@('5') }
-  @{ id='C31'; text='The runtime corelib version is checked against the compiled-against version before any other symbol is used.'; steps=@() }
-  @{ id='C32'; text='All conversion crosses tensor_write/tensor_read; the only FastFlow host converter is the FP32-to-BF16 helper for SSMLP norm/epsilon blobs.'; steps=@() }
-  @{ id='C33'; text='No tensor_write/tensor_read call site passes a byte count or byte offset.'; steps=@() }
-  @{ id='C34'; text='QKV, MHA, O, SSMLP, and LM-head dependency boundaries synchronize as specified.'; steps=@() }
-  @{ id='C35'; text='LM head synchronizes before logits are read.'; steps=@() }
-  @{ id='C36'; text='Golden logits meet correlation, top-1, top-5, top-32 max-difference, and lowest-ID tie-breaking gates.'; steps=@('7b') }
-  @{ id='C37'; text='FastFlow resolves EOS IDs 200020 and 199999 from the accepted tokenizer configuration.'; steps=@() }
-  @{ id='C38'; text='CLI and streaming/non-streaming server E2E pass on xcomedusad-43.'; steps=@('7','8','9') }
-  @{ id='C39'; text='flm validate can report corelib AIE4 readiness independently of legacy XDNA2 readiness.'; steps=@('3') }
-  @{ id='C40'; text='Complete requests are serialized for the single mutable KV session.'; steps=@('9b') }
-  @{ id='C41'; text='Cancellation never abandons submitted work without synchronize.'; steps=@() }
-  @{ id='C42'; text='Detailed corelib errors are copied immediately and remain durable.'; steps=@('12') }
-  @{ id='C43'; text='A pre-first-submit operation failure remains nonterminal; any post-first-submit operation failure or synchronize failure enters the process-wide hard-termination path with no fallback.'; steps=@('12') }
-  @{ id='C44'; text='A pre-first-submit failure clears all session state, and interactive CLI output explicitly reports that the conversation was cleared.'; steps=@() }
-  @{ id='C45'; text='Healthy shutdown destroys all handles before corelib cleanup.'; steps=@('3') }
-  @{ id='C46'; text='A terminal runtime failure flushes the real corelib diagnostic, skips normal unload, and hard-terminates the whole FastFlow process.'; steps=@('12') }
-  @{ id='C47'; text='Concurrent FastFlow processes use PID/start-time-qualified fatal files and the next startup reports every completed record deterministically without disturbing a live process pending file.'; steps=@('12') }
-  @{ id='C48'; text='Failure to query another process start time leaves its pending file untouched.'; steps=@() }
-  @{ id='C49'; text='Tests distinguish pre-submit dependency isolation from the process-wide impact of a terminal runtime failure.'; steps=@() }
-  # Deliberately mapped to NO step in this harness. Step 11 sustains 512
-  # tokens on the product path and records the process's private-byte slope,
-  # but that window contains the HTTP stack, the tokenizer and the response
-  # buffer as well as the decode loop, so it can neither establish nor refute
-  # per-token growth IN DECODE. Mapping it here would turn a measurement of
-  # something else into a met criterion, which is the exact move this file
-  # exists to prevent. The claim is measured by benchmark_phi4_aie4's memory
-  # window over explicit token IDs, outside this acceptance run.
-  @{ id='C50'; text='Decode shows no per-token memory growth after warmup.'; steps=@() }
-  @{ id='C51'; text='Cold/warm, fresh-prefill, continuation-ingest, decode, memory, and V-scatter baselines are recorded.'; steps=@() }
-  @{ id='C52'; text='No corelib, HIP-EP, ORT graph, GPU hybrid, or AIE4 kernel change is required.'; steps=@() }
+  @{ id='C01'; text='A new phi4-mini-it-aie4:4b tag selects only corelib_aie4.'; steps=@('1','6'); gap='' }
+  @{ id='C02'; text='Its catalog entry uses existing context fields and measured size and on-disk footprint; no nonexistent maximum-context field is assumed.'; steps=@('1','5'); gap='' }
+  @{ id='C03'; text='Existing phi4-mini-it:4b Q4NX/NPU2 selection is unchanged.'; steps=@('1'); gap='the catalog entry is checked; no Q4NX/NPU2 model was loaded, because this box has no XDNA2 hardware' }
+  @{ id='C04'; text='FastFlow invokes corelib from native C++ with no Python runtime.'; steps=@(); gap='' }
+  @{ id='C05'; text='The executable does not link the corelib import library.'; steps=@('2'); gap='' }
+  @{ id='C06'; text='Missing corelib DLLs do not prevent non-AIE4 FastFlow startup.'; steps=@('3'); gap='' }
+  @{ id='C07'; text='An unwritable fatal-log directory rejects the AIE4 tag with an actionable error but does not block non-AIE4 startup.'; steps=@('4'); gap='' }
+  @{ id='C08'; text='The exact Phi-4 model contract is validated before packing.'; steps=@('1','1c','5'); gap='' }
+  @{ id='C09'; text='Every MatMul descriptor has has_bias = false.'; steps=@('5'); gap='' }
+  @{ id='C10'; text='All 161 weights load from ONNX-layout components.'; steps=@('5'); gap='the manifest resolves all 161 objects and every role they name; that the engine LOADS all 161 is not separately observed here' }
+  @{ id='C11'; text='Exact component shapes are validated; scales passed to corelib are contiguous FP16.'; steps=@('5'); gap='shapes and FP16 dtype are checked in the manifest; contiguity as passed to corelib is not observable from the product' }
+  @{ id='C12'; text='Source ONNX mappings and derived scale/norm buffers remain alive and unmodified for every weight object.'; steps=@(); gap='' }
+  @{ id='C13'; text='One persistent Stream is reused across tokens and requests.'; steps=@('6'); gap='Step 6 records dispatch and synchronize counters from a loaded model; it does not observe Stream identity, and nothing here shows the same Stream is reused ACROSS REQUESTS' }
+  @{ id='C14'; text='Every layer executes q, k, v, MHA, o, and SSMLP on AIE4.'; steps=@(); gap='' }
+  @{ id='C15'; text='Embedding, layer-0 input RMSNorm, V scatter, last-row extraction, and sampling are the only planned host islands.'; steps=@(); gap='' }
+  @{ id='C16'; text='Fresh multi-row prefill runs only at position zero.'; steps=@(); gap='' }
+  @{ id='C17'; text='Nonzero-position prompt continuation uses only one-row calls.'; steps=@(); gap='' }
+  @{ id='C18'; text='Prefix hits choose between one-row suffix append and full fresh re-prefill using the measured release-fixed suffix threshold, and both routes meet the same Section 15.3 gates.'; steps=@('8b'); gap='' }
+  @{ id='C19'; text='Append-winning sampled suffix lengths are prefix-monotonic; otherwise the published threshold is zero.'; steps=@(); gap='' }
+  @{ id='C20'; text='User-visible prompt plus generated tokens and logical KV position are each bounded at 4096, with over-limit requests rejected before submit.'; steps=@('10','8c'); gap='the enforced bound is 4095, not the 4096 this criterion states -- no token-attention kernel ships for a 4096-token window. The RULE is verified exactly (the remaining capacity is admitted, one more is refused) but against a different constant than the design text, and that discrepancy is a design question, not a measurement' }
+  @{ id='C21'; text='Limits count complete rendered multi-turn history; no partial append, eviction, or sliding window occurs.'; steps=@('8','10'); gap='' }
+  @{ id='C22'; text='set_context_length and update_max_length obey the fixed-pitch behavior in Section 7.3.'; steps=@(); gap='' }
+  @{ id='C23'; text='Lowering the soft cap below live logical context is rejected atomically; clearing first permits the lower cap.'; steps=@(); gap='' }
+  @{ id='C24'; text='Invalid CLI/REST context requests return without mutating either cap; REST over-limit admission is HTTP 400.'; steps=@('9','10'); gap='the REST over-limit HTTP 400 half is verified on all four endpoints; that a refused request leaves BOTH CAPS UNMUTATED is not observed, and no invalid CLI context request was issued' }
+  @{ id='C25'; text='An omitted REST generation limit is not interpreted as an explicit 4096; all three handlers admit a nonempty default request and stop at the active soft cap, including after that cap is lowered.'; steps=@('9'); gap='default requests are admitted and answered on every handler; the "including after that cap is lowered" clause is not exercised, because nothing in this run lowers the cap' }
+  @{ id='C26'; text='K/V caches are separate BF16 [8,4096,128] tensors per layer.'; steps=@('6'); gap='the reported KV byte total is exactly what separate BF16 [8,4096,128] caches require for 32 layers; separateness and layout are inferred from that total, not observed directly' }
+  @{ id='C27'; text='Only live V rows are scattered.'; steps=@(); gap='' }
+  @{ id='C28'; text='Every allocation row extent is derived from the three pad helpers, and every required MatMul padded K/N equals its logical K/N.'; steps=@('6b'); gap='' }
+  @{ id='C29'; text='SSMLP uses four distinct buffers; input and normalized output never alias.'; steps=@(); gap='' }
+  @{ id='C30'; text='RoPE is gathered on the host from its actual source shape/dtype and written once into the contiguous FP32 [4096,48] device tensor.'; steps=@('5'); gap='the SOURCE shape and dtype are read from the real model (float16 [135168,48]); the host gather and the single write into the FP32 [4096,48] device tensor are not observed from the product' }
+  @{ id='C31'; text='The runtime corelib version is checked against the compiled-against version before any other symbol is used.'; steps=@('3b'); gap='' }
+  @{ id='C32'; text='All conversion crosses tensor_write/tensor_read; the only FastFlow host converter is the FP32-to-BF16 helper for SSMLP norm/epsilon blobs.'; steps=@(); gap='' }
+  @{ id='C33'; text='No tensor_write/tensor_read call site passes a byte count or byte offset.'; steps=@(); gap='' }
+  @{ id='C34'; text='QKV, MHA, O, SSMLP, and LM-head dependency boundaries synchronize as specified.'; steps=@(); gap='' }
+  @{ id='C35'; text='LM head synchronizes before logits are read.'; steps=@(); gap='' }
+  @{ id='C36'; text='Golden logits meet correlation, top-1, top-5, top-32 max-difference, and lowest-ID tie-breaking gates.'; steps=@('7b'); gap='' }
+  @{ id='C37'; text='FastFlow resolves EOS IDs 200020 and 199999 from the accepted tokenizer configuration.'; steps=@(); gap='' }
+  @{ id='C38'; text='CLI and streaming/non-streaming server E2E pass on xcomedusad-43.'; steps=@('7','8','9'); gap='' }
+  @{ id='C39'; text='flm validate can report corelib AIE4 readiness independently of legacy XDNA2 readiness.'; steps=@('3'); gap='' }
+  @{ id='C40'; text='Complete requests are serialized for the single mutable KV session.'; steps=@('9c'); gap='' }
+  @{ id='C41'; text='Cancellation never abandons submitted work without synchronize.'; steps=@(); gap='' }
+  @{ id='C42'; text='Detailed corelib errors are copied immediately and remain durable.'; steps=@('12'); gap='' }
+  @{ id='C43'; text='A pre-first-submit operation failure remains nonterminal; any post-first-submit operation failure or synchronize failure enters the process-wide hard-termination path with no fallback.'; steps=@('12'); gap='only the POST-submit half is exercised: a real corelib refusal after first submit hard-terminates with 0xE0040001. No pre-first-submit failure was injected, so the nonterminal half of the criterion is untested here' }
+  @{ id='C44'; text='A pre-first-submit failure clears all session state, and interactive CLI output explicitly reports that the conversation was cleared.'; steps=@(); gap='' }
+  @{ id='C45'; text='Healthy shutdown destroys all handles before corelib cleanup.'; steps=@('3'); gap='flm validate completes a load-and-shutdown cycle and reports shutdown_ok; the ORDER in which handles are destroyed relative to corelib cleanup is not observed' }
+  @{ id='C46'; text='A terminal runtime failure flushes the real corelib diagnostic, skips normal unload, and hard-terminates the whole FastFlow process.'; steps=@('12'); gap='' }
+  @{ id='C47'; text='Concurrent FastFlow processes use PID/start-time-qualified fatal files and the next startup reports every completed record deterministically without disturbing a live process pending file.'; steps=@('12'); gap='the record is PID- and start-time-qualified and the next startup reports and removes it; no two FastFlow processes were run concurrently, so nothing here shows a live process pending file left undisturbed' }
+  @{ id='C48'; text='Failure to query another process start time leaves its pending file untouched.'; steps=@(); gap='' }
+  @{ id='C49'; text='Tests distinguish pre-submit dependency isolation from the process-wide impact of a terminal runtime failure.'; steps=@(); gap='' }
+  # Deliberately mapped to NO step. Step 11 sustains 512 tokens on the product
+  # path and records the process's private-byte slope, but that window contains
+  # the HTTP stack, the tokenizer and the response buffer as well as the decode
+  # loop, so it can neither establish nor refute per-token growth IN DECODE.
+  # Mapping it here would turn a measurement of something else into a met
+  # criterion, which is the exact move this file exists to prevent.
+  @{ id='C50'; text='Decode shows no per-token memory growth after warmup.'; steps=@(); gap='' }
+  @{ id='C51'; text='Cold/warm, fresh-prefill, continuation-ingest, decode, memory, and V-scatter baselines are recorded.'; steps=@(); gap='' }
+  @{ id='C52'; text='No corelib, HIP-EP, ORT graph, GPU hybrid, or AIE4 kernel change is required.'; steps=@(); gap='' }
 )
 
 # Re-read the record from the file before rolling anything up.
@@ -2545,7 +2933,7 @@ Save-Record
 $stepById = @{}
 foreach ($s in @($script:record['steps'])) { $stepById[$s.id] = $s }
 
-$rank = @{ 'met' = 0; 'not_exercised' = 1; 'not_met' = 2 }
+$rank = @{ 'met' = 0; 'partial' = 1; 'not_exercised' = 2; 'not_met' = 3 }
 $rollup = @()
 foreach ($c in $criteria) {
     $status = 'not_exercised'
@@ -2562,13 +2950,27 @@ foreach ($c in $criteria) {
                 if ($rank[$st] -gt $rank[$worst]) { $worst = $st }
             } else {
                 $details += "step ${sid}: absent from this record"
-                $worst = 'not_exercised'
+                if ($rank['not_exercised'] -gt $rank[$worst]) { $worst = 'not_exercised' }
             }
         }
         $status = $worst
         $why = ($details -join '; ')
     }
-    $rollup += [ordered]@{ id = $c.id; criterion = $c.text; status = $status; from_steps = $cited; basis = $why }
+    # A declared gap caps the result at PARTIAL. It can never be argued back up
+    # to MET by the steps being green, because the steps being green is exactly
+    # what the gap is about: they pass, and they cover less than the criterion
+    # says. A gap on a criterion that already failed or was never exercised
+    # changes nothing -- the worse verdict stands.
+    if ($c.gap -and $status -eq 'met') {
+        $status = 'partial'
+        $why = "$why -- PARTIAL: $($c.gap)"
+    } elseif ($c.gap) {
+        $why = "$why (declared coverage gap: $($c.gap))"
+    }
+    $rollup += [ordered]@{
+        id = $c.id; criterion = $c.text; status = $status
+        from_steps = $cited; coverage_gap = $c.gap; basis = $why
+    }
 }
 Set-Field 'section_17' $rollup
 
@@ -2592,6 +2994,7 @@ foreach ($st in @($script:record['steps'])) {
 Save-Record
 
 $met = @($rollup | Where-Object { $_.status -eq 'met' }).Count
+$partial = @($rollup | Where-Object { $_.status -eq 'partial' }).Count
 $notMet = @($rollup | Where-Object { $_.status -eq 'not_met' }).Count
 $notEx = @($rollup | Where-Object { $_.status -eq 'not_exercised' }).Count
 $stepsMet = @($script:record['steps'] | Where-Object { $_.status -eq 'met' }).Count
@@ -2600,6 +3003,7 @@ $stepsNotEx = @($script:record['steps'] | Where-Object { $_.status -eq 'not_exer
 Set-Field 'summary' ([ordered]@{
     criteria_total = $rollup.Count
     criteria_met = $met
+    criteria_partial = $partial
     criteria_not_met = $notMet
     criteria_not_exercised = $notEx
     steps_met = $stepsMet
@@ -2610,13 +3014,18 @@ Save-Record
 
 Write-Section 'Design Section 17, line by line'
 foreach ($r in $rollup) {
-    $marker = switch ($r.status) { 'met' { 'MET          ' } 'not_met' { 'NOT MET      ' } default { 'NOT EXERCISED' } }
+    $marker = switch ($r.status) {
+        'met'     { 'MET          ' }
+        'partial' { 'PARTIAL      ' }
+        'not_met' { 'NOT MET      ' }
+        default   { 'NOT EXERCISED' }
+    }
     Write-Output ("  {0}  {1}  {2}" -f $r.id, $marker, $r.criterion)
 }
 
 Write-Section 'Summary'
 Write-Output "  steps:    $stepsMet met, $stepsNotMet not met, $stepsNotEx not exercised"
-Write-Output "  criteria: $met met, $notMet not met, $notEx not exercised"
+Write-Output "  criteria: $met met, $partial partial, $notMet not met, $notEx not exercised"
 Write-Output "  record:   $OutJson"
 
 # ---------------------------------------------------------------------------
@@ -2671,11 +3080,15 @@ if ($Markdown) {
     $md.Add('')
     $md.Add("**Steps:** $($s.steps_met) met, $($s.steps_not_met) not met, $($s.steps_not_exercised) not exercised.")
     $md.Add('')
-    $md.Add("**Design Section 17 criteria:** $($s.criteria_met) met, $($s.criteria_not_met) not met, $($s.criteria_not_exercised) not exercised.")
+    $md.Add("**Design Section 17 criteria:** $($s.criteria_met) met, $($s.criteria_partial) partial, $($s.criteria_not_met) not met, $($s.criteria_not_exercised) not exercised.")
     $md.Add('')
     $md.Add('"Not exercised" is not a soft pass. It means this acceptance run did')
     $md.Add('not test the criterion, and nothing here should be read as evidence')
     $md.Add('that it holds.')
+    $md.Add('')
+    $md.Add('"Partial" means the steps mapped to a criterion passed but cover less')
+    $md.Add('than the criterion says. The uncovered part is named in the Basis column')
+    $md.Add('of every partial row. A partial criterion is not met.')
     $md.Add('')
     $det = Get-Field $script:record 'determinism_scope'
     if ($det) {
@@ -2708,7 +3121,12 @@ if ($Markdown) {
     $md.Add('| | Criterion | Result | Basis |')
     $md.Add('| --- | --- | --- | --- |')
     foreach ($r in @($script:record['section_17'])) {
-        $mk = switch ($r.status) { 'met' { 'MET' } 'not_met' { '**NOT MET**' } default { '*not exercised*' } }
+        $mk = switch ($r.status) {
+            'met'     { 'MET' }
+            'partial' { '**PARTIAL**' }
+            'not_met' { '**NOT MET**' }
+            default   { '*not exercised*' }
+        }
         $t = ($r.criterion -replace '\|', '\|')
         $b = ($r.basis -replace '\|', '\|')
         $md.Add("| $($r.id) | $t | $mk | $b |")
@@ -2826,10 +3244,11 @@ if ($stepsNotMet -gt 0 -or $notMet -gt 0) {
     Write-Output 'RESULT: FAILED -- at least one acceptance step or criterion is NOT MET.'
     exit 1
 }
-if ($stepsNotEx -gt 0 -or $notEx -gt 0) {
+if ($stepsNotEx -gt 0 -or $notEx -gt 0 -or $partial -gt 0) {
     Write-Output ''
-    Write-Output 'RESULT: INCOMPLETE -- nothing failed, but work was not exercised, and an'
-    Write-Output 'acceptance run that did not test something must not exit 0.'
+    Write-Output 'RESULT: INCOMPLETE -- nothing failed, but work was not exercised or was'
+    Write-Output 'only partly covered, and an acceptance run that did not test something'
+    Write-Output 'must not exit 0.'
     exit 77
 }
 Write-Output ''

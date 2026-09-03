@@ -13,6 +13,32 @@ if(NOT DEFINED NPU_VERSION)
     message(FATAL_ERROR "NPU_VERSION must be specified externally. Use -DNPU_VERSION=<version> when running cmake.")
 endif()
 
+# Both versions must have all three components, and being DEFINED is not
+# enough to establish that.
+#
+# Measured on 2026-09-02: `cmake ... -DFLM_VERSION=1.0.4` written UNQUOTED in a
+# Windows PowerShell script reaches CMake as `-DFLM_VERSION=1`. The cache then
+# holds FLM_VERSION=1, __FLM_VERSION__ compiles to "1", `flm version` prints
+# "FLM v1", and ModelDownloader::check_model_compatibility sscanf's it with
+# "%d.%d.%d" against a catalog flm_min_version of "1.0.4" -- leaving the minor
+# and patch fields uninitialised in that comparison. Every flm.exe built on the
+# AIE4 target before this guard existed had it, and nothing anywhere failed:
+# the build succeeded, the binary ran, and the only symptom was a version
+# string nobody was checking.
+#
+# A regex on the value is the cheapest place to stop that, because it fails at
+# configure time in the same command that introduced the mistake.
+foreach(_flm_version_var FLM_VERSION NPU_VERSION)
+    if(NOT "${${_flm_version_var}}" MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+(\\.[0-9]+)?$")
+        message(FATAL_ERROR
+            "${_flm_version_var} is '${${_flm_version_var}}', which is not a "
+            "dotted version. Expected major.minor.patch (a fourth component is "
+            "allowed). A single number here usually means the argument was "
+            "written unquoted in PowerShell, which truncates it at the first "
+            "'.': quote it as \"-D${_flm_version_var}=1.0.4\".")
+    endif()
+endforeach()
+
 # Set build type to Release
 set(CMAKE_BUILD_TYPE Release)
 

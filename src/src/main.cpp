@@ -11,6 +11,7 @@
 #include "model_downloader.hpp"
 #include "update.hpp"
 #include "utils/utils.hpp"
+#include "utils/debug_utils.hpp"
 #include "program_args.hpp"
 #include "minja/chat-template.hpp"
 #include <cstring>
@@ -473,6 +474,10 @@ int main(int argc, char* argv[]) {
     program_args_t parsed_args;
     if (!arg_utils::parse_options(argc, argv, parsed_args)) {
         return 1; // Help was already printed by Boost Program Options
+    }
+
+    if (parsed_args.command == "serve" && parsed_args.sub_process_mode) {
+        debug_utils::set_quiet_mode(true);
     }
 
     

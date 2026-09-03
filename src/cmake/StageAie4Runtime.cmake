@@ -190,8 +190,63 @@ endforeach()
 # a customer artifact naming a developer's conda prefix leaks build-machine
 # layout for no benefit to the reader. The hashes are what a recipient can
 # actually act on, since they verify the staged bits.
+#
+# It also carries the identity of the corelib itself, ahead of the file list.
+# The first question asked about a wrong number in the field is "which runtime
+# produced it", and until this project put the resolved DLL's SHA-256 into its
+# own test artifacts, nothing could answer it -- an investigation ran for days
+# on the assumption that two runs had loaded the same library, with no record
+# either way. A shipped artifact needs the same answer available to a reader
+# who has only the installed directory.
+#
+# Deliberately bounded: corelib version and corelib hash, nothing else. The
+# FastFlow commit, the model revision and the driver identity live in the
+# baseline identity block and the acceptance record. Copying them here would
+# create a second source that drifts.
 if(FLM_AIE4_REPORT)
-    set(_flm_aie4_report_text "")
+    # Probed against the STAGED copy, not the source copy. The staged file is
+    # the one that ships, and it is the one whose closure sits beside it -- so
+    # a load failure here is a real statement about the artifact rather than
+    # about the build machine's PATH.
+    set(_flm_aie4_staged_root "${_flm_aie4_destination}/ryzenai_corelib.dll")
+    if(NOT EXISTS "${_flm_aie4_staged_root}")
+        message(FATAL_ERROR
+            "Staging did not produce ${_flm_aie4_staged_root}")
+    endif()
+    get_filename_component(_flm_aie4_probe
+        "${CMAKE_CURRENT_LIST_DIR}/ReadCorelibVersion.ps1" ABSOLUTE)
+    if(NOT EXISTS "${_flm_aie4_probe}")
+        message(FATAL_ERROR
+            "The corelib version probe is missing: ${_flm_aie4_probe}")
+    endif()
+    execute_process(
+        COMMAND powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass
+                -File "${_flm_aie4_probe}"
+                -Dll "${_flm_aie4_staged_root}"
+        OUTPUT_VARIABLE _flm_aie4_version
+        ERROR_VARIABLE _flm_aie4_version_error
+        RESULT_VARIABLE _flm_aie4_version_status
+        OUTPUT_STRIP_TRAILING_WHITESPACE)
+    # Hard failure, not a placeholder.
+    #
+    # The only way this probe fails is that the staged closure cannot be
+    # loaded or does not export the entry point -- which means the feature
+    # being packaged does not work. Writing "unknown" into the report and
+    # carrying on would ship a broken runtime under a record that reads like a
+    # successful one, which is the exact failure this project keeps finding.
+    if(NOT _flm_aie4_version_status EQUAL 0
+       OR NOT _flm_aie4_version MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$")
+        message(FATAL_ERROR
+            "Could not read ryzenai_corelib_get_version from the staged "
+            "${_flm_aie4_staged_root}.\n"
+            "  status: ${_flm_aie4_version_status}\n"
+            "  stdout: ${_flm_aie4_version}\n"
+            "  stderr: ${_flm_aie4_version_error}\n"
+            "The staged closure must load before it can be shipped.")
+    endif()
+    file(SHA256 "${_flm_aie4_staged_root}" _flm_aie4_root_hash)
+    set(_flm_aie4_report_text
+        "corelib_version\t${_flm_aie4_version}\ncorelib_sha256\t${_flm_aie4_root_hash}\n")
     foreach(_flm_aie4_file IN LISTS _flm_aie4_files)
         get_filename_component(_flm_aie4_leaf "${_flm_aie4_file}" NAME)
         file(SHA256 "${_flm_aie4_file}" _flm_aie4_hash)

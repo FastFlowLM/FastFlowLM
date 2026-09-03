@@ -211,16 +211,22 @@ try {
     [xml]$parsedWix = $wix
     $ran += "installer-manifests"
 
-    # The main installer must still build with no AIE4 closure present.
-    # Hard-failing here would make the AIE4 feature a precondition of shipping
-    # the ordinary NPU2 product, which is the opposite of optional.
-    foreach ($script in @("wix/get_files.bat", "inno/get_files.bat")) {
-        $text = Get-Content (Join-Path $sourceRoot $script) -Raw
-        if ($text -match "exit /b 1") {
-            throw "$script still fails the non-AIE4 package build"
-        }
-    }
-    $ran += "optional-feature-packaging"
+    # "The main installer must still build with no AIE4 closure present" was
+    # asserted here by forbidding the substring `exit /b 1` anywhere in either
+    # get_files.bat. That guard is retired, deliberately.
+    #
+    # It never checked the property it was named for. It checked that the
+    # scripts contain no error handling at all -- so the moment a DIFFERENT
+    # failure legitimately needed reporting (the 2026-09-01 decision to ship
+    # the closure report, which must fail loudly when the report is absent)
+    # the guard fired on correct code while still being unable to notice a
+    # regression that failed the no-closure path some other way, such as
+    # `goto :eof` after an echo, or a non-zero errorlevel left by the last
+    # command in the else branch.
+    #
+    # The property is now proven by RUNNING both shipped scripts with no
+    # closure staged and requiring exit 0 -- see the installer-staging block
+    # below, which reports under this same name.
 
     # flm.exe must never gain a link-time dependency on ryzenai_corelib. The
     # DLL is resolved at run time by absolute path precisely so that a binary
@@ -406,15 +412,65 @@ flm_aie4_install_runtime(DESTINATION bin/aie4 COMPONENT AIE4)
                 throw "The shipped closure report leaks a build path: $line"
             }
         }
+        # The corelib's own identity, ahead of the file list. Human decision,
+        # 2026-09-01: the shipped artifact must answer "which runtime produced
+        # this" without reference to a build tree that travelled nowhere.
+        #
+        # Asserted by key, not by position, and asserted to be PRESENT --
+        # dropping the identity silently is the failure mode that matters,
+        # because the report would still parse and still verify every hash.
+        $identity = @{}
         foreach ($line in Get-Content $report) {
             $fields = $line -split "`t"
-            if ($fields.Count -ne 3 -or $fields[2] -notmatch '^[0-9a-f]{64}$') {
-                throw "The shipped closure report lacks a SHA-256: $line"
+            if ($fields[0] -eq 'staged') {
+                if (
+                    $fields.Count -ne 3 -or
+                    $fields[2] -notmatch '^[0-9a-f]{64}$'
+                ) {
+                    throw "The shipped closure report lacks a SHA-256: $line"
+                }
+                $actual = Get-Sha256Hex (Join-Path $stagedDir $fields[1])
+                if ($actual -ne $fields[2]) {
+                    throw (
+                        "Staged $($fields[1]) does not match its recorded hash")
+                }
+            } elseif ($fields.Count -eq 2) {
+                $identity[$fields[0]] = $fields[1]
+            } else {
+                throw "Unrecognised line in the shipped closure report: $line"
             }
-            $actual = Get-Sha256Hex (Join-Path $stagedDir $fields[1])
-            if ($actual -ne $fields[2]) {
-                throw "Staged $($fields[1]) does not match its recorded hash"
+        }
+        foreach ($key in @('corelib_version', 'corelib_sha256')) {
+            if (-not $identity.ContainsKey($key)) {
+                throw (
+                    "The shipped closure report carries no $key. A field " +
+                    "report about a wrong number cannot then say which " +
+                    "runtime produced it.")
             }
+        }
+        if ($identity['corelib_version'] -notmatch '^\d+\.\d+\.\d+$') {
+            throw (
+                "corelib_version is not MAJOR.MINOR.PATCH: " +
+                $identity['corelib_version'])
+        }
+        # Two independent things, both checked: the recorded hash is the hash
+        # of the file that shipped, and it is the same hash the file list
+        # already recorded for that file. Either one alone can agree with a
+        # wrong value.
+        $rootHash = Get-Sha256Hex (Join-Path $stagedDir 'ryzenai_corelib.dll')
+        if ($identity['corelib_sha256'] -ne $rootHash) {
+            throw (
+                "corelib_sha256 does not match the staged ryzenai_corelib.dll")
+        }
+        $rootLine = @(
+            Get-Content $report |
+                Where-Object { $_ -like "staged`tryzenai_corelib.dll`t*" }
+        )
+        if ($rootLine.Count -ne 1) {
+            throw "The file list does not name ryzenai_corelib.dll exactly once"
+        }
+        if (($rootLine[0] -split "`t")[2] -ne $identity['corelib_sha256']) {
+            throw "corelib_sha256 disagrees with the file list's own entry"
         }
 
         # CLOSURE-2, positive control.
@@ -458,6 +514,205 @@ flm_aie4_install_runtime(DESTINATION bin/aie4 COMPONENT AIE4)
             "real-closure (CLOSURE-1/2): pass -CorelibRuntimeDir, and " +
             "-DependencyDir where the corelib's own dependencies live")
     }
+
+    # ------------------------------------------------------------------
+    # The closure report must survive the INSTALLER staging, not just the
+    # CMake install.
+    #
+    # Human decision, 2026-09-01: ship the provenance with the artifact. Both
+    # get_files.bat scripts copy `..\build\aie4\*` wholesale, so the report was
+    # already arriving -- incidentally. An incidental dependency is exactly the
+    # kind that breaks silently: narrow that copy to `*.dll` and the installed
+    # runtime loses the only thing in it that says which corelib produced a
+    # result, with nothing failing.
+    #
+    # Driven through the REAL shipped .bat files against a synthetic tree, so
+    # this cannot agree with a copy of the logic that has drifted from the one
+    # that ships. Needs nothing but cmd.exe, so it always runs.
+    # ------------------------------------------------------------------
+    $installerRoot = Join-Path $temporary "installer"
+    $fakeSrc = Join-Path $installerRoot "src"
+    foreach ($relative in @(
+        "build/aie4", "lib/xrt", "wix", "inno")) {
+        New-Item -ItemType Directory -Force `
+            -Path (Join-Path $fakeSrc $relative) | Out-Null
+    }
+    Set-Content -Path (Join-Path $fakeSrc "build/flm.exe") -Value "not an exe"
+    Set-Content -Path (Join-Path $fakeSrc "lib/placeholder.dll") -Value "dll"
+    Set-Content -Path (Join-Path $fakeSrc "lib/xrt/placeholder_xrt.dll") `
+        -Value "dll"
+    Set-Content -Path (Join-Path $fakeSrc "model_list.json") -Value "{}"
+    Set-Content -Path (Join-Path $fakeSrc "model_info.json") -Value "{}"
+    Set-Content -Path (Join-Path $fakeSrc "inno/logo.ico") -Value "ico"
+    Set-Content -Path (Join-Path $fakeSrc "inno/terms.rtf") -Value "rtf"
+    Copy-Item (Join-Path $sourceRoot "wix/get_files.bat") `
+        (Join-Path $fakeSrc "wix/get_files.bat")
+    Copy-Item (Join-Path $sourceRoot "inno/get_files.bat") `
+        (Join-Path $fakeSrc "inno/get_files.bat")
+
+    $fakeAie4 = Join-Path $fakeSrc "build/aie4"
+    $fakeCorelib = Join-Path $fakeAie4 "ryzenai_corelib.dll"
+    $fakeReport = Join-Path $fakeAie4 "aie4-closure.txt"
+    Set-Content -Path $fakeCorelib -Value "not a dll"
+    # Shaped like the real report, including the identity header the shipped
+    # artifact now carries.
+    $fakeReportText = (
+        "corelib_version`t0.1.0`n" +
+        "corelib_sha256`t$('a' * 64)`n" +
+        "staged`tryzenai_corelib.dll`t$('a' * 64)`n")
+    [System.IO.File]::WriteAllText($fakeReport, $fakeReportText)
+
+    function Invoke-GetFiles {
+        param([string]$Directory)
+        $previous = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        $output = (& cmd.exe /c (
+            "cd /d `"$Directory`" && get_files.bat") 2>&1 |
+            ForEach-Object { $_.ToString() } | Out-String)
+        $code = $LASTEXITCODE
+        $ErrorActionPreference = $previous
+        return [pscustomobject]@{ ExitCode = $code; Output = $output }
+    }
+
+    $installerCases = @(
+        [pscustomobject]@{
+            Name = "wix"
+            Directory = (Join-Path $fakeSrc "wix")
+            Staged = (Join-Path $fakeSrc "wix/package/aie4")
+        },
+        [pscustomobject]@{
+            Name = "inno"
+            Directory = (Join-Path $fakeSrc "inno")
+            Staged = (Join-Path $fakeSrc "inno/aie4")
+        }
+    )
+
+    foreach ($case in $installerCases) {
+        # 1. With a complete closure the report must arrive, unmodified and
+        #    still free of build-machine paths.
+        $result = Invoke-GetFiles -Directory $case.Directory
+        if ($result.ExitCode -ne 0) {
+            throw (
+                "$($case.Name)/get_files.bat failed with a complete closure " +
+                "(exit $($result.ExitCode)).`n$($result.Output)")
+        }
+        $stagedReport = Join-Path $case.Staged "aie4-closure.txt"
+        if (-not (Test-Path -LiteralPath $stagedReport)) {
+            throw (
+                "$($case.Name)/get_files.bat did not stage aie4-closure.txt " +
+                "beside the AIE4 runtime")
+        }
+        $stagedText = [System.IO.File]::ReadAllText($stagedReport)
+        if ($stagedText -ne $fakeReportText) {
+            throw "$($case.Name) staged a modified aie4-closure.txt"
+        }
+        foreach ($line in $stagedText -split "`r?`n") {
+            if ($line -match '(?i)[a-z]:[\\/]') {
+                throw (
+                    "The $($case.Name)-staged closure report leaks a build " +
+                    "path: $line")
+            }
+        }
+
+        # 2. RED proof. Remove the report and the staging must FAIL, because a
+        #    guard that cannot fail is not a guard. This is the case the
+        #    wholesale xcopy would pass silently.
+        Remove-Item -LiteralPath $fakeReport -Force
+        Remove-Item -LiteralPath $stagedReport -Force
+        $result = Invoke-GetFiles -Directory $case.Directory
+        if ($result.ExitCode -eq 0) {
+            throw (
+                "$($case.Name)/get_files.bat reported success while staging " +
+                "an AIE4 runtime with no aie4-closure.txt.`n$($result.Output)")
+        }
+        # A non-zero exit for some unrelated reason would satisfy the check
+        # above while proving nothing, so the diagnostic has to name the file.
+        if ($result.Output -notmatch 'aie4-closure\.txt') {
+            throw (
+                "$($case.Name)/get_files.bat failed without saying the " +
+                "closure report was missing.`n$($result.Output)")
+        }
+        [System.IO.File]::WriteAllText($fakeReport, $fakeReportText)
+
+        # 3. The optional feature stays optional. With no closure staged at
+        #    all, the ordinary NPU2 installer must still build -- the
+        #    regression dc15d66f introduced and Task 11 fixed.
+        Rename-Item -LiteralPath $fakeCorelib -NewName "ryzenai_corelib.hidden"
+        try {
+            $result = Invoke-GetFiles -Directory $case.Directory
+        } finally {
+            Rename-Item `
+                -LiteralPath (Join-Path $fakeAie4 "ryzenai_corelib.hidden") `
+                -NewName "ryzenai_corelib.dll"
+        }
+        if ($result.ExitCode -ne 0) {
+            throw (
+                "$($case.Name)/get_files.bat failed with no AIE4 closure " +
+                "staged, making an optional feature a precondition for " +
+                "shipping.`n$($result.Output)")
+        }
+    }
+
+    # The wix branch additionally emits the include file WiX compiles. Assert
+    # both shapes, because the empty ComponentGroup is the one no build has
+    # ever exercised.
+    $wxi = Join-Path $fakeSrc "wix/package/aie4.wxi"
+    if (-not (Test-Path -LiteralPath $wxi)) {
+        throw "wix/get_files.bat emitted no package\aie4.wxi"
+    }
+    $wxiText = [System.IO.File]::ReadAllText($wxi)
+    if ($wxiText -notmatch '<ComponentGroup Id="Aie4RuntimeComponents"[^>]*/>') {
+        throw (
+            "With no closure staged, aie4.wxi must define an EMPTY " +
+            "Aie4RuntimeComponents group.`n$wxiText")
+    }
+    $result = Invoke-GetFiles -Directory (Join-Path $fakeSrc "wix")
+    if ($result.ExitCode -ne 0) {
+        throw "wix/get_files.bat failed on the closure-present rerun"
+    }
+    $wxiText = [System.IO.File]::ReadAllText($wxi)
+    # Two defects a real `wix build` found on 2026-09-03, both of which had
+    # been asserted-not-demonstrated since Task 11:
+    #
+    #  1. The generated <Include> declared no namespace, so every element
+    #     inside it landed in the empty namespace and WiX rejected the file
+    #     with WIX0200. That failed BOTH MSI builds -- including the ordinary
+    #     non-AIE4 one, which had nothing to do with this feature.
+    #  2. `Include="package\aie4\**"` doubled the path. The Files element
+    #     resolves against the directory of the file CONTAINING it, and
+    #     aie4.wxi is generated into package\, so WiX looked in
+    #     package\package\aie4, found nothing, and emitted WIX8601 -- a
+    #     WARNING. The build succeeded and produced an MSI with no AIE4
+    #     runtime in it at all, byte-for-byte the same size as the no-closure
+    #     MSI. A silent empty feature is exactly the outcome an "optional"
+    #     feature must not have.
+    foreach ($shape in @(
+        @{
+            Pattern = '<Include xmlns="http://wixtoolset\.org/schemas/v4/wxs">'
+            Why = ("aie4.wxi must declare the WiX namespace or WiX rejects " +
+                   "ComponentGroup with WIX0200")
+        },
+        @{
+            Pattern = '<Files Include="aie4\\\*\*" />'
+            Why = ("the Files path is relative to aie4.wxi's own directory; " +
+                   "prefixing it with package\ makes WiX harvest nothing and " +
+                   "only warn")
+        }
+    )) {
+        if ($wxiText -notmatch $shape.Pattern) {
+            throw "$($shape.Why).`n$wxiText"
+        }
+    }
+    if ($wxiText -match 'Include="package\\aie4') {
+        throw (
+            "aie4.wxi doubles the staged path: WiX resolves it against " +
+            "package\, so this harvests package\package\aie4 and ships an " +
+            "empty AIE4 feature with a warning.`n$wxiText")
+    }
+    $ran += (
+        "installer-staging (aie4-closure.txt ships, RED-proven, both " +
+        "get_files.bat, both aie4.wxi shapes)")
+    $ran += "optional-feature-packaging (no-closure staging exits 0, executed)"
 
     if ($FlmExe) {
         $resolvedFlm = (Resolve-Path $FlmExe).Path

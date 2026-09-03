@@ -92,10 +92,14 @@ the last category is large.
   the whole conversation yourself — the `/api/chat` and `/v1/chat/completions`
   endpoints take a full `messages` array and count it in full — until this is
   fixed.
-- **Generation can run to the context cap.** A request with no generation
-  limit is bounded only by the model emitting an end token. When it does not,
-  generation continues to the cap; one measured turn took 182 seconds and
-  produced a repeating phrase. Set an explicit limit for predictable latency.
+- **Generation can run to the context cap, and output degrades when it does.**
+  A request with no generation limit is bounded only by the model emitting an
+  end token. When it does not, generation continues to the cap — and the text
+  falls apart before it gets there. In the acceptance run, two turns ran to the
+  4095-token cap taking **186.9 s** and **179.9 s**; one repeated a single
+  phrase for the remainder, and the other degenerated into meaningless
+  characters. **Set an explicit generation limit.** It is the difference
+  between a bounded reply and three minutes of noise.
 - **The limit is 4095, not 4096**, for the prompt and the generated tokens
   together, counted over the complete rendered conversation. The KV window is
   4096 rows; the usable cap is one less because no token-attention kernel

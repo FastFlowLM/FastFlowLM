@@ -2273,72 +2273,162 @@ if (Test-Selected '9') {
     }
 
     # -----------------------------------------------------------------------
-    # Step 9c: serialization, measured against a single-request baseline
+    # Step 9c: serialization, measured against per-request baselines
     # -----------------------------------------------------------------------
     Write-Section 'Step 9c: are complete requests serialized?'
     $ev3 = [ordered]@{}
     $problems3 = @()
+    $verdict = 'inconclusive'
     try {
         Start-FlmServer
-        # Equal work on both sides, and a baseline for one of them alone.
+        # A WARM-UP FIRST, and two DIFFERENT prompts.
         #
-        # With identical requests, serialized execution predicts the two
-        # concurrent requests together take about twice a single one, and
-        # genuinely parallel execution predicts about the same as one. Those
-        # two predictions are far enough apart to tell apart, which is the
-        # property the previous attempt lacked.
-        $body = '{"model":"' + $ModelTag + '","prompt":"Count from one to twenty in words.","stream":false,"max_tokens":48}'
-        $single = Invoke-Rest -Path '/api/generate' -Body $body -Name 'step9c-baseline'
-        $ev3['baseline_http'] = $single.Code
-        $ev3['baseline_seconds'] = $single.Seconds
-        if ($single.Code -ne '200') { $problems3 += "the single-request baseline returned HTTP $($single.Code)" }
+        # The first attempt compared two identical concurrent requests against
+        # a single-request baseline and reported 1.077x -- "not consistent with
+        # serialization". Both of its ingredients were wrong.
+        #
+        # The baseline was the FIRST request after the server started, so it
+        # carried warm-up the concurrent pair did not: 6.241 s against the
+        # 2.03 s the same shape of request takes warm. That alone accounts for
+        # the ratio, and the step was reporting a cold-start artifact as a
+        # concurrency finding. Hence the discarded warm-up below.
+        #
+        # I first assumed the cause was prefix reuse on the identical second
+        # prompt, and that guess was also wrong -- worth recording, because it
+        # is the kind of plausible story that survives review. Measured here:
+        # an immediate repeat of the same prompt takes 0.996x the first, no
+        # saving at all. A prefix hit needs matched == history_size, and a
+        # repeated single-turn prompt is SHORTER than the history it is
+        # compared against (which holds the previous prompt AND its reply), so
+        # it never qualifies. Identical prompts were still the wrong choice,
+        # but for the ordinary reason that they make sum and max harder to
+        # separate, not for that one.
+        #
+        # Two prompts sharing no prefix beyond the chat template both pay a
+        # full prefill, so:
+        #     serialized  -> wall is close to t1 + t2
+        #     parallel    -> wall is close to max(t1, t2)
+        # Those are far apart, and each is measured on this box in this run
+        # rather than assumed.
+        $p1 = 'Name three rivers in Europe and say which is longest.'
+        $p2 = 'Describe the water cycle briefly, in your own words.'
+        $mk = { param($p) '{"model":"' + $ModelTag + '","prompt":"' + $p + '","stream":false,"max_tokens":48}' }
 
-        $f1 = Join-Path $script:artifactDir 'step9c.req.json'
-        Set-Content -Path $f1 -Value $body -Encoding utf8
-        $m1 = Join-Path $script:artifactDir 'step9c-1.meta'
-        $m2 = Join-Path $script:artifactDir 'step9c-2.meta'
+        # Warm first, and discard it: the first request after a load pays costs
+        # that have nothing to do with concurrency.
+        [void](Invoke-Rest -Path '/api/generate' -Body (& $mk 'Say hello.') -Name 'step9c-warm')
+
+        $r1 = Invoke-Rest -Path '/api/generate' -Body (& $mk $p1) -Name 'step9c-t1'
+        $r2 = Invoke-Rest -Path '/api/generate' -Body (& $mk $p2) -Name 'step9c-t2'
+        $ev3['t1_http'] = $r1.Code; $ev3['t1_seconds'] = $r1.Seconds
+        $ev3['t2_http'] = $r2.Code; $ev3['t2_seconds'] = $r2.Seconds
+        if ($r1.Code -ne '200' -or $r2.Code -ne '200') {
+            $problems3 += "the sequential baselines returned HTTP $($r1.Code) and $($r2.Code)"
+        }
+
+        # Recorded, not gated: does an immediate repeat of p1 come back much
+        # faster? If it does, token_history survived the request and the repeat
+        # took the append route with a zero-token suffix. That is the
+        # observation that explains why the identical-prompt design failed, and
+        # it is the only evidence in this run bearing on whether the append
+        # route is reachable through the server at all.
+        $r1again = Invoke-Rest -Path '/api/generate' -Body (& $mk $p1) -Name 'step9c-t1-repeat'
+        $ev3['t1_repeat_seconds'] = $r1again.Seconds
+        if ($r1.Seconds -gt 0) {
+            $ev3['repeat_over_first_ratio'] = [math]::Round($r1again.Seconds / $r1.Seconds, 3)
+            $ev3['prefix_reuse_note'] = "an immediate repeat of the same prompt took $($ev3['repeat_over_first_ratio'])x the original. rest_handler does not clear_context() on success, so token_history survives and a prefix hit is architecturally possible on the server -- but a ratio at or near 1 means no prefill was skipped here, which is what the prefix rule predicts: a hit needs matched == history_size, and a repeated single-turn prompt is shorter than the stored history (previous prompt AND reply), so it cannot match. A genuinely GROWING chat conversation is the case that could hit, and this run does not exercise it. RECORDED, NOT ASSERTED: the REST surface does not report the continuation route."
+        }
+
+        $f1 = Join-Path $script:artifactDir 'step9c-p1.req.json'
+        $f2 = Join-Path $script:artifactDir 'step9c-p2.req.json'
+        Set-Content -Path $f1 -Value (& $mk $p1) -Encoding utf8
+        Set-Content -Path $f2 -Value (& $mk $p2) -Encoding utf8
+        $m1 = Join-Path $script:artifactDir 'step9c-c1.meta'
+        $m2 = Join-Path $script:artifactDir 'step9c-c2.meta'
+        $o1 = Join-Path $script:artifactDir 'step9c-c1.resp.json'
+        $o2 = Join-Path $script:artifactDir 'step9c-c2.resp.json'
         $t0 = Get-Date
-        $p1 = Start-Process -FilePath 'curl.exe' -PassThru -NoNewWindow -ArgumentList @(
-            '-s', '-o', 'NUL', '-w', '%{http_code}', '-X', 'POST',
+        $c1 = Start-Process -FilePath 'curl.exe' -PassThru -NoNewWindow -ArgumentList @(
+            '-s', '-o', $o1, '-w', '%{http_code}', '-X', 'POST',
             "http://127.0.0.1:$Port/api/generate", '-H', 'Content-Type: application/json',
             '--data-binary', "@$f1", '--max-time', '900') -RedirectStandardOutput $m1
-        $p2 = Start-Process -FilePath 'curl.exe' -PassThru -NoNewWindow -ArgumentList @(
-            '-s', '-o', 'NUL', '-w', '%{http_code}', '-X', 'POST',
+        $c2 = Start-Process -FilePath 'curl.exe' -PassThru -NoNewWindow -ArgumentList @(
+            '-s', '-o', $o2, '-w', '%{http_code}', '-X', 'POST',
             "http://127.0.0.1:$Port/api/generate", '-H', 'Content-Type: application/json',
-            '--data-binary', "@$f1", '--max-time', '900') -RedirectStandardOutput $m2
-        $p1.WaitForExit(); $p2.WaitForExit()
+            '--data-binary', "@$f2", '--max-time', '900') -RedirectStandardOutput $m2
+        $c1.WaitForExit(); $c2.WaitForExit()
         $ev3['concurrent_wall_seconds'] = [math]::Round(((Get-Date) - $t0).TotalSeconds, 3)
-        $ev3['c1_http'] = (Get-Content $m1 -Raw -ErrorAction SilentlyContinue)
-        $ev3['c2_http'] = (Get-Content $m2 -Raw -ErrorAction SilentlyContinue)
-        if ($ev3['c1_http'] -notmatch '200' -or $ev3['c2_http'] -notmatch '200') {
-            $problems3 += "concurrent equal-work requests returned $($ev3['c1_http']) and $($ev3['c2_http'])"
+        # Success is judged from the RESPONSE BODY, not from curl's -w status.
+        #
+        # `-w '%{http_code}'` under Start-Process writes "200000" here for both
+        # clients -- reproducibly, and not against an ordinary server, where
+        # the same call shape writes a clean "200". Whatever produces the
+        # trailing "000" (curl reports 000 when it has no HTTP response), the
+        # status text is not trustworthy on this path, and an earlier check of
+        # `-notmatch '200'` accepted it silently. The body is the better
+        # evidence regardless: a completed generation contains "response",
+        # which no failure mode produces. run_server_endpoints.ps1 matches on
+        # the body for the same reason.
+        $ev3['c1_status_text_raw'] = ((Get-Content $m1 -Raw -ErrorAction SilentlyContinue) -replace '\s', '')
+        $ev3['c2_status_text_raw'] = ((Get-Content $m2 -Raw -ErrorAction SilentlyContinue) -replace '\s', '')
+        $ev3['status_text_note'] = 'curl -w %{http_code} under Start-Process is unreliable on this path (it writes 200000); the response bodies below are what this step judges'
+        $b1 = if (Test-Path $o1) { Get-Content $o1 -Raw } else { '' }
+        $b2 = if (Test-Path $o2) { Get-Content $o2 -Raw } else { '' }
+        $ev3['c1_body_head'] = $b1.Substring(0, [math]::Min(300, $b1.Length))
+        $ev3['c2_body_head'] = $b2.Substring(0, [math]::Min(300, $b2.Length))
+        $ev3['c1_completed'] = ($b1 -match '"response"')
+        $ev3['c2_completed'] = ($b2 -match '"response"')
+        if (-not $ev3['c1_completed'] -or -not $ev3['c2_completed']) {
+            $problems3 += "a concurrent request did not return a completed generation (c1 ok = $($ev3['c1_completed']), c2 ok = $($ev3['c2_completed']))"
         }
-        if ($single.Seconds -gt 0) {
-            $ratio = $ev3['concurrent_wall_seconds'] / $single.Seconds
-            $ev3['concurrent_over_single_ratio'] = [math]::Round($ratio, 3)
-            $ev3['prediction'] = 'serialized predicts about 2.0; genuinely parallel predicts about 1.0'
-            # A generous band. The point is to separate 1 from 2, not to
-            # measure the constant.
-            if ($ratio -lt 1.5) {
-                $problems3 += ("two equal-work requests completed in {0}x the time of one, which is not consistent with serialization" -f $ev3['concurrent_over_single_ratio'])
-            }
+        if ($script:server.HasExited) { $problems3 += 'the server terminated during the concurrent run' }
+
+        $sum = $ev3['t1_seconds'] + $ev3['t2_seconds']
+        $max = [math]::Max($ev3['t1_seconds'], $ev3['t2_seconds'])
+        $wall = $ev3['concurrent_wall_seconds']
+        $ev3['sum_of_baselines'] = [math]::Round($sum, 3)
+        $ev3['max_of_baselines'] = [math]::Round($max, 3)
+        # The two predictions have to be far enough apart to choose between.
+        # If t1 and t2 are too close in size, sum and max are not separable and
+        # the whole comparison is meaningless -- say so rather than pick one.
+        $separation = $(if ($max -gt 0) { $sum / $max } else { 0 })
+        $ev3['prediction_separation'] = [math]::Round($separation, 3)
+        if ($separation -lt 1.4) {
+            $verdict = 'inconclusive'
+            $ev3['why_inconclusive'] = "the two baselines ($($ev3['t1_seconds'])s and $($ev3['t2_seconds'])s) are too unequal for sum and max to be distinguishable predictions"
         } else {
-            $problems3 += 'the baseline took no measurable time, so the ratio means nothing'
+            $dSum = [math]::Abs($wall - $sum) / $sum
+            $dMax = [math]::Abs($wall - $max) / $max
+            $ev3['distance_to_serialized_prediction'] = [math]::Round($dSum, 3)
+            $ev3['distance_to_parallel_prediction'] = [math]::Round($dMax, 3)
+            if ($dSum -le 0.25 -and $dSum -lt $dMax) { $verdict = 'serialized' }
+            elseif ($dMax -le 0.25 -and $dMax -lt $dSum) { $verdict = 'parallel' }
+            else { $verdict = 'inconclusive'; $ev3['why_inconclusive'] = 'the wall clock is not close to either prediction' }
         }
+        $ev3['verdict'] = $verdict
+        $ev3['prediction'] = "serialized predicts a wall clock near t1+t2 = $($ev3['sum_of_baselines'])s; parallel predicts near max(t1,t2) = $($ev3['max_of_baselines'])s; measured $wall s"
     } catch {
         $problems3 += "serialization probe failed: $($_.Exception.Message)"
         $ev3['error'] = $_.Exception.Message
     } finally {
         Stop-FlmServer
     }
-    if ($problems3.Count -eq 0) {
-        Add-StepResult -Id '9c' -Title 'Complete requests are serialized' -Status 'met' `
-            -Detail ("two equal-work concurrent requests took $($ev3['concurrent_over_single_ratio'])x a single one (serialized predicts ~2.0, parallel ~1.0)") `
-            -Evidence $ev3 -Criteria @()
-    } else {
+    if ($problems3.Count -gt 0) {
         $ev3['problems'] = $problems3
         Add-StepResult -Id '9c' -Title 'Complete requests are serialized' -Status 'not_met' `
             -Detail ($problems3 -join '; ') -Evidence $ev3 -Criteria @()
+    } elseif ($verdict -eq 'serialized') {
+        Add-StepResult -Id '9c' -Title 'Complete requests are serialized' -Status 'met' `
+            -Detail "two distinct requests run concurrently took $($ev3['concurrent_wall_seconds'])s against baselines summing to $($ev3['sum_of_baselines'])s (parallel would predict $($ev3['max_of_baselines'])s), which is the serialized prediction" `
+            -Evidence $ev3 -Criteria @()
+    } elseif ($verdict -eq 'parallel') {
+        Add-StepResult -Id '9c' -Title 'Complete requests are serialized' -Status 'not_met' `
+            -Detail "two distinct requests run concurrently took $($ev3['concurrent_wall_seconds'])s, close to max(t1,t2) = $($ev3['max_of_baselines'])s rather than the serialized t1+t2 = $($ev3['sum_of_baselines'])s: they appear to have overlapped" `
+            -Evidence $ev3 -Criteria @()
+    } else {
+        Add-StepResult -Id '9c' -Title 'Complete requests are serialized' -Status 'not_exercised' `
+            -Detail "the timing comparison was inconclusive: $($ev3['why_inconclusive']). Wall $($ev3['concurrent_wall_seconds'])s against t1+t2 $($ev3['sum_of_baselines'])s and max(t1,t2) $($ev3['max_of_baselines'])s" `
+            -Evidence $ev3 -Criteria @()
     }
 } else {
     Add-UnselectedStep -Id '9' -Title 'Server: four generation endpoints'

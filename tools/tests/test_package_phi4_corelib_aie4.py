@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import difflib
 import hashlib
 import io
 import json
@@ -751,6 +752,246 @@ class Phi4CatalogProvenanceTests(unittest.TestCase):
         entry, _, overlay = self._committed()
         self.assertNotIn("genai_config.json", entry["files"])
         self.assertFalse((overlay / "genai_config.json").exists())
+
+
+class Phi4CatalogWriterTests(unittest.TestCase):
+    """The catalog is edited in place, not regenerated.
+
+    An earlier version wrote `model_list.json` with
+    `json.dump(indent=2, sort_keys=True)`. It was semantics-preserving and it
+    still reformatted all 2,234 lines of the product's most actively edited
+    file for one added entry -- conflicting with every concurrent model
+    addition and hiding the one real change from review. These tests fail if
+    that behaviour comes back, and they check it the way a reviewer would:
+    by diffing the bytes, not by trusting the writer's own helpers.
+    """
+
+    # Deliberately not the output of any `json.dumps` call. The real catalog
+    # is hand-maintained and carries `"label":[` with no space, `"9b":{`, and
+    # a line with trailing whitespace; a serialiser normalises all three away.
+    # A fixture that round-trips cleanly would let a re-dump pass.
+    FIXTURE = (
+        "{\n"
+        '    "model_path": "models",\n'
+        '    "models": {\n'
+        '        "alpha": {\n'
+        '            "1b": {\n'
+        '                "name": "Alpha-1B",\n'
+        '                "label":[\n'
+        '                    "reasoning"\n'
+        "                ],\n"
+        '                "footprint": 1.0\n'
+        "            }\n"
+        "        },        \n"
+        '        "phi4-mini-it": {\n'
+        '            "4b": {\n'
+        '                "name": "Phi4-mini-Instruct-NPU2",\n'
+        # Braces and an escaped quote inside a string: a brace-counting
+        # splice that is not string-aware truncates somebody else's entry
+        # here, and the damage looks like a hand edit.
+        '                "url": "https://e.invalid/{a}\\"b\\"",\n'
+        '                "footprint": 3.4\n'
+        "            }\n"
+        "        },\n"
+        '        "omega": {\n'
+        '            "9b":{\n'
+        '                "name": "Omega-9B"\n'
+        "            }\n"
+        "        }\n"
+        "    }\n"
+        "}\n"
+    )
+
+    ENTRY = {"name": "generated", "footprint": 3.05}
+
+    # `model_info.json` has its own hazards: the value is an ARRAY rather than
+    # an object, the key sits at the document root, and the committed file has
+    # NO TRAILING NEWLINE -- which a writer that re-serialises silently adds.
+    INFO_FIXTURE = (
+        "{\n"
+        '    "alpha:1b": [\n'
+        "        {\n"
+        '            "type": "file",\n'
+        '            "path": "config.json"\n'
+        "        }\n"
+        "    ],\n"
+        '    "phi4-mini-it:4b": [\n'
+        "        {\n"
+        '            "type": "file",\n'
+        '            "path": "model.q4nx"\n'
+        "        }\n"
+        "    ]\n"
+        "}"
+    )
+
+    RECORDS = [{"type": "file", "path": "model.onnx"}]
+
+    def _write(self, original: str, entry: dict[str, object]) -> str:
+        updated, _ = package_tool.updated_catalog_documents(
+            json.loads(original),
+            {},
+            entry,
+            [],
+        )
+        with tempfile.TemporaryDirectory() as workspace:
+            path = Path(workspace) / "model_list.json"
+            package_tool.write_model_list(path, original, updated)
+            produced = path.read_bytes().decode("utf-8")
+        self.assertEqual(json.loads(produced), updated)
+        return produced
+
+    def _write_info(
+        self,
+        original: str,
+        records: list[dict[str, object]],
+    ) -> str:
+        _, updated = package_tool.updated_catalog_documents(
+            {"models": {}},
+            json.loads(original),
+            {},
+            records,
+        )
+        with tempfile.TemporaryDirectory() as workspace:
+            path = Path(workspace) / "model_info.json"
+            package_tool.write_model_info(path, original, updated)
+            produced = path.read_bytes().decode("utf-8")
+        self.assertEqual(json.loads(produced), updated)
+        return produced
+
+    def _sole_edit(self, before: str, after: str):
+        """The one changed line range, asserted to be the only one.
+
+        Computed here from `difflib` rather than from the writer's own
+        `_strip_catalog_member`, so a bug shared by both cannot hide.
+        """
+        matcher = difflib.SequenceMatcher(
+            None,
+            before.splitlines(keepends=True),
+            after.splitlines(keepends=True),
+            autojunk=False,
+        )
+        edits = [op for op in matcher.get_opcodes() if op[0] != "equal"]
+        self.assertEqual(len(edits), 1, f"expected one edit, got {edits}")
+        return edits[0]
+
+    def test_new_entry_is_the_only_change_to_the_document(self):
+        produced = self._write(self.FIXTURE, self.ENTRY)
+        tag, i1, i2, j1, j2 = self._sole_edit(self.FIXTURE, produced)
+        self.assertEqual(tag, "insert")
+        inserted = produced.splitlines(keepends=True)[j1:j2]
+        self.assertIn('        "phi4-mini-it-aie4": {\n', inserted)
+        # The insert lands after the anchor, not at the end of the catalog.
+        self.assertLess(i1, len(self.FIXTURE.splitlines()))
+        self.assertIn('"omega"', "".join(produced.splitlines(True)[j2:]))
+        # Style, not just structure: 4-space steps and no CRLF.
+        for line in inserted:
+            self.assertTrue(line.endswith("\n"))
+            self.assertNotIn("\r", line)
+            body = line.rstrip("\n")
+            self.assertEqual(
+                (len(body) - len(body.lstrip(" "))) % 4,
+                0,
+                f"indent is not a 4-space step: {line!r}",
+            )
+
+    def test_crlf_catalog_is_not_converted_to_lf(self):
+        original = self.FIXTURE.replace("\n", "\r\n")
+        produced = self._write(original, self.ENTRY)
+        self.assertEqual(produced.count("\n"), produced.count("\r\n"))
+        tag, _, _, j1, j2 = self._sole_edit(original, produced)
+        self.assertEqual(tag, "insert")
+        self.assertIn(
+            '        "phi4-mini-it-aie4": {\r\n',
+            produced.splitlines(keepends=True)[j1:j2],
+        )
+
+    def test_rerun_replaces_in_place_and_leaves_the_rest_alone(self):
+        # The churn the reviewer flagged returns on the *second* run, when the
+        # tool reads back its own output, so that is the run under test.
+        first = self._write(self.FIXTURE, self.ENTRY)
+        again = self._write(first, self.ENTRY)
+        self.assertEqual(again, first)
+
+        moved = self._write(first, {"name": "generated", "footprint": 3.06})
+        tag, _, _, j1, j2 = self._sole_edit(first, moved)
+        self.assertEqual(tag, "replace")
+        self.assertIn(
+            '                "footprint": 3.06\n',
+            moved.splitlines(keepends=True)[j1:j2],
+        )
+
+    def test_committed_catalog_files_are_fixed_points_of_the_writers(self):
+        # The product files themselves: re-writing them with the entries they
+        # already carry must not move a single byte. `model_info.json` is in
+        # here because it is written by the same code path and would have
+        # taken the same 3,387-line reformat on the next `refresh-catalog`.
+        source = Phi4CatalogProvenanceTests.SOURCE
+        cases = (
+            ("model_list.json", package_tool.write_model_list),
+            ("model_info.json", package_tool.write_model_info),
+        )
+        for name, writer in cases:
+            with self.subTest(document=name):
+                original = (source / name).read_bytes().decode("utf-8")
+                with tempfile.TemporaryDirectory() as workspace:
+                    target = Path(workspace) / name
+                    writer(target, original, json.loads(original))
+                    self.assertEqual(
+                        target.read_bytes().decode("utf-8"),
+                        original,
+                    )
+
+    def test_metadata_records_are_appended_without_a_trailing_newline(self):
+        produced = self._write_info(self.INFO_FIXTURE, self.RECORDS)
+        tag, _, _, j1, j2 = self._sole_edit(self.INFO_FIXTURE, produced)
+        self.assertEqual(tag, "insert")
+        inserted = produced.splitlines(keepends=True)[j1:j2]
+        self.assertIn('    "phi4-mini-it-aie4:4b": [\n', inserted)
+        # `_write_json` appends one. The committed file does not have one, and
+        # a writer that adds it churns the last line of a 3,387-line diff.
+        self.assertFalse(produced.endswith("\n"))
+
+    def test_metadata_rerun_replaces_the_record_list_in_place(self):
+        first = self._write_info(self.INFO_FIXTURE, self.RECORDS)
+        self.assertEqual(self._write_info(first, self.RECORDS), first)
+        moved = self._write_info(
+            first, [{"type": "file", "path": "vocab.json"}]
+        )
+        tag, _, _, j1, j2 = self._sole_edit(first, moved)
+        self.assertEqual(tag, "replace")
+        self.assertIn(
+            '            "path": "vocab.json"\n',
+            moved.splitlines(keepends=True)[j1:j2],
+        )
+
+    def test_a_catalog_without_the_anchor_still_gets_one_insert(self):
+        original = self.FIXTURE.replace("phi4-mini-it", "beta-mini-it")
+        produced = self._write(original, self.ENTRY)
+        tag, _, _, j1, j2 = self._sole_edit(original, produced)
+        self.assertEqual(tag, "insert")
+        self.assertIn(
+            '        "phi4-mini-it-aie4": {\n',
+            produced.splitlines(keepends=True)[j1:j2],
+        )
+
+    def test_a_damaged_splice_is_refused_rather_than_written(self):
+        # The writer's two self-checks are the only thing standing between a
+        # textual JSON edit and a corrupted catalog, so they are tested by
+        # breaking the splice rather than by reading them.
+        updated, _ = package_tool.updated_catalog_documents(
+            json.loads(self.FIXTURE), {}, self.ENTRY, []
+        )
+        with tempfile.TemporaryDirectory() as workspace:
+            path = Path(workspace) / "model_list.json"
+            with patch.object(
+                package_tool,
+                "_splice_member",
+                lambda text, *rest: text,
+            ):
+                with self.assertRaises(ValueError) as caught:
+                    package_tool.write_model_list(path, self.FIXTURE, updated)
+            self.assertIn("does not parse", str(caught.exception))
+            self.assertFalse(path.exists())
 
 
 if __name__ == "__main__":

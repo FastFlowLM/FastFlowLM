@@ -1,6 +1,8 @@
 build
 build_*/
-/.build-*/
+# Not root-anchored: scratch build trees get dropped next to the sources they
+# build, e.g. src/test/phi4_corelib_aie4/.build-task11/.
+.build-*/
 /src/build-*/
 .vscode
 __pycache__

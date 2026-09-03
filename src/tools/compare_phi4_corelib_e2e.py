@@ -39,7 +39,8 @@ from pathlib import Path
 import numpy as np
 
 # Thresholds from design Section 12.4. They are named rather than inlined so a
-# report can quote the number that actually ran.
+# report can quote the number that actually ran, and they are SEALED below --
+# see `_DETERM2_SEALED`. Do not change either number here alone.
 MIN_CORRELATION = 0.9999
 MIN_DECODE_STEPS = 16
 TOP_K = 32
@@ -90,26 +91,58 @@ RUN_TO_RUN_MAX_ULPS = 2
 # So: every constant below is cross-checked against a literal that exists for
 # no other purpose, and the runtime failure messages point at this block by
 # name so that grepping what the message says leads HERE.
+#
+# IT NOW COVERS THE DESIGN 12.4 ACCEPTANCE THRESHOLDS TOO, and not because
+# 12.4 asked for it. `MIN_CORRELATION` and `MIN_DECODE_STEPS` sat outside the
+# seal while their values were printed verbatim in four failure messages --
+# the exact grep-the-message-and-edit path the seal exists to block, forty
+# lines above the constants it did block. Sealing the instance and leaving the
+# class open is the mistake this file has already paid for once, in the alias
+# incident described above; two lines close the class.
+#
+# Each entry carries the reason its own number cannot be moved, because the
+# reasons are NOT the same -- two are measured ceilings and two are the size
+# of the experiment -- and one message that fitted both would be true of
+# neither.
 _DETERM2_SEALED = {
-    "MAX_TOP32_ABS_DIFF": 0.25,
-    "RUN_TO_RUN_MAX_ULPS": 2,
+    "MAX_TOP32_ABS_DIFF": (
+        0.25,
+        "the largest cross-implementation top-32 logit difference ever "
+        "measured on this hardware, recorded with no margin (design 12.4)",
+    ),
+    "RUN_TO_RUN_MAX_ULPS": (
+        2,
+        "in BF16 ULP, the largest run-to-run difference that has ever been "
+        "benign; Task 13 measured two events above it and they are defects, "
+        "not headroom (design 15.3, DETERM-1)",
+    ),
+    "MIN_CORRELATION": (
+        0.9999,
+        "the correlation FastFlow must reach against the corelib reference "
+        "before the two are called the same computation; lowering it does "
+        "not make them agree, it stops the comparison asking (design 12.4)",
+    ),
+    "MIN_DECODE_STEPS": (
+        16,
+        "the shortest decode run design 12.4 accepts as evidence; fewer "
+        "steps is a smaller experiment, not a passing one",
+    ),
 }
-for _sealed_name, _sealed_value in _DETERM2_SEALED.items():
+for _sealed_name, (_sealed_value, _sealed_reason) in _DETERM2_SEALED.items():
     _actual = globals()[_sealed_name]
     if _actual != _sealed_value:
         raise SystemExit(
             f"DETERM-2: {_sealed_name} has been changed from its sealed "
             f"value {_sealed_value} to {_actual}.\n"
             "\n"
-            "These bounds are the largest differences ever measured on this "
-            "hardware, recorded with no margin. Widening one does not make a "
+            f"{_sealed_name} is {_sealed_reason}. Moving it does not make a "
             "failing run acceptable; it makes the suite stop reporting a "
             "change in behaviour that nobody has looked at.\n"
             "\n"
-            "If a run genuinely exceeds a bound: measure it, characterise it "
-            "the way report section 14.2 characterises the run-to-run case, "
-            "and amend design section 15.3. Only then update the constant "
-            "AND its entry in _DETERM2_SEALED together."
+            "If a run genuinely misses one of these: measure it, characterise "
+            "it the way report section 14.2 characterises the run-to-run "
+            "case, and amend the design section the entry names. Only then "
+            "update the constant AND its entry in _DETERM2_SEALED together."
         )
 
 

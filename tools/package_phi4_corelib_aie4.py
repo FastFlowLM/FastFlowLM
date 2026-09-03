@@ -293,6 +293,287 @@ def _write_json(path: Path, value: object) -> None:
     )
 
 
+# The two catalog documents are NOT written with `_write_json`, and the reason
+# is worth stating because the obvious thing was tried and it was wrong.
+#
+# `model_list.json` is the product's most actively edited file: 2,234 lines, 27
+# model families, and an upstream that adds to it constantly. A `json.dump` of
+# the whole document for a single added entry changed indentation (4 -> 2),
+# line endings (LF -> CRLF) and key order (alphabetised) across every one of
+# those lines. It was semantics-preserving and it was still the wrong output:
+# it conflicts with any concurrent model addition, and the one real change is
+# invisible in review.
+#
+# `model_info.json` never shipped that churn only because the entry that was
+# committed was not written by this tool. Run `refresh-catalog` against the
+# committed file and `_write_json` reformats all 3,387 of its lines the same
+# way. Fixing one file and leaving the other would have moved the defect
+# rather than closed it, so both go through the writer below.
+#
+# Matching the style instead of preserving it does not work either. Neither
+# committed file is the output of any `json.dumps` call -- `model_list.json`
+# carries hand-authored details a serialiser normalises away (`"label":[` with
+# no space, `"9b":{`, a trailing-whitespace line, a stray blank line) and
+# `model_info.json` has no trailing newline. A re-dump of the catalog at
+# indent 4 with the original key order still rewrites 66 lines.
+#
+# So the entry is spliced in as text and every other byte is left exactly as it
+# was found. Textual editing of JSON is easy to get subtly wrong, so the writer
+# proves both halves of its own contract before it writes: the produced text
+# must parse to the object graph the caller asked for, and it must reduce to
+# the input byte-for-byte once the entry is removed again.
+CATALOG_MODEL_NAME = "phi4-mini-it-aie4"
+CATALOG_MODEL_ANCHOR = "phi4-mini-it"
+CATALOG_INFO_KEY = f"{CATALOG_MODEL_NAME}:4b"
+_CATALOG_MODELS_KEY = "models"
+_CATALOG_MODEL_DEPTH = 2
+_CATALOG_INFO_DEPTH = 1
+
+
+def _json_text_style(text: str) -> tuple[str, str]:
+    """The document's newline and its one indent step, read out of itself."""
+    newline = "\r\n" if "\r\n" in text else "\n"
+    for line in text.split(newline):
+        stripped = line.lstrip(" \t")
+        if stripped and stripped != line:
+            return newline, line[: len(line) - len(stripped)]
+    raise ValueError("cannot determine the catalog's indent step")
+
+
+_JSON_CLOSERS = {"{": "}", "[": "]"}
+
+
+def _json_value_span(text: str, search_from: int) -> tuple[int, int]:
+    """Half-open span of the object or array at or after `search_from`.
+
+    Bracket counting with string awareness rather than a regex: model names
+    and URLs contain braces and escaped quotes, and a regex that gets that
+    wrong fails by silently truncating somebody else's entry. Arrays count
+    because `model_info.json` maps each model to a list of file records.
+    """
+    candidates = [
+        position
+        for position in (
+            text.find("{", search_from),
+            text.find("[", search_from),
+        )
+        if position >= 0
+    ]
+    if not candidates:
+        raise ValueError("no JSON object or array in the catalog")
+    open_at = min(candidates)
+    closer = _JSON_CLOSERS[text[open_at]]
+    depth = 0
+    in_string = False
+    escaped = False
+    for index in range(open_at, len(text)):
+        character = text[index]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == '"':
+                in_string = False
+            continue
+        if character == '"':
+            in_string = True
+        elif character == text[open_at]:
+            depth += 1
+        elif character == closer:
+            depth -= 1
+            if depth == 0:
+                return open_at, index + 1
+    raise ValueError("unterminated JSON value in the catalog")
+
+
+def _member_span(
+    text: str,
+    name: str,
+    depth: int,
+    newline: str,
+    indent_unit: str,
+) -> tuple[int, int] | None:
+    """Span of `"name": <value>` written at `depth` indent steps, or None.
+
+    The indent is part of the match on purpose. `"phi4-mini-it"` also occurs
+    inside URLs and inside the nested `4b` object of the entry being written;
+    only the occurrence at the members' own level is the member.
+    """
+    marker = f"{newline}{indent_unit * depth}{json.dumps(name)}:"
+    first = text.find(marker)
+    if first < 0:
+        return None
+    if text.find(marker, first + 1) >= 0:
+        raise ValueError(f"catalog has more than one {name} member")
+    start = first + len(newline)
+    _, end = _json_value_span(text, first + len(marker))
+    return start, end
+
+
+def _rendered_member(
+    name: str,
+    value: object,
+    depth: int,
+    newline: str,
+    indent_unit: str,
+) -> str:
+    """`"<name>": <value>` in the document's own style."""
+    rendered = json.dumps(
+        {name: value},
+        ensure_ascii=False,
+        indent=indent_unit,
+    )
+    # Strip the wrapper object `json.dumps` needed in order to emit the key,
+    # then push the remainder out to the depth it will live at.
+    body = rendered.split("\n")[1:-1]
+    extra = indent_unit * (depth - 1)
+    return newline.join(extra + line for line in body)
+
+
+def _splice_member(
+    text: str,
+    name: str,
+    value: object,
+    depth: int,
+    anchor_name: str | None,
+    container_name: str | None,
+) -> str:
+    """Insert or replace one member, touching nothing else.
+
+    `anchor_name` is the member the new one is placed after when it is not
+    already present; `container_name` is the object it belongs to, or None for
+    the document root. Both mirror `updated_catalog_documents`, so the text and
+    the object graph agree about where the entry goes.
+    """
+    newline, indent_unit = _json_text_style(text)
+    member = _rendered_member(name, value, depth, newline, indent_unit)
+
+    existing = _member_span(text, name, depth, newline, indent_unit)
+    if existing is not None:
+        # Re-running the tool must be idempotent. Replacing in place also keeps
+        # the entry where a previous run put it rather than moving it.
+        start, end = existing
+        return text[:start] + member + text[end:]
+
+    if anchor_name is not None:
+        anchor = _member_span(text, anchor_name, depth, newline, indent_unit)
+        if anchor is not None:
+            # The insert lands between the anchor's closing brace and the
+            # comma that already follows it, so the anchor's own line is
+            # untouched and the comma ends up closing the new member instead.
+            insert_at = anchor[1]
+            return text[:insert_at] + "," + newline + member + text[insert_at:]
+
+    if container_name is None:
+        container = _json_value_span(text, 0)
+    else:
+        found = _member_span(
+            text, container_name, depth - 1, newline, indent_unit
+        )
+        if found is None:
+            raise ValueError(f"catalog has no {container_name} member")
+        container = found
+    # No anchor: append as the last member, which is what
+    # `updated_catalog_documents` does with the same input.
+    insert_at = len(text[: container[1] - 1].rstrip())
+    return text[:insert_at] + "," + newline + member + text[insert_at:]
+
+
+def _strip_member(text: str, name: str, depth: int) -> str:
+    """`text` with that member and its separator comma removed."""
+    newline, indent_unit = _json_text_style(text)
+    span = _member_span(text, name, depth, newline, indent_unit)
+    if span is None:
+        return text
+    start, end = span
+    head = text[:start]
+    suffix = indent_unit * depth
+    if head.endswith(suffix):
+        head = head[: -len(suffix)]
+    if head.endswith(newline):
+        head = head[: -len(newline)]
+    tail = text[end:]
+    if head.endswith(","):
+        head = head[:-1]
+    elif tail.startswith(","):
+        tail = tail[1:]
+    return head + tail
+
+
+def _write_spliced(
+    path: Path,
+    original: str,
+    updated: object,
+    value: object,
+    name: str,
+    depth: int,
+    anchor_name: str | None,
+    container_name: str | None,
+) -> None:
+    """Splice one member in and write, but only if the result checks out.
+
+    Two checks, both before anything reaches disk, because a textual edit that
+    is subtly wrong is worse than a reformat: a reformat is merely noisy.
+    """
+    produced = _splice_member(
+        original, name, value, depth, anchor_name, container_name
+    )
+    if json.loads(produced) != updated:
+        raise ValueError(
+            f"the spliced {name} member does not parse to the requested "
+            "document"
+        )
+    if _strip_member(produced, name, depth) != _strip_member(
+        original, name, depth
+    ):
+        raise ValueError(
+            f"the spliced document changed bytes outside the {name} entry"
+        )
+    Path(path).write_bytes(produced.encode("utf-8"))
+
+
+def write_model_list(path: Path, original: str, updated_list: object) -> None:
+    """Write `model_list.json` with only the AIE4 entry changed."""
+    value = _require_mapping(
+        _require_mapping(updated_list, "catalog").get(_CATALOG_MODELS_KEY),
+        _CATALOG_MODELS_KEY,
+    ).get(CATALOG_MODEL_NAME)
+    if value is None:
+        raise ValueError(f"updated catalog has no {CATALOG_MODEL_NAME} entry")
+    _write_spliced(
+        path,
+        original,
+        updated_list,
+        value,
+        CATALOG_MODEL_NAME,
+        _CATALOG_MODEL_DEPTH,
+        CATALOG_MODEL_ANCHOR,
+        _CATALOG_MODELS_KEY,
+    )
+
+
+def write_model_info(path: Path, original: str, updated_info: object) -> None:
+    """Write `model_info.json` with only the AIE4 record list changed.
+
+    No anchor: `updated_catalog_documents` appends this key, and the committed
+    file already has it last. Preserving that keeps the file a fixed point.
+    """
+    value = _require_mapping(updated_info, "metadata").get(CATALOG_INFO_KEY)
+    if value is None:
+        raise ValueError(f"updated metadata has no {CATALOG_INFO_KEY} entry")
+    _write_spliced(
+        path,
+        original,
+        updated_info,
+        value,
+        CATALOG_INFO_KEY,
+        _CATALOG_INFO_DEPTH,
+        None,
+        None,
+    )
+
+
 def generate_overlay(
     upstream_dir: Path,
     overlay_dir: Path,
@@ -578,12 +859,17 @@ def updated_catalog_documents(
     reordered: dict[str, object] = {}
     inserted = False
     for name, value in models.items():
+        if name == CATALOG_MODEL_NAME:
+            # A re-run reads back its own output. Skipping the stale copy here
+            # is what makes the freshly built entry survive to the end of the
+            # loop instead of being overwritten by the one on disk.
+            continue
         reordered[name] = value
-        if name == "phi4-mini-it":
-            reordered["phi4-mini-it-aie4"] = {"4b": copy.deepcopy(entry)}
+        if name == CATALOG_MODEL_ANCHOR:
+            reordered[CATALOG_MODEL_NAME] = {"4b": copy.deepcopy(entry)}
             inserted = True
     if not inserted:
-        reordered["phi4-mini-it-aie4"] = {"4b": copy.deepcopy(entry)}
+        reordered[CATALOG_MODEL_NAME] = {"4b": copy.deepcopy(entry)}
     updated_list["models"] = reordered
 
     updated_info = copy.deepcopy(model_info)
@@ -702,12 +988,13 @@ def update_catalog_files(
     overlay_dir: Path,
     git_files: list[dict[str, object]],
 ) -> None:
-    model_list = json.loads(
-        Path(model_list_path).read_text(encoding="utf-8")
-    )
-    model_info = json.loads(
-        Path(model_info_path).read_text(encoding="utf-8")
-    )
+    # Read bytes and decode. `read_text` applies universal newline translation,
+    # which would hide the file's real line endings from the style-preserving
+    # writer and make it rewrite every line of a CRLF catalog.
+    model_list_text = Path(model_list_path).read_bytes().decode("utf-8")
+    model_list = json.loads(model_list_text)
+    model_info_text = Path(model_info_path).read_bytes().decode("utf-8")
+    model_info = json.loads(model_info_text)
     entry = build_catalog_entry(overlay_dir, git_files)
     validate_catalog_provenance(entry, git_files, Path(overlay_dir))
     updated_list, updated_info = updated_catalog_documents(
@@ -716,8 +1003,8 @@ def update_catalog_files(
         entry,
         git_files,
     )
-    _write_json(Path(model_list_path), updated_list)
-    _write_json(Path(model_info_path), updated_info)
+    write_model_list(Path(model_list_path), model_list_text, updated_list)
+    write_model_info(Path(model_info_path), model_info_text, updated_info)
 
 
 def validate_catalog_files(

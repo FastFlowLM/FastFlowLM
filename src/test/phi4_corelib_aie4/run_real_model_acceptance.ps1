@@ -1907,29 +1907,80 @@ if (Test-Selected '8') {
         }
         $ev['routes_selected'] = @($perTurn | ForEach-Object { $_.continuation_route })
 
-        # The mechanism, not just the symptom.
+        # The mechanism, not just the symptom -- and asserted by CONTAINMENT,
+        # not by a token count.
         #
-        # "The model did not recall turn 1" is an observation about text and a
+        # "The model did not recall turn 1" is an observation about text, and a
         # reader is entitled to ask whether it is just a weak model. /history
         # answers that: it prints the conversation the frontend believes it
-        # has. If the history were accumulating, its token count would grow
-        # monotonically across turns. If each turn replaces it, the count
-        # tracks the length of the current turn instead.
+        # has. If the history accumulates, turn N's history contains turn N-1's
+        # message. If each turn replaces it, turn N's history contains only
+        # turn N.
+        #
+        # The first version of this gate compared TOKEN COUNTS and required
+        # them to grow. That is a proxy, and a bad one in both directions.
+        # Those counts are the length of the CURRENT turn's prompt plus reply,
+        # so they can rise for reasons that have nothing to do with
+        # accumulation: an earlier run of this same step recorded
+        # [76, 81, 94, 29] -- three consecutive increases on a run where the
+        # history demonstrably was not accumulating, and the gate fired only
+        # because turn 4's reply happened to be short. Had turn 4 run long, the
+        # harness would have concluded the history WAS accumulating, on the
+        # run that proves it is not. It fails the other way too: a genuinely
+        # accumulating conversation that saturates the context cap produces
+        # equal successive counts, which "must increase" reads as a defect.
+        #
+        # Containment has neither failure mode, and the data was already being
+        # stored.
         $historyCounts = @($perTurn | ForEach-Object { $_.history_tokens })
         $ev['history_tokens_per_turn'] = $historyCounts
         $ev['history_verbatim_per_turn'] = @($perTurn | ForEach-Object { $_.history_verbatim })
+
+        # Whitespace is removed from BOTH sides rather than normalised.
+        #
+        # /history is read back out of the console screen buffer, so a long
+        # line is wrapped at the buffer width -- and a wrap splits a word with
+        # no separator at all. Collapsing runs of whitespace to single spaces
+        # would leave "remem ber" and the match would fail on a history that is
+        # perfectly correct. Deleting whitespace entirely makes the comparison
+        # immune to however the console chose to lay the text out.
+        function Remove-AllWhitespace { param([string]$T) return ($T -replace '\s', '') }
+
+        $containment = @()
+        for ($k = 1; $k -lt $perTurn.Count; $k++) {
+            $previousPrompt = [string]$perTurn[$k - 1].prompt
+            $thisHistory = [string]$perTurn[$k].history_verbatim
+            $needle = Remove-AllWhitespace $previousPrompt
+            $haystack = Remove-AllWhitespace $thisHistory
+            $contains = ($needle.Length -gt 0 -and $haystack.Contains($needle))
+            $containment += [ordered]@{
+                turn = $perTurn[$k].index
+                previous_turn_prompt = $previousPrompt
+                history_contains_previous_turn = $contains
+            }
+        }
+        $ev['history_containment'] = $containment
+        $missing = @($containment | Where-Object { -not $_.history_contains_previous_turn })
+        $ev['turns_whose_history_lost_the_previous_turn'] = @($missing | ForEach-Object { $_.turn })
+
+        # Recorded, not gated. The count sequence is informative -- it is how
+        # the runaway-to-the-cap turns show up -- but it decides nothing.
         $growing = $true
         for ($k = 1; $k -lt $historyCounts.Count; $k++) {
             if ($null -ne $historyCounts[$k] -and $null -ne $historyCounts[$k-1] -and
                 $historyCounts[$k] -le $historyCounts[$k-1]) { $growing = $false }
         }
-        $ev['history_grows_monotonically'] = $growing
-        if (@($historyCounts | Where-Object { $null -ne $_ }).Count -lt 2) {
-            $problems += '/history reported fewer than two token counts, so history accumulation could not be measured'
-        } elseif (-not $growing) {
-            $problems += ("the conversation history is not accumulating: /history reported " +
-                          ($historyCounts -join ' then ') +
-                          ' tokens across the turns, so each turn replaces the previous history rather than appending to it')
+        $ev['history_tokens_grow_monotonically'] = $growing
+        $ev['history_token_count_note'] = 'recorded only; the accumulation verdict comes from containment above, because a token count can rise or stay flat for reasons unrelated to whether the previous turn was kept'
+
+        if ($perTurn.Count -lt 2) {
+            $problems += 'fewer than two turns were captured, so history accumulation could not be measured'
+        } elseif (@($perTurn | Where-Object { -not $_.history_verbatim }).Count -gt 0) {
+            $problems += '/history produced no output for at least one turn, so history accumulation could not be measured'
+        } elseif ($missing.Count -gt 0) {
+            $problems += ("the conversation history is not accumulating: the /history output at turn(s) " +
+                          (@($missing | ForEach-Object { $_.turn }) -join ', ') +
+                          " does not contain the preceding turn's message, so each turn replaces the previous history rather than appending to it")
         }
 
         if ($problems.Count -eq 0) {
@@ -2413,6 +2464,22 @@ if (Test-Selected '9') {
         }
         $ev3['verdict'] = $verdict
         $ev3['prediction'] = "serialized predicts a wall clock near t1+t2 = $($ev3['sum_of_baselines'])s; parallel predicts near max(t1,t2) = $($ev3['max_of_baselines'])s; measured $wall s"
+
+        # Wall clock ABOVE the serialized prediction is its own observation and
+        # deserves to be named rather than left for a reader to notice in the
+        # numbers. Two requests overlapping in flight cost more than running
+        # them one after another would; on a single mutable KV session that is
+        # a plausible product signal, and it is the reason this step comes out
+        # inconclusive rather than merely imprecise. Surfaced, not gated: this
+        # probe cannot attribute the excess, and guessing is what the previous
+        # version of this step did.
+        if ($wall -gt $sum) {
+            $ev3['concurrency_costs_more_than_serial'] = $true
+            $ev3['concurrency_overhead_ratio'] = [math]::Round($wall / $sum, 3)
+            $ev3['concurrency_finding'] = "two concurrent requests took $wall s against $($ev3['sum_of_baselines'])s of sequential work -- $([math]::Round($wall / $sum, 2))x the serialized prediction and $([math]::Round($wall / $max, 2))x the parallel one. Overlapping requests cost MORE than serializing them. This step cannot say where the excess goes; it is recorded so a future task has somewhere to start."
+        } else {
+            $ev3['concurrency_costs_more_than_serial'] = $false
+        }
     } catch {
         $problems3 += "serialization probe failed: $($_.Exception.Message)"
         $ev3['error'] = $_.Exception.Message
@@ -2925,7 +2992,7 @@ if (Test-Selected '12') {
 # means this acceptance run does not exercise the criterion, and the table must
 # say so.
 $criteria = @(
-  @{ id='C01'; text='A new phi4-mini-it-aie4:4b tag selects only corelib_aie4.'; steps=@('1','6'); gap='' }
+  @{ id='C01'; text='A new phi4-mini-it-aie4:4b tag selects only corelib_aie4.'; steps=@('1','6'); gap='the catalog entry names corelib_aie4 and a real load reports that engine, which establishes that it selects corelib_aie4; ONLY is a negative and no run here shows the tag failing to reach any other backend' }
   @{ id='C02'; text='Its catalog entry uses existing context fields and measured size and on-disk footprint; no nonexistent maximum-context field is assumed.'; steps=@('1','5'); gap='' }
   @{ id='C03'; text='Existing phi4-mini-it:4b Q4NX/NPU2 selection is unchanged.'; steps=@('1'); gap='the catalog entry is checked; no Q4NX/NPU2 model was loaded, because this box has no XDNA2 hardware' }
   @{ id='C04'; text='FastFlow invokes corelib from native C++ with no Python runtime.'; steps=@(); gap='' }
@@ -2955,7 +3022,7 @@ $criteria = @(
   @{ id='C28'; text='Every allocation row extent is derived from the three pad helpers, and every required MatMul padded K/N equals its logical K/N.'; steps=@('6b'); gap='' }
   @{ id='C29'; text='SSMLP uses four distinct buffers; input and normalized output never alias.'; steps=@(); gap='' }
   @{ id='C30'; text='RoPE is gathered on the host from its actual source shape/dtype and written once into the contiguous FP32 [4096,48] device tensor.'; steps=@('5'); gap='the SOURCE shape and dtype are read from the real model (float16 [135168,48]); the host gather and the single write into the FP32 [4096,48] device tensor are not observed from the product' }
-  @{ id='C31'; text='The runtime corelib version is checked against the compiled-against version before any other symbol is used.'; steps=@('3b'); gap='' }
+  @{ id='C31'; text='The runtime corelib version is checked against the compiled-against version before any other symbol is used.'; steps=@('3b'); gap='step 3b measures that the runtime and compiled-against versions MATCH. The ordering clause -- that the check runs before any other symbol is resolved -- is read from CorelibApi::Load in the source, not observed: nothing in this run loads a mismatched library and watches where it stops' }
   @{ id='C32'; text='All conversion crosses tensor_write/tensor_read; the only FastFlow host converter is the FP32-to-BF16 helper for SSMLP norm/epsilon blobs.'; steps=@(); gap='' }
   @{ id='C33'; text='No tensor_write/tensor_read call site passes a byte count or byte offset.'; steps=@(); gap='' }
   @{ id='C34'; text='QKV, MHA, O, SSMLP, and LM-head dependency boundaries synchronize as specified.'; steps=@(); gap='' }
@@ -3129,6 +3196,7 @@ Write-Output "  record:   $OutJson"
 # ---------------------------------------------------------------------------
 
 $script:renderError = $null
+$script:renderedTurnPrompts = @()
 if ($Markdown) {
   try {
     $md = New-Object System.Collections.Generic.List[string]
@@ -3288,6 +3356,14 @@ if ($Markdown) {
             $md.Add("### Step $($st.id): $($st.title)")
             $md.Add('')
             foreach ($t in @($e.per_turn)) {
+                # Recorded as we render, for the readback check below. Taking
+                # it from the source data rather than re-parsing the finished
+                # markdown avoids guessing which '>' lines are prompts: a
+                # reply is free to contain one.
+                $script:renderedTurnPrompts += [pscustomobject]@{
+                    step = [string](Get-Field $st 'id')
+                    prompt = [string](Get-Field $t 'prompt')
+                }
                 $md.Add("**Turn $(Get-Field $t 'index')** ($(Get-Field $t 'seconds') s, continuation route ``$(Get-Field $t 'continuation_route')``)")
                 $md.Add('')
                 $md.Add('```')
@@ -3348,6 +3424,43 @@ if ($Markdown) {
     $written = Get-Content -LiteralPath $Markdown -Raw -ErrorAction SilentlyContinue
     if (-not $written -or $written -notmatch [regex]::Escape("run-stamp: $script:runStamp")) {
         throw "the acceptance document at $Markdown was not written by this run"
+    }
+    # The stamp proves the document is FRESH. It does not prove it is
+    # POPULATED, and those are different failures.
+    #
+    # The renderer reads evidence through Get-Field, which returns $null for a
+    # missing field rather than throwing. That was a deliberate change -- an
+    # unexpected row shape used to abort the whole render -- but it trades a
+    # loud failure for a quiet one: a row missing the fields the verbatim block
+    # wants now produces a turn heading with a blank prompt and a blank reply,
+    # and it would sail past the stamp check and be reported as success. The
+    # verbatim completions are the evidence a human judges this acceptance on,
+    # so an empty one is not cosmetic.
+    #
+    # Checked by literal containment against the text that was rendered, not by
+    # parsing '>' lines back out of the markdown -- a reply may legitimately
+    # contain one, and a check that cannot tell a prompt from a quoted line is
+    # a check that will eventually pass on nothing.
+    $blank = @($script:renderedTurnPrompts | Where-Object { -not $_.prompt -or $_.prompt.Trim().Length -eq 0 })
+    if ($blank.Count -gt 0) {
+        throw ("the document rendered $($blank.Count) turn(s) with an empty prompt for step(s) " +
+               (@($blank | ForEach-Object { $_.step } | Sort-Object -Unique) -join ', ') +
+               ": the verbatim evidence did not reach it")
+    }
+    foreach ($rt in $script:renderedTurnPrompts) {
+        if ($written -notmatch [regex]::Escape($rt.prompt)) {
+            throw "step $($rt.step): a turn prompt was rendered but is not present in the written document"
+        }
+    }
+    $stepsWithTurns = @($script:record['steps'] | Where-Object {
+        @(Get-Field (Get-Field $_ 'evidence') 'per_turn').Count -gt 0 })
+    foreach ($swt in $stepsWithTurns) {
+        $sid = [string](Get-Field $swt 'id')
+        $expected = @(Get-Field (Get-Field $swt 'evidence') 'per_turn').Count
+        $got = @($script:renderedTurnPrompts | Where-Object { $_.step -eq $sid }).Count
+        if ($got -ne $expected) {
+            throw "step ${sid}: $expected turn(s) of evidence but $got rendered into the document"
+        }
     }
     Write-Output "  document: $Markdown (run-stamp $script:runStamp)"
   } catch {

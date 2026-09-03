@@ -85,9 +85,13 @@ the last category is large.
 - **Multi-turn conversation in `flm run` does not retain history.** Each turn
   is answered as though it were the first: after telling the model a fact and
   asking about it on the next turn, the model does not have it. `/history`
-  confirms the previous turn is gone rather than appended. Supply the whole
-  conversation yourself — the `/api/chat` and `/v1/chat/completions` endpoints
-  take a full `messages` array and behave correctly — until this is fixed.
+  confirms it — the token count tracks the current turn instead of growing, so
+  the previous turn was replaced rather than appended. This is **not specific
+  to this model or to the AIE4 backend**: the CLI builds a single-message
+  prompt from the current input, and every text frontend does the same. Supply
+  the whole conversation yourself — the `/api/chat` and `/v1/chat/completions`
+  endpoints take a full `messages` array and count it in full — until this is
+  fixed.
 - **Generation can run to the context cap.** A request with no generation
   limit is bounded only by the model emitting an end token. When it does not,
   generation continues to the cap; one measured turn took 182 seconds and

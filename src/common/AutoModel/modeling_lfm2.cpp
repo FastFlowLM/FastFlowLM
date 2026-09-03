@@ -7,6 +7,7 @@
 
 #include "AutoModel/modeling_lfm2.hpp"
 #include "utils/utils.hpp"
+#include "utils/tool_calling_utils.hpp"
 #include "metrices.hpp"
 
 /************              LFM2 family            **************/
@@ -220,12 +221,7 @@ StreamResult LFM2::parse_stream_content(const std::string content) {
                             value_end++;
                         }
                         value = args_part.substr(pos, value_end - pos);
-                        size_t v_start = value.find_first_not_of(" \t\n\r");
-                        size_t v_end = value.find_last_not_of(" \t\n\r");
-                        if (v_start != std::string::npos) {
-                            value = value.substr(v_start, v_end - v_start + 1);
-                        }
-                        args_json[key] = value;
+                        args_json[key] = normalize_tool_argument_value(value);
                         pos = value_end;
                     }
                 }
@@ -612,12 +608,7 @@ StreamResult LFM2_5_TK::parse_stream_content(const std::string content) {
                             value_end++;
                         }
                         value = args_part.substr(pos, value_end - pos);
-                        size_t v_start = value.find_first_not_of(" \t\n\r");
-                        size_t v_end = value.find_last_not_of(" \t\n\r");
-                        if (v_start != std::string::npos) {
-                            value = value.substr(v_start, v_end - v_start + 1);
-                        }
-                        args_json[key] = value;
+                        args_json[key] = normalize_tool_argument_value(value);
                         pos = value_end;
                     }
                 }

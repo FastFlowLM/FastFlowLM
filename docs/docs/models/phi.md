@@ -87,12 +87,17 @@ the last category is large.
   asking about it on the next turn, the model does not have it. `/history`
   confirms it — the conversation it prints contains only the current exchange,
   with the previous turn's message and reply absent, so each turn replaces the
-  history rather than appending to it. This is **not specific
-  to this model or to the AIE4 backend**: the CLI builds a single-message
-  prompt from the current input, and every text frontend does the same. Supply
-  the whole conversation yourself — the `/api/chat` and `/v1/chat/completions`
-  endpoints take a full `messages` array and count it in full — until this is
-  fixed.
+  history rather than appending to it. This is **not specific to this model or
+  to the AIE4 backend, and it is not an AIE4 defect.** `Phi4::insert`
+  (`common/AutoModel/modeling_phi4.cpp:559`) wraps `input.prompt` in a fresh
+  single-message array whenever `input.messages` is empty, which is every CLI
+  turn, and that happens at lines 569–573 — *above* the
+  `#if defined(FLM_ENABLE_CORELIB_AIE4)` branch that starts at line 579. The
+  history is already gone before any AIE4 code runs. The identical construction
+  is in the Llama 3, Qwen 2, Qwen 3, Gemma 3, LFM2, GPT-OSS and Nanbeige
+  frontends: it is the shared CLI path for every text model. Supply the whole
+  conversation yourself — the `/api/chat` and `/v1/chat/completions` endpoints
+  take a full `messages` array and count it in full — until this is fixed.
 - **Generation can run to the context cap, and output degrades when it does.**
   A request with no generation limit is bounded only by the model emitting an
   end token. When it does not, generation continues to the cap — and the text
@@ -101,9 +106,19 @@ the last category is large.
   phrase for the remainder, and the other degenerated into meaningless
   characters. **Set an explicit generation limit.** It is the difference
   between a bounded reply and three minutes of noise.
-- **The limit is 4095, not 4096**, for the prompt and the generated tokens
-  together, counted over the complete rendered conversation. The KV window is
-  4096 rows; the usable cap is one less because no token-attention kernel
-  ships for a 4096-token window. Requests over the cap are refused before any
-  work is submitted, with HTTP 400 on the server and a message naming the cap
-  and the rendered prompt length.
+
+  *Why those turns degenerated is not yet known, and this document will not
+  guess.* Reaching the cap is a consequence of a reply that will not stop, not
+  a cause of one, and the first of the two turns had no conversation history to
+  lose — so the missing-history behaviour above does not explain it. It also
+  sits against five single-turn prompts in the same acceptance run that all
+  returned short, correct, well-formed answers. Attribution is pending.
+- **The limit is 4095 tokens** for the prompt and the generated tokens
+  together, counted over the complete rendered conversation. This is **by
+  design, not a shortfall**: the AIE4 operators support at most about 4k input.
+  The KV window is 4096 rows and the usable cap is one less, because no
+  token-attention kernel ships for a 4096-token window. Requests over the cap
+  are refused before any work is submitted, with HTTP 400 on the server and a
+  message naming the cap and the rendered prompt length. The acceptance run
+  verifies the enforcement exactly: the remaining capacity is admitted and one
+  token more is refused.

@@ -182,7 +182,11 @@ std::pair<std::string, std::string> Whisper::generate(whisper_task_type_t task, 
             os << token_str << std::flush;
         }
         
-        int watching_dog = 16;
+        // Forcing a timestamp after only 16 content tokens (~4 s of speech) makes
+        // Whisper close the segment and emit EOT: every transcription was cut at
+        // ~15 tokens (see issue #698). 448 = decoder max, so the guard only fires
+        // on a genuinely runaway decode.
+        int watching_dog = 448;
         for (int i = 0; i < 448 - 3; i++){
             buffer<bf16> logits = this->whisper_engine->decode_audio(last_idx);
             if (watching_dog == 0 && allow_force_time_stamp){

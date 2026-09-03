@@ -69,6 +69,128 @@ Tool calling has been supported since `v0.9.26`.
 
 Please refer to the [model card](https://fastflowlm.com/docs/models/) to see whether tool calling is supported for each model.
 
+## OpenAI tool-selection behavior
+
+FastFlowLM implements function tools at the `/v1/chat/completions` boundary.
+The following table describes the supported contract. It does not imply support
+for every tool feature available in other OpenAI endpoints.
+
+| Capability | Status | Behavior |
+|---|---|---|
+| Function tools | Supported | Each tool must have `type: "function"` and a valid function name. |
+| `tool_choice: "none"` | Supported | No function definitions are sent to the model and tool calls are rejected. |
+| `tool_choice: "auto"` | Supported | The model may return text or one or more calls. This is the default when tools are present. |
+| `tool_choice: "required"` | Supported | The model must return one or more valid calls. |
+| Named function choice | Supported | The model must return exactly one call to the selected function. |
+| `allowed_tools` | Supported | Restricts the model to a named subset in `auto` or `required` mode. |
+| `parallel_tool_calls` | Supported | `false` limits each assistant response to at most one call. |
+| Streaming tool responses | Supported with buffering | Calls are validated before any Server-Sent Events (SSE) are emitted. |
+| Strict JSON Schema | Not supported | A function definition with `strict: true` returns a request error. |
+| Custom or hosted tools | Not supported | Only function tools can be passed to FastFlowLM model templates. |
+| Responses API tools | Not supported | This contract applies only to Chat Completions. |
+
+### Selecting tools
+
+The endpoint accepts `none`, `auto`, and `required` as string values. A named
+function choice uses this object form:
+
+```json
+{
+  "tool_choice": {
+    "type": "function",
+    "function": { "name": "get_temperature" }
+  }
+}
+```
+
+The name must identify a function in the same request's `tools` array. The
+`allowed_tools` form can expose only a subset of the definitions:
+
+```json
+{
+  "tool_choice": {
+    "type": "allowed_tools",
+    "allowed_tools": {
+      "mode": "required",
+      "tools": [
+        {"type": "function", "function": {"name": "get_temperature"}}
+      ]
+    }
+  }
+}
+```
+
+`parallel_tool_calls` must be a JSON boolean. When it is `false`, a response
+containing more than one call is rejected. A named function choice always
+requires exactly one call, regardless of the parallel setting.
+
+### Function definitions and validation
+
+Function names are limited to 64 ASCII letters, digits, underscores, or hyphens.
+`description`, when present, must be a string and may contain UTF-8 text.
+`parameters`, when present, must be a JSON Schema object. `strict` must be a
+boolean; `strict: true` is rejected because FastFlowLM does not yet provide
+constrained JSON Schema decoding.
+
+Tool-call responses are checked before they are returned. Each call must name an
+available function, have a non-empty call ID, and provide `function.arguments`
+as a string containing a JSON object. FastFlowLM validates the transport shape,
+not every constraint in the function's parameter schema. Applications must
+validate the decoded object against their schema before executing a function.
+
+If generation violates the selected policy, returns an undeclared function,
+or produces malformed arguments, FastFlowLM returns HTTP 500 with a structured
+model error instead of presenting the output as a successful call:
+
+```json
+{
+  "error": {
+    "message": "model called an unavailable function: call",
+    "type": "model_error",
+    "param": "tool_choice",
+    "code": 500
+  }
+}
+```
+
+The parser state, model context, and prompt cache are cleared after this error,
+so a subsequent request does not reuse the rejected generation. Invalid request
+fields instead return HTTP 400 with `type: "invalid_request_error"` and identify
+the rejected parameter.
+
+### Streaming and usage
+
+Requests with tools are buffered until the complete assistant response can be
+validated. Time to first token is therefore approximately equal to the complete
+tool-call generation time. After validation, FastFlowLM emits Chat Completions
+SSE chunks followed by `data: [DONE]`.
+
+By default, streamed chunks do not contain `usage`. To request token totals, set:
+
+```json
+{
+  "stream": true,
+  "stream_options": {"include_usage": true}
+}
+```
+
+With `include_usage: true`, ordinary chunks contain `"usage": null`. A separate
+final chunk has an empty `choices` array and contains the total usage. If the
+stream is interrupted, that final usage chunk may not arrive.
+
+### Executing calls safely
+
+The application, not FastFlowLM, executes functions. Before dispatching a call:
+
+1. Confirm the function name is registered for the current request.
+2. Decode `function.arguments` as JSON and validate it against the function schema.
+3. Apply authorization, path, network, and side-effect controls appropriate to the function.
+4. Return one `role: "tool"` message with the matching `tool_call_id` for each call.
+5. Preserve the assistant's complete `tool_calls` message when sending the next turn.
+
+Do not execute an unknown function, malformed argument object, or repeated
+side-effecting call merely because it appeared in model output.
+
 ## 🐍 How to use tool calling with FLM via Python script
 
 This section walks through an end‑to‑end tool‑calling flow in both streaming and non‑streaming modes. 

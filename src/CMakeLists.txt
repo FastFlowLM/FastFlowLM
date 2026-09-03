@@ -1,6 +1,7 @@
 cmake_minimum_required(VERSION 3.22)
 project(flm LANGUAGES CXX VERSION 0.1.0)
 
+include(CTest)
 if(POLICY CMP0207)
     cmake_policy(SET CMP0207 NEW)
 endif()
@@ -875,6 +876,9 @@ else()
     ")
 endif()
 
+if(BUILD_TESTING)
+    add_subdirectory(test/openai_tool_policy)
+endif()
 install(FILES model_list.json DESTINATION "${FLM_SHARE_DESTINATION}")
 install(FILES model_info.json DESTINATION "${FLM_SHARE_DESTINATION}")
 

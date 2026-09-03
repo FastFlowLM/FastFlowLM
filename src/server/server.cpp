@@ -738,9 +738,9 @@ bool WebServer::handle_request(http::request<http::string_body>& req,
                 if (code == 400) {
                     status = http::status::bad_request;
                 }
-                //else if () {
-
-                //}
+                else if (code >= 500) {
+                    status = http::status::internal_server_error;
+                }
             }
 
             response_ref.result(status);

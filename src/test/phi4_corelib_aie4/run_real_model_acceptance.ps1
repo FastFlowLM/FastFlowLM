@@ -112,6 +112,21 @@ New-Item -ItemType Directory -Force -Path $script:artifactDir | Out-Null
 # different binary.
 $script:identityExeSha = $(if (Test-Path $FlmExe) { (Get-FileHash -Path $FlmExe -Algorithm SHA256).Hash.ToLowerInvariant() } else { $null })
 
+# The harness hashes itself and its console driver.
+#
+# `checkout_revision` alone is not enough to say what produced a result. This
+# script is edited and copied to the target dozens of times while it is being
+# brought up, so a record can truthfully name a commit while having been
+# produced by a script that differs from that commit's content. Recording the
+# script's own SHA-256 makes the claim checkable: `git show <rev>:<path>`
+# hashed against this field either matches or it does not.
+#
+# It also gates the carry-forward rule below, so a result produced by an
+# earlier version of this harness is never carried into a run of a later one.
+$script:harnessSha = (Get-FileHash -Path $MyInvocation.MyCommand.Path -Algorithm SHA256).Hash.ToLowerInvariant()
+$script:driverPath = Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) 'drive_flm_console.ps1'
+$script:driverSha = $(if (Test-Path $script:driverPath) { (Get-FileHash -Path $script:driverPath -Algorithm SHA256).Hash.ToLowerInvariant() } else { $null })
+
 $script:record = [ordered]@{}
 if ($Append -and (Test-Path $OutJson)) {
     $existing = Get-Content $OutJson -Raw | ConvertFrom-Json
@@ -280,6 +295,8 @@ function Add-StepResult {
         # carrying a result forward across runs would be an act of faith.
         flm_exe_sha256   = $script:identityExeSha
         fastflow_revision = $FastFlowRevision
+        harness_sha256   = $script:harnessSha
+        driver_sha256    = $script:driverSha
         carried_over = $false
     }
     $script:record['steps'] = @($steps | Sort-Object { [double]($_.id -replace '[^0-9.]', '') })
@@ -336,9 +353,16 @@ function Add-UnselectedStep {
         $priorStatus = [string](Get-Field $p 'status')
         $priorExe = [string](Get-Field $p 'flm_exe_sha256')
         $priorRev = [string](Get-Field $p 'fastflow_revision')
+        $priorHarness = [string](Get-Field $p 'harness_sha256')
+        $priorDriver = [string](Get-Field $p 'driver_sha256')
+        # Same binary, same revision, AND same harness. Editing this script
+        # invalidates every earlier result, which is the point: a verdict
+        # reached by different code is a different verdict.
         if ($priorStatus -ne 'not_exercised' -and
             $priorExe -eq $script:identityExeSha -and
-            $priorRev -eq $FastFlowRevision) {
+            $priorRev -eq $FastFlowRevision -and
+            $priorHarness -eq $script:harnessSha -and
+            $priorDriver -eq $script:driverSha) {
             # Rebuilt as a fresh ordered dictionary rather than mutated in
             # place: a prior entry loaded from the JSON file is a
             # PSCustomObject and a prior entry from this session is an ordered
@@ -364,7 +388,7 @@ function Add-UnselectedStep {
             return
         }
         if ($priorStatus -ne 'not_exercised') {
-            Write-Output ("  [DISCARDED] step {0}: a prior '{1}' result was recorded against a different binary or revision" -f $Id, $priorStatus)
+            Write-Output ("  [DISCARDED] step {0}: a prior '{1}' result was recorded against a different binary, revision or harness" -f $Id, $priorStatus)
         }
     }
     Add-StepResult -Id $Id -Title $Title -Status 'not_exercised' -Detail 'step not selected for this run'
@@ -449,6 +473,9 @@ $identity = [ordered]@{
     corelib_runtime_dir = $CorelibRuntimeDir
     corelib_source_revision = $CorelibSourceRevision
     hf_revision        = 'e751fb68c2cfffe6b0d32942118f75ac0a0365bb'
+    harness_sha256     = $script:harnessSha
+    driver_sha256      = $script:driverSha
+    harness_path       = $MyInvocation.MyCommand.Path
 }
 try {
     $cpu = Get-CimInstance Win32_Processor | Select-Object -First 1
@@ -1533,40 +1560,85 @@ if (Test-Selected '6') {
 # ---------------------------------------------------------------------------
 
 if (Test-Selected '7') {
-    Write-Section 'Step 7: first real generation through flm run'
+    Write-Section 'Step 7: real generation through flm run'
     $ev = [ordered]@{}
-    $prompt = 'What is the capital of France? Answer in one sentence.'
-    $ev['prompt_verbatim'] = $prompt
-    $session = Invoke-FlmConsoleSession -Turns @($prompt) -Name 'step7-generate'
-    $ev['driver_result'] = $session.Path
-    $ev['driver_exit'] = $session.ExitCode
-    if (-not $session.Json) {
-        Add-StepResult -Id '7' -Title 'First real generation' -Status 'not_exercised' `
-            -Detail $session.Reason -Evidence $ev -Criteria @('C24')
-    } else {
+
+    # Several prompts, not one, and each with an anchor a wrong answer cannot
+    # accidentally satisfy.
+    #
+    # The acceptance question for this release is whether the shipped product,
+    # run the way a user runs it, against the real published model, produces
+    # COHERENT OUTPUT. One prompt cannot answer that: a single lucky
+    # completion is exactly what a subtly wrong weight map produces. These
+    # exercise recall, arithmetic, instruction-following, short-form
+    # generation and a refusal-shaped question, so that a reader has enough
+    # material to judge, which is what the acceptance actually rests on.
+    #
+    # `anchor` is a substring the correct answer must contain. It is a floor,
+    # never a ceiling: a reply can contain it and still be nonsense, which is
+    # why every completion is recorded verbatim in the document for a human.
+    $probes = @(
+        @{ name = 'capital';    prompt = 'What is the capital of France? Answer in one sentence.'; anchor = 'Paris' },
+        @{ name = 'arithmetic'; prompt = 'What is 17 multiplied by 4? Reply with just the number.'; anchor = '68' },
+        @{ name = 'instruction'; prompt = 'List exactly three primary colours, separated by commas, and nothing else.'; anchor = 'red' },
+        @{ name = 'shortform';  prompt = 'In two sentences, explain what a compiler does.'; anchor = '' },
+        @{ name = 'recall';     prompt = 'Who wrote the play Hamlet? Answer with the name only.'; anchor = 'Shakespeare' }
+    )
+    $results = @()
+    $problems = @()
+    $driverFailed = $false
+    foreach ($probe in $probes) {
+        $session = Invoke-FlmConsoleSession -Turns @($probe.prompt) -Name ("step7-" + $probe.name)
+        if (-not $session.Json) {
+            $problems += "$($probe.name): $($session.Reason)"
+            $driverFailed = $true
+            $results += [ordered]@{ name = $probe.name; prompt_verbatim = $probe.prompt; error = $session.Reason }
+            continue
+        }
         $reply = ''
+        $seconds = $null
         if ($session.Json.turns -and @($session.Json.turns).Count -gt 0) {
             $reply = @($session.Json.turns)[0].reply_raw
-            $ev['turn_seconds'] = @($session.Json.turns)[0].seconds
+            $seconds = @($session.Json.turns)[0].seconds
         }
-        $ev['completion_verbatim'] = $reply
-        $ev['screen_verbatim'] = $session.Json.screen_final
-        $ev['model_load_seconds'] = $session.Json.load_seconds
-        # "Coherent English", not "non-empty". Paris is a factual anchor the
-        # model is expected to get right; a wrong weight map produces fluent
-        # text that fails exactly this.
-        $judged = Test-LooksLikeEnglish -Text $reply -MustContain 'Paris'
-        $ev['coherence_reasons'] = $judged.Reasons
-        $ev['coherence_normalized'] = $judged.Normalized
-        if ($judged.Ok) {
-            Add-StepResult -Id '7' -Title 'First real generation' -Status 'met' `
-                -Detail 'flm run produced coherent English naming Paris; the verbatim prompt and completion are in the evidence for a human to judge' `
-                -Evidence $ev -Criteria @('C24')
-        } else {
-            Add-StepResult -Id '7' -Title 'First real generation' -Status 'not_met' `
-                -Detail ("the completion did not read as a coherent answer: " + ($judged.Reasons -join '; ')) `
-                -Evidence $ev -Criteria @('C24')
+        $judged = Test-LooksLikeEnglish -Text $reply -MustContain $probe.anchor
+        $results += [ordered]@{
+            name = $probe.name
+            prompt_verbatim = $probe.prompt
+            completion_verbatim = $reply
+            expected_substring = $probe.anchor
+            seconds = $seconds
+            model_load_seconds = $session.Json.load_seconds
+            coherent = $judged.Ok
+            coherence_reasons = $judged.Reasons
+            driver_result = $session.Path
         }
+        if (-not $judged.Ok) { $problems += "$($probe.name): $($judged.Reasons -join ', ')" }
+    }
+    $ev['probes'] = $results
+    $ev['probe_count'] = $results.Count
+    $ev['coherent_count'] = @($results | Where-Object { $_.coherent }).Count
+    # The first probe is also surfaced under the names the document's verbatim
+    # section looks for, so the headline prompt and completion appear in full.
+    if ($results.Count -gt 0 -and -not $driverFailed) {
+        $ev['prompt_verbatim'] = $results[0].prompt_verbatim
+        $ev['completion_verbatim'] = $results[0].completion_verbatim
+    }
+    $ev['judgement_scope'] = 'the mechanical check below only rules out the gross failures -- empty output, a repeated token, a missing factual anchor. Whether these completions read as a working model is a human judgement, and the verbatim text is recorded so it can be made.'
+
+    if ($driverFailed) {
+        $ev['problems'] = $problems
+        Add-StepResult -Id '7' -Title 'Real generation through flm run' -Status 'not_exercised' `
+            -Detail ("the console driver did not complete: " + ($problems -join '; ')) -Evidence $ev -Criteria @('C24')
+    } elseif ($problems.Count -eq 0) {
+        Add-StepResult -Id '7' -Title 'Real generation through flm run' -Status 'met' `
+            -Detail "$($ev['coherent_count']) of $($ev['probe_count']) prompts produced coherent English carrying the expected answer; every prompt and completion is recorded verbatim for a human to judge" `
+            -Evidence $ev -Criteria @('C24')
+    } else {
+        $ev['problems'] = $problems
+        Add-StepResult -Id '7' -Title 'Real generation through flm run' -Status 'not_met' `
+            -Detail ("$($ev['coherent_count']) of $($ev['probe_count']) prompts produced a coherent answer; failures: " + ($problems -join '; ')) `
+            -Evidence $ev -Criteria @('C24')
     }
 
     # The golden token-ID half of Step 7 is a separate result, because it is a
@@ -2444,6 +2516,32 @@ $reloaded = [ordered]@{}
 foreach ($prop in $onDisk.PSObject.Properties) { $reloaded[$prop.Name] = $prop.Value }
 $script:record = $reloaded
 
+# Say what this run did NOT measure about determinism, always, in the record
+# and in the document.
+#
+# Design DETERM-5 (human decision) makes run-to-run divergence a known,
+# measured, bounded defect carried alongside this release rather than a
+# release blocker, so a DETERM breach does not fail this acceptance verdict.
+# The gates and the DETERM-2 seal are untouched -- they are how a CHANGE in
+# the behaviour gets noticed, and nothing here widens a bound or makes a gate
+# advisory.
+#
+# What this acceptance run must not do is let the defect go silently absent.
+# It runs no determinism campaign at all: no repeated golden, no bit-identity
+# comparison, no rate. The observed divergence rate is a few percent, so even
+# a run that DID measure and came out clean would not be evidence the defect
+# is gone. Stating that here means the reader cannot infer from a green
+# acceptance that the question is settled.
+Set-Field 'determinism_scope' ([ordered]@{
+    exercised = $false
+    why = 'this acceptance run measures the shipped product against the real model; it runs no repeated-golden or bit-identity campaign, so it produces no determinism evidence in either direction'
+    policy = 'DETERM-5: run-to-run divergence is a known, measured, bounded defect carried with this release and is not a blocker for this acceptance verdict. The DETERM-1/2 gates and the sealed constants are unchanged.'
+    clean_run_is_not_absence = 'the observed divergence rate is a few percent, so a run that did not breach a gate would not be evidence the defect is gone'
+    measured_by = 'run_hardware_suite.ps1 -DeterminismRuns <n> with src/tools/compare_phi4_corelib_e2e.py; baseline in docs/docs/benchmarks/phi4_results.md'
+    sharpened_hypothesis = 'precision alone cannot produce this: deterministic rounding of deterministic inputs is reproducible. Identical inputs giving different results additionally requires the ORDER of operations to vary -- a parallel reduction combining partials in completion order, an unpinned tiling or work split, or a dispatch-time scheduling choice. Floating-point addition is not associative, so varying order varies the last bits. The search is therefore for an operator whose accumulation or work-partitioning order is not pinned, not for the least accurate one, and it is confined to the 32-layer model body because the LM head is exonerated against an FP64 host reference.'
+})
+Save-Record
+
 $stepById = @{}
 foreach ($s in @($script:record['steps'])) { $stepById[$s.id] = $s }
 
@@ -2548,7 +2646,14 @@ if ($Markdown) {
     $md.Add("| Machine | ``$($id.machine)`` |")
     $md.Add("| CPU | $($id.cpu) |")
     $md.Add("| NPU | $($id.npu), driver $($id.npu_driver), status $($id.npu_status) |")
-    $md.Add("| FastFlow commit | ``$($id.fastflow_revision)`` |")
+    $md.Add("| FastFlow commit ``flm.exe`` was built from | ``$($id.binary_revision)`` |")
+    $md.Add("| Commit this acceptance ran at | ``$($id.checkout_revision)`` |")
+    $md.Add("| Harness SHA-256 | ``$($id.harness_sha256)`` |")
+    $md.Add("| Console driver SHA-256 | ``$($id.driver_sha256)`` |")
+    $changedSince = Get-Field $id 'product_sources_changed_since_binary_revision'
+    if ($null -ne $changedSince) {
+        $md.Add("| Product sources differing between them | $(@($changedSince).Count) |")
+    }
     $md.Add("| ``flm.exe`` SHA-256 | ``$($id.flm_exe_sha256)`` |")
     $md.Add("| corelib source revision | ``$($id.corelib_source_revision)`` |")
     $md.Add("| Model | ``amd/phi-4-mini-instruct-oga-dml`` at HF ``$($id.hf_revision)`` |")
@@ -2572,6 +2677,22 @@ if ($Markdown) {
     $md.Add('not test the criterion, and nothing here should be read as evidence')
     $md.Add('that it holds.')
     $md.Add('')
+    $det = Get-Field $script:record 'determinism_scope'
+    if ($det) {
+        $md.Add('### Run-to-run determinism is not measured here')
+        $md.Add('')
+        $md.Add((Get-Field $det 'why') + '.')
+        $md.Add('')
+        $md.Add((Get-Field $det 'policy'))
+        $md.Add('')
+        $md.Add('**A clean acceptance run is not evidence that the divergence is gone.** ' +
+                (Get-Field $det 'clean_run_is_not_absence') + '.')
+        $md.Add('')
+        $md.Add('It is measured by `' + (Get-Field $det 'measured_by') + '`.')
+        $md.Add('')
+        $md.Add('On what a future investigation should look for: ' + (Get-Field $det 'sharpened_hypothesis'))
+        $md.Add('')
+    }
     $md.Add('## Steps')
     $md.Add('')
     $md.Add('| Step | Result | What was checked |')
@@ -2608,6 +2729,27 @@ if ($Markdown) {
         # which is how the document generator died after the summary had
         # already printed a clean result.
         $names = @($e.PSObject.Properties | ForEach-Object { $_.Name })
+        if ($names -contains 'probes') {
+            $any = $true
+            $md.Add("### Step $($st.id): $($st.title)")
+            $md.Add('')
+            $md.Add('The mechanical check below each completion only rules out gross')
+            $md.Add('failure. Whether these read as a working model is a human')
+            $md.Add('judgement, and making it is what this section is for.')
+            $md.Add('')
+            foreach ($pr in @($e.probes)) {
+                $verdict = $(if (Get-Field $pr 'coherent') { 'passed the mechanical check' } else { 'FAILED the mechanical check: ' + ((Get-Field $pr 'coherence_reasons') -join ', ') })
+                $secs = Get-Field $pr 'seconds'
+                $md.Add("**$(Get-Field $pr 'name')** ($secs s, $verdict)")
+                $md.Add('')
+                $md.Add('```')
+                $md.Add(">>> $(Get-Field $pr 'prompt_verbatim')")
+                foreach ($line in ([string](Get-Field $pr 'completion_verbatim') -split "`r?`n")) { $md.Add($line) }
+                $md.Add('```')
+                $md.Add('')
+            }
+            continue
+        }
         if ($names -contains 'prompt_verbatim' -and $names -contains 'completion_verbatim') {
             $any = $true
             $md.Add("### Step $($st.id): $($st.title)")

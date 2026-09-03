@@ -62,3 +62,38 @@ repository.
 
 These files restate the model contract for FastFlowLM's existing readers; they
 never override it, and a model whose weights disagree with them fails to load.
+That last sentence is checked rather than asserted: editing a single value in
+the shipped `config.json` makes `flm run phi4-mini-it-aie4:4b` refuse to load,
+naming the field, the value it found and the value the ONNX initializers
+require.
+
+### What has been verified on hardware
+
+This backend has been run end to end against the published model on an AMD
+Ryzen AI NPU. The signed-off record — machine and driver identity, the
+FastFlowLM commit, corelib DLL hashes, every measured timing, the verbatim
+prompts and completions, and a line-by-line result against the design's
+acceptance criteria — is at
+[Phi-4 AIE4 acceptance](../benchmarks/phi4_aie4_acceptance.html).
+
+Read that document before relying on any claim here. It states plainly which
+criteria were met, which were not, and which were **not tested at all**, and
+the last category is large.
+
+### Known limitations
+
+- **Multi-turn conversation in `flm run` does not retain history.** Each turn
+  is answered as though it were the first: after telling the model a fact and
+  asking about it on the next turn, the model does not have it. `/history`
+  confirms the previous turn is gone rather than appended. Supply the whole
+  conversation yourself — the `/api/chat` and `/v1/chat/completions` endpoints
+  take a full `messages` array and behave correctly — until this is fixed.
+- **Generation can run to the context cap.** A request with no generation
+  limit is bounded only by the model emitting an end token. When it does not,
+  generation continues to the 4096-token cap; one measured turn took 182
+  seconds and produced a repeating phrase. Set an explicit limit for
+  predictable latency.
+- The context limit is 4096 tokens for the prompt and the generated tokens
+  together, counted over the complete rendered conversation. Requests over
+  that are refused before any work is submitted, with HTTP 400 on the server
+  and a message naming the cap.

@@ -4,9 +4,23 @@ project(phi4_corelib_aie4_tests LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# ryzenai-corelib is OPTIONAL here, and that is not a relaxation.
+#
+# This suite owns the guards that answer "does FastFlow still build with the
+# AIE4 feature OFF" -- phi4_frontend_compile_off and task10_production_compile_off
+# compile the real production TUs (main.cpp, rest_handler.cpp, runner.cpp,
+# modeling_phi4.cpp) with FLM_ENABLE_CORELIB_AIE4 undefined. With REQUIRED here
+# those targets could only be CONFIGURED on a machine that has corelib, i.e. the
+# "builds without corelib" proof could never be run anywhere corelib was absent,
+# which is the only place it means anything.
+#
+# So the search is allowed to fail, and the guards-only path below configures
+# just those two targets and returns. Every target that genuinely needs corelib
+# is either past that return or hard-fails by name inside the functions that add
+# it -- the ON path is unchanged and still cannot be configured without corelib.
 find_path(RYZENAI_CORELIB_INCLUDE_DIR
           NAMES ryzenai/corelib.h
-          REQUIRED)
+          DOC "Directory containing ryzenai/corelib.h")
 find_path(BOOST_INCLUDE_DIR
           NAMES boost/any.hpp
           HINTS
@@ -75,6 +89,153 @@ endif()
 message(STATUS
     "Phi-4 AIE4 test suite: FLM_VERSION=${FLM_VERSION} "
     "NPU_VERSION=${NPU_VERSION}")
+
+# ---------------------------------------------------------------------------
+# The feature-OFF compile guards, and the guards-only early return
+# ---------------------------------------------------------------------------
+#
+# These two functions and their feature-OFF invocations live HERE, ahead of
+# everything that needs ryzenai-corelib, for one reason: a machine with no
+# corelib must still be able to configure and build the proof that FastFlow
+# compiles without it. Their feature-ON twins are invoked further down, past the
+# return below, where corelib is known to exist.
+#
+# ENABLE_AIE4 is what makes a target need corelib, so that is where the hard
+# failure lives -- naming the target rather than a header.
+
+set(PHI4_FRONTEND_SOURCES
+    ${FASTFLOW_SOURCE_DIR}/common/AutoModel/automodel.cpp
+    ${FASTFLOW_SOURCE_DIR}/common/AutoModel/modeling_phi4.cpp
+    ${FASTFLOW_SOURCE_DIR}/server/generation_limit.cpp)
+
+function(add_phi4_frontend_compile_check TARGET_NAME ENABLE_AIE4)
+    add_library(${TARGET_NAME} OBJECT
+        ${PHI4_FRONTEND_SOURCES})
+    target_include_directories(${TARGET_NAME} PRIVATE
+        ${FASTFLOW_SOURCE_DIR}/include
+        ${FASTFLOW_SOURCE_DIR}/../third_party/tokenizers-cpp/include
+        ${BOOST_INCLUDE_DIR}
+        ${XRT_INCLUDE_DIR})
+    target_compile_definitions(${TARGET_NAME} PRIVATE
+        DEV_BUILD=1
+        __WINDOWS__
+        USEAVX2=1
+        DISABLE_ABI_CHECK=1
+        _ENABLE_EXTENDED_ALIGNED_STORAGE
+        CMAKE_INSTALL_PREFIX="${FASTFLOW_SOURCE_DIR}/build/phi4_corelib_aie4-tests"
+        CMAKE_XCLBIN_PREFIX="${FASTFLOW_SOURCE_DIR}/xclbins"
+        WIN32_LEAN_AND_MEAN
+        NOMINMAX)
+    target_compile_options(${TARGET_NAME} PRIVATE
+        $<$<CXX_COMPILER_ID:MSVC>:/arch:AVX2 /fp:precise>)
+    if(ENABLE_AIE4)
+        if(NOT RYZENAI_CORELIB_INCLUDE_DIR)
+            message(FATAL_ERROR
+                "${TARGET_NAME} compiles with FLM_ENABLE_CORELIB_AIE4=1 and "
+                "therefore needs ryzenai/corelib.h, which was not found. Pass "
+                "-DRYZENAI_CORELIB_INCLUDE_DIR=<dir> or add the corelib "
+                "install prefix to CMAKE_PREFIX_PATH. Only the feature-OFF "
+                "compile guards can be configured without it.")
+        endif()
+        target_compile_definitions(${TARGET_NAME} PRIVATE
+            FLM_ENABLE_CORELIB_AIE4=1)
+        target_include_directories(${TARGET_NAME} PRIVATE
+            ${RYZENAI_CORELIB_INCLUDE_DIR})
+    endif()
+endfunction()
+
+add_phi4_frontend_compile_check(
+    phi4_frontend_compile_off
+    FALSE)
+
+set(TASK10_PRODUCTION_SOURCES
+    ${FASTFLOW_SOURCE_DIR}/server/generation_limit.cpp
+    ${FASTFLOW_SOURCE_DIR}/server/npu_access_manager.cpp
+    ${FASTFLOW_SOURCE_DIR}/server/rest_handler.cpp
+    ${FASTFLOW_SOURCE_DIR}/server/server.cpp
+    ${FASTFLOW_SOURCE_DIR}/runner/runner.cpp
+    ${FASTFLOW_SOURCE_DIR}/src/main.cpp)
+
+set(TASK10_STUB_INCLUDE_DIR
+    "${CMAKE_CURRENT_BINARY_DIR}/task10-compile-stubs")
+# These production translation units include declaration-only FFmpeg headers
+# transitively. The standalone host suite does not link or execute FFmpeg.
+foreach(TASK10_STUB_HEADER IN ITEMS
+        libavcodec/avcodec.h
+        libswscale/swscale.h
+        libavutil/imgutils.h
+        libavutil/frame.h
+        libavutil/pixfmt.h)
+    get_filename_component(
+        TASK10_STUB_PARENT
+        "${TASK10_STUB_INCLUDE_DIR}/${TASK10_STUB_HEADER}"
+        DIRECTORY)
+    file(MAKE_DIRECTORY "${TASK10_STUB_PARENT}")
+    file(WRITE
+        "${TASK10_STUB_INCLUDE_DIR}/${TASK10_STUB_HEADER}"
+        "#pragma once\n")
+endforeach()
+
+function(add_task10_production_compile_check TARGET_NAME ENABLE_AIE4)
+    add_library(${TARGET_NAME} OBJECT
+        ${TASK10_PRODUCTION_SOURCES})
+    target_include_directories(${TARGET_NAME} PRIVATE
+        ${FASTFLOW_SOURCE_DIR}/include
+        ${FASTFLOW_SOURCE_DIR}/runner
+        ${FASTFLOW_SOURCE_DIR}/server
+        ${FASTFLOW_SOURCE_DIR}/pull
+        ${FASTFLOW_SOURCE_DIR}/../third_party/tokenizers-cpp/include
+        ${TASK10_STUB_INCLUDE_DIR}
+        ${BOOST_INCLUDE_DIR}
+        ${XRT_INCLUDE_DIR})
+    target_compile_definitions(${TARGET_NAME} PRIVATE
+        DEV_BUILD=1
+        __WINDOWS__
+        USEAVX2=1
+        DISABLE_ABI_CHECK=1
+        _ENABLE_EXTENDED_ALIGNED_STORAGE
+        CMAKE_INSTALL_PREFIX="${FASTFLOW_SOURCE_DIR}/build/phi4_corelib_aie4-tests"
+        CMAKE_XCLBIN_PREFIX="${FASTFLOW_SOURCE_DIR}/xclbins"
+        __FLM_VERSION__="task10-test"
+        __NPU_VERSION__="0.0.0.0"
+        WIN32_LEAN_AND_MEAN
+        NOMINMAX)
+    target_compile_options(${TARGET_NAME} PRIVATE
+        $<$<CXX_COMPILER_ID:MSVC>:/arch:AVX2 /fp:precise>)
+    if(ENABLE_AIE4)
+        if(NOT RYZENAI_CORELIB_INCLUDE_DIR)
+            message(FATAL_ERROR
+                "${TARGET_NAME} compiles with FLM_ENABLE_CORELIB_AIE4=1 and "
+                "therefore needs ryzenai/corelib.h, which was not found. Pass "
+                "-DRYZENAI_CORELIB_INCLUDE_DIR=<dir> or add the corelib "
+                "install prefix to CMAKE_PREFIX_PATH. Only the feature-OFF "
+                "compile guards can be configured without it.")
+        endif()
+        target_compile_definitions(${TARGET_NAME} PRIVATE
+            FLM_ENABLE_CORELIB_AIE4=1)
+        target_include_directories(${TARGET_NAME} PRIVATE
+            ${RYZENAI_CORELIB_INCLUDE_DIR})
+    endif()
+endfunction()
+
+add_task10_production_compile_check(
+    task10_production_compile_off
+    FALSE)
+
+if(NOT RYZENAI_CORELIB_INCLUDE_DIR)
+    # Guards-only configure. Everything below this point either includes
+    # ryzenai/corelib.h or links something that does, so stopping here is the
+    # difference between "the without-corelib guard cannot be configured" and
+    # "the without-corelib guard is the only thing configured". Say which
+    # targets exist, so a green configure is not mistaken for the full suite.
+    message(STATUS
+        "ryzenai/corelib.h not found: configuring the feature-OFF compile "
+        "guards only (phi4_frontend_compile_off, task10_production_compile_off). "
+        "The corelib tests, the hardware suite and the feature-ON guards are "
+        "NOT configured. Pass -DRYZENAI_CORELIB_INCLUDE_DIR=<dir> for the full "
+        "suite.")
+    return()
+endif()
 
 include("${FASTFLOW_SOURCE_DIR}/common/corelib/corelib_sources.cmake")
 add_library(flm_corelib_aie4_testlib STATIC
@@ -371,11 +532,6 @@ add_dependencies(
 target_link_libraries(test_corelib_fatal_record PRIVATE
     advapi32)
 
-set(PHI4_FRONTEND_SOURCES
-    ${FASTFLOW_SOURCE_DIR}/common/AutoModel/automodel.cpp
-    ${FASTFLOW_SOURCE_DIR}/common/AutoModel/modeling_phi4.cpp
-    ${FASTFLOW_SOURCE_DIR}/server/generation_limit.cpp)
-
 function(add_phi4_frontend_test TEST_NAME ENABLE_AIE4)
     add_executable(${TEST_NAME}
         test_phi4_frontend.cpp
@@ -423,106 +579,13 @@ endfunction()
 add_phi4_frontend_test(test_phi4_frontend_off FALSE)
 add_phi4_frontend_test(test_phi4_frontend_on TRUE)
 
-function(add_phi4_frontend_compile_check TARGET_NAME ENABLE_AIE4)
-    add_library(${TARGET_NAME} OBJECT
-        ${PHI4_FRONTEND_SOURCES})
-    target_include_directories(${TARGET_NAME} PRIVATE
-        ${FASTFLOW_SOURCE_DIR}/include
-        ${FASTFLOW_SOURCE_DIR}/../third_party/tokenizers-cpp/include
-        ${BOOST_INCLUDE_DIR}
-        ${XRT_INCLUDE_DIR})
-    target_compile_definitions(${TARGET_NAME} PRIVATE
-        DEV_BUILD=1
-        __WINDOWS__
-        USEAVX2=1
-        DISABLE_ABI_CHECK=1
-        _ENABLE_EXTENDED_ALIGNED_STORAGE
-        CMAKE_INSTALL_PREFIX="${FASTFLOW_SOURCE_DIR}/build/phi4_corelib_aie4-tests"
-        CMAKE_XCLBIN_PREFIX="${FASTFLOW_SOURCE_DIR}/xclbins"
-        WIN32_LEAN_AND_MEAN
-        NOMINMAX)
-    target_compile_options(${TARGET_NAME} PRIVATE
-        $<$<CXX_COMPILER_ID:MSVC>:/arch:AVX2 /fp:precise>)
-    if(ENABLE_AIE4)
-        target_compile_definitions(${TARGET_NAME} PRIVATE
-            FLM_ENABLE_CORELIB_AIE4=1)
-        target_include_directories(${TARGET_NAME} PRIVATE
-            ${RYZENAI_CORELIB_INCLUDE_DIR})
-    endif()
-endfunction()
-
-add_phi4_frontend_compile_check(
-    phi4_frontend_compile_off
-    FALSE)
+# The feature-ON halves of the two compile guards. Their feature-OFF twins, and
+# the functions themselves, are defined near the top of this file so that they
+# survive the guards-only return -- see the corelib find_path comment there.
 add_phi4_frontend_compile_check(
     phi4_frontend_compile_on
     TRUE)
 
-set(TASK10_PRODUCTION_SOURCES
-    ${FASTFLOW_SOURCE_DIR}/server/generation_limit.cpp
-    ${FASTFLOW_SOURCE_DIR}/server/npu_access_manager.cpp
-    ${FASTFLOW_SOURCE_DIR}/server/rest_handler.cpp
-    ${FASTFLOW_SOURCE_DIR}/server/server.cpp
-    ${FASTFLOW_SOURCE_DIR}/runner/runner.cpp
-    ${FASTFLOW_SOURCE_DIR}/src/main.cpp)
-
-set(TASK10_STUB_INCLUDE_DIR
-    "${CMAKE_CURRENT_BINARY_DIR}/task10-compile-stubs")
-# These production translation units include declaration-only FFmpeg headers
-# transitively. The standalone host suite does not link or execute FFmpeg.
-foreach(TASK10_STUB_HEADER IN ITEMS
-        libavcodec/avcodec.h
-        libswscale/swscale.h
-        libavutil/imgutils.h
-        libavutil/frame.h
-        libavutil/pixfmt.h)
-    get_filename_component(
-        TASK10_STUB_PARENT
-        "${TASK10_STUB_INCLUDE_DIR}/${TASK10_STUB_HEADER}"
-        DIRECTORY)
-    file(MAKE_DIRECTORY "${TASK10_STUB_PARENT}")
-    file(WRITE
-        "${TASK10_STUB_INCLUDE_DIR}/${TASK10_STUB_HEADER}"
-        "#pragma once\n")
-endforeach()
-
-function(add_task10_production_compile_check TARGET_NAME ENABLE_AIE4)
-    add_library(${TARGET_NAME} OBJECT
-        ${TASK10_PRODUCTION_SOURCES})
-    target_include_directories(${TARGET_NAME} PRIVATE
-        ${FASTFLOW_SOURCE_DIR}/include
-        ${FASTFLOW_SOURCE_DIR}/runner
-        ${FASTFLOW_SOURCE_DIR}/server
-        ${FASTFLOW_SOURCE_DIR}/pull
-        ${FASTFLOW_SOURCE_DIR}/../third_party/tokenizers-cpp/include
-        ${TASK10_STUB_INCLUDE_DIR}
-        ${BOOST_INCLUDE_DIR}
-        ${XRT_INCLUDE_DIR})
-    target_compile_definitions(${TARGET_NAME} PRIVATE
-        DEV_BUILD=1
-        __WINDOWS__
-        USEAVX2=1
-        DISABLE_ABI_CHECK=1
-        _ENABLE_EXTENDED_ALIGNED_STORAGE
-        CMAKE_INSTALL_PREFIX="${FASTFLOW_SOURCE_DIR}/build/phi4_corelib_aie4-tests"
-        CMAKE_XCLBIN_PREFIX="${FASTFLOW_SOURCE_DIR}/xclbins"
-        __FLM_VERSION__="task10-test"
-        __NPU_VERSION__="0.0.0.0"
-        WIN32_LEAN_AND_MEAN
-        NOMINMAX)
-    target_compile_options(${TARGET_NAME} PRIVATE
-        $<$<CXX_COMPILER_ID:MSVC>:/arch:AVX2 /fp:precise>)
-    if(ENABLE_AIE4)
-        target_compile_definitions(${TARGET_NAME} PRIVATE
-            FLM_ENABLE_CORELIB_AIE4=1)
-        target_include_directories(${TARGET_NAME} PRIVATE
-            ${RYZENAI_CORELIB_INCLUDE_DIR})
-    endif()
-endfunction()
-
-add_task10_production_compile_check(
-    task10_production_compile_off
-    FALSE)
 add_task10_production_compile_check(
     task10_production_compile_on
     TRUE)

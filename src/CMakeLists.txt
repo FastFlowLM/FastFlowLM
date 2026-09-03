@@ -78,6 +78,26 @@ option(FLM_ENABLE_CORELIB_AIE4
        "Enable optional Phi-4 AIE4 execution through ryzenai-corelib" OFF)
 include("${CMAKE_SOURCE_DIR}/cmake/ConfigureAie4Runtime.cmake")
 
+# Where boost/any.hpp is looked for. ONE list, used by both Boost searches.
+#
+# There are two find_path(... boost/any.hpp ... REQUIRED) calls below: the
+# feature-ON one for flm_corelib_aie4, and the unconditional one for flm on the
+# non-vcpkg Windows path. They were written as two literal hint lists that a
+# comment claimed were "the same search", and they were not: the second omitted
+# $ENV{USERPROFILE}/anaconda3/Library/include. Because they share one cache
+# variable (FLM_BOOST_INCLUDE_DIR) and both are REQUIRED, the difference was
+# invisible with the feature ON -- the first call populated the cache and the
+# second found it already set -- and turned into a hard configure failure with
+# the feature OFF on any box whose only Boost is a bare anaconda3 install. The
+# feature-OFF build is the shipping one, so the narrower list was the one that
+# mattered. Defining the hints once is what makes the comment true.
+set(FLM_BOOST_INCLUDE_HINTS
+    "$ENV{BOOST_INCLUDEDIR}"
+    "$ENV{BOOST_ROOT}"
+    "$ENV{CONDA_PREFIX}/Library/include"
+    "$ENV{USERPROFILE}/anaconda3/Library/include"
+    "C:/dev/boost_1_88_0")
+
 if(FLM_ENABLE_CORELIB_AIE4 AND (NOT WIN32 OR FLM_USE_HRX))
     message(FATAL_ERROR
         "FLM_ENABLE_CORELIB_AIE4 requires Windows and the XRT backend")
@@ -109,12 +129,7 @@ if(FLM_ENABLE_CORELIB_AIE4)
     # tree build on a developer box, the AIE4 target and the CI runner.
     find_path(FLM_BOOST_INCLUDE_DIR
               NAMES boost/any.hpp
-              HINTS
-                  "$ENV{BOOST_INCLUDEDIR}"
-                  "$ENV{BOOST_ROOT}"
-                  "$ENV{CONDA_PREFIX}/Library/include"
-                  "$ENV{USERPROFILE}/anaconda3/Library/include"
-                  "C:/dev/boost_1_88_0"
+              HINTS ${FLM_BOOST_INCLUDE_HINTS}
               DOC "Directory containing boost/any.hpp, needed by XRT's headers"
               REQUIRED)
 
@@ -511,15 +526,13 @@ if(WIN32 AND NOT VCPKG_TOOLCHAIN)
             "Could not find curl/curl.h. Add the prefix that provides CURL to "
             "CMAKE_PREFIX_PATH or configure with a vcpkg toolchain.")
     endif()
-    # Boost: the same search flm_corelib_aie4 uses, so the two targets cannot
-    # end up with different Boost headers in one build.
+    # Boost: literally the same hint list flm_corelib_aie4 uses
+    # (FLM_BOOST_INCLUDE_HINTS, defined once near the top), so the two targets
+    # cannot end up with different Boost headers in one build -- and so this
+    # search cannot fail on a prefix the other one accepts.
     find_path(FLM_BOOST_INCLUDE_DIR
               NAMES boost/any.hpp
-              HINTS
-                  "$ENV{BOOST_INCLUDEDIR}"
-                  "$ENV{BOOST_ROOT}"
-                  "$ENV{CONDA_PREFIX}/Library/include"
-                  "C:/dev/boost_1_88_0"
+              HINTS ${FLM_BOOST_INCLUDE_HINTS}
               DOC "Directory containing boost/any.hpp"
               REQUIRED)
     message(STATUS "  FFmpeg headers: ${FLM_FFMPEG_INCLUDE_DIR}")
@@ -565,11 +578,31 @@ endif()
 # where those same macros are actively wrong: CURL_STATICLIB removes the
 # __declspec(dllimport) the import library expects. It was previously inferred
 # from "no vcpkg toolchain", which is not the same question, so the option now
-# says what it means. Default OFF, because a shared prefix is the common case
-# and a wrong static declaration fails at link rather than silently.
+# says what it means.
+#
+# Default ON, and the default is the whole point of the option existing.
+#
+# It shipped as OFF once, and that was a regression rather than a preference.
+# Before the option existed this block defined CURL_STATICLIB /
+# BOOST_ALL_NO_LIB / BOOST_ALL_STATIC_LINK unconditionally on the
+# `WIN32 AND NOT VCPKG_TOOLCHAIN` path, and the Windows link list named
+# `libboost_program_options-vc143-mt-x64-1_88` -- the STATIC b2 spelling. So
+# the shipped binary had no Boost DLL import at all, which is why src/lib
+# vendors no boost_program_options.dll and why src/wix/get_files.bat stages
+# none. Defaulting the new option OFF flipped that binary from static Boost to
+# shared, silently: FLM_WIN_STATIC_DEPS is set nowhere in the tree, no preset
+# sets a toolchainFile (so VCPKG_TOOLCHAIN is false on every Windows preset),
+# and .github/workflows/windows-build.yml runs `cmake --preset windows-vs18`
+# bare. The MSI was then missing a DLL nothing in the repository produces, and
+# the failure was misattributed to upstream packaging.
+#
+# ON is therefore the configuration that CI and the MSI actually ship, and the
+# default has to match it. A conda or otherwise shared prefix -- which is what
+# the AIE4 work uses -- opts out with -DFLM_WIN_STATIC_DEPS=OFF, and gets the
+# import-library spellings and BOOST_ALL_DYN_LINK described below.
 option(FLM_WIN_STATIC_DEPS
        "Windows non-vcpkg dependencies are static archives (CI runner layout)"
-       OFF)
+       ON)
 if(WIN32 AND NOT VCPKG_TOOLCHAIN)
     if(FLM_WIN_STATIC_DEPS)
         target_compile_definitions(flm PUBLIC
@@ -742,6 +775,43 @@ elseif(WIN32)
             "silently ignored.")
     endif()
 
+    # Boost's name order follows FLM_WIN_STATIC_DEPS, because the linkage macros
+    # and the library name are two halves of ONE decision.
+    #
+    # b2 encodes linkage in the file name: `libboost_program_options-...lib` is
+    # the static archive, bare `boost_program_options.lib` is the import library
+    # for boost_program_options.dll. Before this list existed the name was
+    # hard-coded to the static spelling, which agreed with the then
+    # unconditional BOOST_ALL_STATIC_LINK. Replacing it with a shared-first
+    # search left the two halves free to disagree: with FLM_WIN_STATIC_DEPS OFF
+    # they were both shared and consistent, but a machine that staged only the
+    # static archive got BOOST_ALL_DYN_LINK against it, and turning the option
+    # ON on a machine with both variants would have declared static linkage and
+    # then linked the import library. Deriving the order from the same variable
+    # that picks the macros makes disagreement unrepresentable; the guard after
+    # the loop catches the residual case where only the wrong variant exists.
+    #
+    # The fallback spelling stays in the list either way -- a prefix that ships
+    # only one variant should still build, it just gets the linkage its macros
+    # do not expect, and that is exactly what the guard reports.
+    set(_flm_boost_po_static
+        "libboost_program_options-vc143-mt-x64-1_88;libboost_program_options-vc142-mt-x64-1_88")
+    set(_flm_boost_po_shared "boost_program_options")
+    if(FLM_WIN_STATIC_DEPS)
+        set(_flm_boost_po_names
+            "${_flm_boost_po_static};${_flm_boost_po_shared}")
+    else()
+        set(_flm_boost_po_names
+            "${_flm_boost_po_shared};${_flm_boost_po_static}")
+    endif()
+    # curl gets no such treatment, deliberately: its names do not encode
+    # linkage. `libcurl.lib` is the static archive in a vcpkg static triplet AND
+    # the import library conda-forge ships for libcurl.dll -- the same spelling
+    # means opposite things depending on who built it. Only `libcurl_imp` is
+    # unambiguous (curl's own CMake build names its import library that), and it
+    # is already searched. There is no order that carries information here, and
+    # for the same reason the guard below cannot check curl either.
+
     set(_flm_win_libs "")
     foreach(_flm_dep IN ITEMS
             "required|avformat|avformat"
@@ -750,7 +820,7 @@ elseif(WIN32)
             "required|swscale|swscale"
             "required|swresample|swresample"
             "required|curl|libcurl;libcurl_imp;curl"
-            "required|boost_program_options|boost_program_options;libboost_program_options-vc143-mt-x64-1_88;libboost_program_options-vc142-mt-x64-1_88"
+            "required|boost_program_options|${_flm_boost_po_names}"
             "required|fftw3f|fftw3f;libfftw3f-3"
             "optional|fftw3|fftw3;libfftw3-3"
             "optional|fftw3l|fftw3l;libfftw3l-3")
@@ -828,6 +898,67 @@ elseif(WIN32)
         message(STATUS "  ${_flm_dep_key}: ${FLM_LIB_${_flm_dep_key}}")
         list(APPEND _flm_win_libs "${FLM_LIB_${_flm_dep_key}}")
     endforeach()
+
+    # Boost linkage consistency: the library that was actually RESOLVED has to
+    # agree with the macros that were actually DEFINED.
+    #
+    # This is the check that would have caught the boost_program_options.dll
+    # regression at configure time instead of at MSI-validation time. The
+    # macro choice (FLM_WIN_STATIC_DEPS, above) and the name preference (the
+    # search list, above) are now derived from the same variable, so they
+    # cannot disagree by construction -- but the SEARCH can still land on the
+    # other variant, because both spellings stay in the list as fallbacks and
+    # a stale FLM_LIB_boost_program_options cache entry is never re-searched.
+    # Either way the symptom is silent: BOOST_ALL_STATIC_LINK against an import
+    # library, or BOOST_ALL_DYN_LINK against an archive, both link and both
+    # produce a binary whose Boost dependency is not the one the packaging
+    # assumes. Fail here, loudly, naming both halves -- a warning in a
+    # thousand-line configure log is what got missed the first time.
+    #
+    # Only a positively identified b2 spelling is judged. An unrecognised name
+    # (a repackaged prefix, a vcpkg-style artifact) carries no linkage
+    # information and is left alone rather than guessed at.
+    get_filename_component(_flm_boost_po_name
+                           "${FLM_LIB_boost_program_options}" NAME)
+    set(_flm_boost_po_linkage "unknown")
+    if(_flm_boost_po_name MATCHES "^libboost_program_options")
+        set(_flm_boost_po_linkage "static")
+    elseif(_flm_boost_po_name MATCHES "^boost_program_options")
+        set(_flm_boost_po_linkage "shared")
+    endif()
+    if(FLM_WIN_STATIC_DEPS AND _flm_boost_po_linkage STREQUAL "shared")
+        message(FATAL_ERROR
+            "Boost linkage is inconsistent. FLM_WIN_STATIC_DEPS=ON defined "
+            "BOOST_ALL_NO_LIB + BOOST_ALL_STATIC_LINK (static linkage), but "
+            "the search resolved '${FLM_LIB_boost_program_options}' -- a bare "
+            "'boost_' name, which is b2's IMPORT LIBRARY for "
+            "boost_program_options.dll, not an archive. flm.exe would declare "
+            "static linkage and then depend on a DLL that nothing in this "
+            "repository stages (src/lib ships none and src/wix/get_files.bat "
+            "stages none), producing an MSI that cannot start off this "
+            "machine. Fix ONE of the two: stage the static variant "
+            "(libboost_program_options-vc143-mt-x64-1_88.lib) on "
+            "CMAKE_PREFIX_PATH, or configure with -DFLM_WIN_STATIC_DEPS=OFF "
+            "and ship boost_program_options.dll alongside flm.exe. Delete "
+            "FLM_LIB_boost_program_options from CMakeCache.txt after either.")
+    endif()
+    if(NOT FLM_WIN_STATIC_DEPS AND _flm_boost_po_linkage STREQUAL "static")
+        message(FATAL_ERROR
+            "Boost linkage is inconsistent. FLM_WIN_STATIC_DEPS=OFF defined "
+            "BOOST_ALL_NO_LIB + BOOST_ALL_DYN_LINK (shared linkage), but the "
+            "search resolved '${FLM_LIB_boost_program_options}' -- a "
+            "'lib'-prefixed name, which is b2's STATIC archive. Boost's "
+            "headers would declare every symbol __declspec(dllimport) and the "
+            "archive exports none of them, so the link fails on data symbols "
+            "(boost::program_options::arg, "
+            "options_description::m_default_line_length) in a way that reads "
+            "as the wrong Boost version. Fix ONE of the two: configure with "
+            "-DFLM_WIN_STATIC_DEPS=ON to match the archive, or put a prefix "
+            "shipping boost_program_options.lib/.dll on CMAKE_PREFIX_PATH. "
+            "Delete FLM_LIB_boost_program_options from CMakeCache.txt after "
+            "either.")
+    endif()
+
     target_link_libraries(flm PUBLIC ${_flm_win_libs})
 elseif(FFMPEG_BUILT_FROM_SOURCE)
     # Portable Linux: link the static FFmpeg archives built above (plus zlib) so

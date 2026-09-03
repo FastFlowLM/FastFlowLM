@@ -1109,8 +1109,10 @@ struct phi4_corelib_aie4::Impl final {
                 // discards via clear_after_corelib_error().
                 //
                 // This deliberately also moves a REJECTED DISPATCH that
-                // follows a completed synchronize -- flat_mha, o, ssmlp,
-                // lm_head -- onto the recoverable side, which is a wider
+                // follows a completed synchronize -- flat_mha, o, ssmlp and
+                // lm_head, all four of which are tested by
+                // TestFailuresPastACompletedSynchronizeAreRecoverable --
+                // onto the recoverable side, which is a wider
                 // change than "host failures only". It is the same rule
                 // checked_submit already applies to the first dispatch of a
                 // step: the flag is set only after api->Check succeeds,
@@ -1265,6 +1267,46 @@ struct phi4_corelib_aie4::Impl final {
                 active_layer,
                 rows,
                 position);
+        // THE TWO TERMINATE CALLS BELOW ARE NOW UNREACHABLE FROM RunRows,
+        // and that is recorded rather than fixed. Read before deleting them.
+        //
+        // Reaching either needs a non-CorelibError exception thrown while
+        // `submission.irrevocable()` or `synchronize_in_progress` is true.
+        // After the boundary became per submission group, walk the windows:
+        //
+        //   * irrevocable window -- from checked_submit's MarkSuccessfulSubmit
+        //     to the next checked_synchronize's clear. Everything executed in
+        //     it is a SubmitMatMul/SubmitMha/SubmitSsMlp forwarder (a bare
+        //     call through the C function table, no allocation, no container)
+        //     plus api->Check, which throws CorelibError and nothing else.
+        //   * synchronize window -- stream_synchronize plus api->Check. Same.
+        //
+        // Every host operation that CAN throw a std::exception -- StageInput,
+        // ScatterValue, BridgePadding, PrepareLastHidden, ReadLogits, and the
+        // `active_phase = "..."` assignments, which allocate for the longer
+        // literals -- sits either before the step's first submit or after a
+        // completed synchronize. So the guard above is always true when a
+        // host exception arrives here, and both arms rethrow.
+        //
+        // WHAT WOULD MAKE THEM FIRE AGAIN: any host work inserted BETWEEN a
+        // checked_submit and its checked_synchronize -- a staging copy folded
+        // into the q/k/v group, a metrics container appended to mid-group, a
+        // descriptor built between two dispatches. That is exactly the case
+        // that must still terminate, which is why these stay. Deleting them
+        // would silently reclassify the next such edit as recoverable.
+        //
+        // The one residue: `api->Check` allocating its own message and
+        // throwing std::bad_alloc inside the synchronize window would reach
+        // TerminateHostFailure. Not tested, not worth a fake.
+        //
+        // Consequence for coverage, stated because it went unmentioned when
+        // it happened: the two tests that asserted a host failure past a
+        // submit terminates were DELETED this round, correctly -- they
+        // asserted the retracted rule. The `phase == "v_scatter"` string
+        // assertion went with them, and no fatal record can carry that phase
+        // any more, so `active_phase`'s v_scatter value is now only reachable
+        // on this dead path. TestFailuresPastACompletedSynchronizeAreRecoverable
+        // covers the same three failures from the recoverable side instead.
         } catch (const std::exception& error) {
             if (RecoverableBeforeIrrevocableWork(
                     synchronize_in_progress,

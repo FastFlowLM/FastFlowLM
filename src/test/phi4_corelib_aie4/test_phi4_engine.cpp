@@ -758,7 +758,17 @@ enum class FailurePoint {
     ScatterBadAllocDeepLayer,
     // flat_mha refused at layer 0, after the q/k/v synchronize. This is the
     // shape of the 4096-token-window refusal seen on hardware.
-    MhaRefusedAfterSynchronize
+    MhaRefusedAfterSynchronize,
+    // The other three dispatches that follow a completed synchronize.
+    //
+    // The engine's own comment claimed all four of `flat_mha`, `o`, `ssmlp`
+    // and `lm_head` were recoverable when only `flat_mha` had a test -- a
+    // comment asserting four cases on evidence covering one. Each of these
+    // sits immediately after a checked_synchronize in RunRows, so each is a
+    // rejected dispatch with the outstanding list provably empty.
+    ORefusedAfterSynchronize,
+    SsMlpRefusedAfterSynchronize,
+    LmHeadRefusedAfterSynchronize
 };
 
 struct UnknownFailure final {};
@@ -1323,6 +1333,23 @@ ryzenai_corelib_status RecordingMatMul(
         flm::test::SetLastErrorMessage("injected layer-1 k failure");
         return ryzenai_corelib_status_failure;
     }
+    // Rejected AFTER a completed synchronize, so nothing is outstanding.
+    // `o_0` follows the flat_mha synchronize; `lm_head` follows layer 31's
+    // ssmlp synchronize, 128 synchronizes into the step.
+    if (
+        state.failure == FailurePoint::ORefusedAfterSynchronize &&
+        weight->label == "o_0") {
+        flm::test::SetLastErrorMessage(
+            "injected o refusal after a completed synchronize");
+        return ryzenai_corelib_status_unsupported;
+    }
+    if (
+        state.failure == FailurePoint::LmHeadRefusedAfterSynchronize &&
+        weight->label == "lm_head") {
+        flm::test::SetLastErrorMessage(
+            "injected lm_head refusal after a completed synchronize");
+        return ryzenai_corelib_status_unsupported;
+    }
 
     const std::int64_t padded_rows =
         MatMulPaddedRows(state, weight->desc, rows);
@@ -1381,6 +1408,15 @@ ryzenai_corelib_status RecordingSsMlp(
         weight_object->kind != ObjectKind::SsMlpWeight ||
         rows <= 0) {
         return ryzenai_corelib_status_bad_argument;
+    }
+    // Layer 0's ssmlp, which follows the `o` synchronize: three completed
+    // synchronizes into the step, with nothing outstanding.
+    if (
+        state.failure == FailurePoint::SsMlpRefusedAfterSynchronize &&
+        state.active_layer == 0) {
+        flm::test::SetLastErrorMessage(
+            "injected ssmlp refusal after a completed synchronize");
+        return ryzenai_corelib_status_unsupported;
     }
     state.events.emplace_back("ssmlp");
     state.ssmlp_calls.push_back(
@@ -1730,6 +1766,24 @@ public:
 
     json FatalRecord() const {
         return ReadFatalRecord(fatal_root_.path());
+    }
+
+    // Existence without parsing, so a recoverable case can assert the
+    // ABSENCE of a record. `FatalRecord()` throws when there is none, which
+    // is the wrong shape for that: the comment on
+    // TestFailuresPastACompletedSynchronizeAreRecoverable claimed each case
+    // "asserts that no fatal record was written" while nothing did.
+    bool AnyFatalRecord() const {
+        for (const auto& entry :
+             std::filesystem::directory_iterator(fatal_root_.path())) {
+            const auto name = entry.path().filename().string();
+            if (
+                name.starts_with("corelib-fatal-") &&
+                name.ends_with(".json")) {
+                return true;
+            }
+        }
+        return false;
     }
 
     RecordingState state;
@@ -2381,8 +2435,9 @@ void CheckFatalFailure(
 // matmul, ~100 further dispatches and every host operation between them were
 // classified irrevocable, so a bad_alloc in the V scatter or an overflow in a
 // padding write killed the server (exit 0xE0040001) at a point where the
-// stream was provably quiescent. The four cases below are the ones that used
-// to terminate and must not.
+// stream was provably quiescent. The seven cases below are the ones that used
+// to terminate and must not: three host failures past a synchronize, and all
+// four rejected dispatches that follow one.
 //
 // The engine's only lasting state at these points is partially-updated KV
 // caches, and the recoverable contract is that the caller throws the session
@@ -2400,6 +2455,9 @@ void TestFailuresPastACompletedSynchronizeAreRecoverable(
             run(fixture, prompt);
             CHECK(!fixture.state.terminator_called);
             CHECK(fixture.runtime->state() == ProcessState::Healthy);
+            // The comment above says "no fatal record was written". Now it
+            // is asserted rather than described.
+            CHECK(!fixture.AnyFatalRecord());
             // Nothing was committed: RunRows advances `position` only on a
             // clean return.
             CHECK(fixture.engine->get_current_context_length() == 0);
@@ -2482,6 +2540,64 @@ void TestFailuresPastACompletedSynchronizeAreRecoverable(
             CHECK(threw);
             CHECK(fixture.state.synchronize_calls == 1u);
         });
+
+    // The OTHER THREE dispatches that follow a completed synchronize.
+    //
+    // The engine comment beside checked_synchronize named four -- flat_mha,
+    // o, ssmlp and lm_head -- and only flat_mha had a test. A comment
+    // asserting four cases on evidence covering one is a test agreeing with
+    // the implementation about which case exists, so here are the other
+    // three. Each pins the synchronize count as well as the call, because
+    // "after a completed synchronize" is the whole claim and a case that
+    // silently moved to a different point in the step would still throw.
+    const auto check_refused_dispatch =
+        [&](FailurePoint failure,
+            const char* call,
+            const char* detail,
+            unsigned synchronizes) {
+            check_recoverable(
+                failure,
+                [&](EngineFixture& fixture, std::vector<int>& prompt) {
+                    bool threw = false;
+                    try {
+                        (void)fixture.engine->prefill(prompt);
+                    } catch (const CorelibError& error) {
+                        threw = true;
+                        CHECK(error.call == call);
+                        CHECK(
+                            error.status ==
+                            ryzenai_corelib_status_unsupported);
+                        CHECK(error.detail == detail);
+                    }
+                    CHECK(threw);
+                    CHECK(
+                        fixture.state.synchronize_calls == synchronizes);
+                });
+        };
+
+    // `o` at layer 0: after the qkv synchronize and the flat_mha
+    // synchronize.
+    check_refused_dispatch(
+        FailurePoint::ORefusedAfterSynchronize,
+        "o",
+        "injected o refusal after a completed synchronize",
+        2u);
+
+    // `ssmlp` at layer 0: one more synchronize on, after `o`'s.
+    check_refused_dispatch(
+        FailurePoint::SsMlpRefusedAfterSynchronize,
+        "ssmlp",
+        "injected ssmlp refusal after a completed synchronize",
+        3u);
+
+    // `lm_head`: the last dispatch of the step, 128 synchronizes in --
+    // four per layer across all 32. If the flag failed to re-arm anywhere in
+    // that span this case would not reach lm_head at all.
+    check_refused_dispatch(
+        FailurePoint::LmHeadRefusedAfterSynchronize,
+        "lm_head",
+        "injected lm_head refusal after a completed synchronize",
+        128u);
 }
 
 void TestIrrevocableFailurePolicies(

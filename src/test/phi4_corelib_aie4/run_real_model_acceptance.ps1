@@ -22,6 +22,13 @@
 #    status. A criterion with no step mapped to it renders `not_exercised`. It
 #    is not possible to hand-write `met` next to a criterion here.
 #
+# IF YOU RECOMPUTE `harness_sha256` AND IT DOES NOT MATCH THE COMMITTED
+# RECORD, that is expected and explained in
+# docs/docs/benchmarks/phi4_aie4_acceptance_provenance.md. This harness has
+# been fixed since the record beside it was produced, without a new hardware
+# run being authorized; the record is immutable evidence of the older harness's
+# run, not a stale copy of this one's.
+#
 # ORDERING IS LOAD-BEARING. Step 12b deliberately kills a process to prove the
 # terminal-failure path carries corelib's own diagnostic, so it runs last. Two
 # processes holding AIE4 device contexts at once fail in ways that look like
@@ -329,18 +336,12 @@ function Add-StepResult {
 # revision. Anything else is discarded and reported as not exercised. A
 # carried result is marked `carried_over` with the run stamp that produced it,
 # so nothing in the document can quietly present it as fresh.
-# Read one field from either shape a step result can take: an ordered
-# dictionary built in this session, or a PSCustomObject loaded from the JSON.
-function Get-Field {
-    param($Object, [string]$Name)
-    if ($null -eq $Object) { return $null }
-    if ($Object -is [System.Collections.IDictionary]) {
-        if ($Object.Contains($Name)) { return $Object[$Name] }
-        return $null
-    }
-    if ($Object.PSObject.Properties.Name -contains $Name) { return $Object.$Name }
-    return $null
-}
+# Guard logic lives in one file, dot-sourced by this harness and by
+# verify_acceptance_guards.ps1. See acceptance_guards.ps1 for why: the verifier
+# used to hold a second copy, and a copy agrees with the original by
+# construction -- which is how a guard that could not work shipped labelled
+# "verified offline".
+. (Join-Path $script:suiteDir 'acceptance_guards.ps1')
 
 function Add-UnselectedStep {
     param(
@@ -476,6 +477,10 @@ $identity = [ordered]@{
     harness_sha256     = $script:harnessSha
     driver_sha256      = $script:driverSha
     harness_path       = $MyInvocation.MyCommand.Path
+    # Emitted into every record so the next reader does not have to find the
+    # report to understand a hash that does not match. A record travels; a
+    # report under an untracked directory does not.
+    harness_note       = 'harness_sha256 and driver_sha256 are of the files AS CHECKED OUT, not of the git blobs -- .gitattributes normalises line endings, so `git show <rev>:<path>` will not reproduce them. If either differs from the scripts beside this record, the harness has been changed since the run without a new run being authorized; see docs/docs/benchmarks/phi4_aie4_acceptance_provenance.md.'
 }
 try {
     $cpu = Get-CimInstance Win32_Processor | Select-Object -First 1
@@ -1944,21 +1949,7 @@ if (Test-Selected '8') {
         # would leave "remem ber" and the match would fail on a history that is
         # perfectly correct. Deleting whitespace entirely makes the comparison
         # immune to however the console chose to lay the text out.
-        function Remove-AllWhitespace { param([string]$T) return ($T -replace '\s', '') }
-
-        $containment = @()
-        for ($k = 1; $k -lt $perTurn.Count; $k++) {
-            $previousPrompt = [string]$perTurn[$k - 1].prompt
-            $thisHistory = [string]$perTurn[$k].history_verbatim
-            $needle = Remove-AllWhitespace $previousPrompt
-            $haystack = Remove-AllWhitespace $thisHistory
-            $contains = ($needle.Length -gt 0 -and $haystack.Contains($needle))
-            $containment += [ordered]@{
-                turn = $perTurn[$k].index
-                previous_turn_prompt = $previousPrompt
-                history_contains_previous_turn = $contains
-            }
-        }
+        $containment = @(Test-HistoryContainment $perTurn)
         $ev['history_containment'] = $containment
         $missing = @($containment | Where-Object { -not $_.history_contains_previous_turn })
         $ev['turns_whose_history_lost_the_previous_turn'] = @($missing | ForEach-Object { $_.turn })
@@ -3332,7 +3323,15 @@ if ($Markdown) {
                 $md.Add('```')
                 $md.Add('')
             }
-            continue
+            # No `continue` here.
+            #
+            # It used to skip the rest of the branches for any step carrying
+            # `probes`, which would silently drop the per-turn blocks of a step
+            # that had both -- and the populated-document check counts a step's
+            # per_turn evidence as expected output, so such a step would be
+            # counted and never rendered, failing the run for a reason that has
+            # nothing to do with the run. No step carries both today; letting
+            # the branches fall through means none has to.
         }
         if ($names -contains 'prompt_verbatim' -and $names -contains 'completion_verbatim') {
             $any = $true
@@ -3441,27 +3440,9 @@ if ($Markdown) {
     # parsing '>' lines back out of the markdown -- a reply may legitimately
     # contain one, and a check that cannot tell a prompt from a quoted line is
     # a check that will eventually pass on nothing.
-    $blank = @($script:renderedTurnPrompts | Where-Object { -not $_.prompt -or $_.prompt.Trim().Length -eq 0 })
-    if ($blank.Count -gt 0) {
-        throw ("the document rendered $($blank.Count) turn(s) with an empty prompt for step(s) " +
-               (@($blank | ForEach-Object { $_.step } | Sort-Object -Unique) -join ', ') +
-               ": the verbatim evidence did not reach it")
-    }
-    foreach ($rt in $script:renderedTurnPrompts) {
-        if ($written -notmatch [regex]::Escape($rt.prompt)) {
-            throw "step $($rt.step): a turn prompt was rendered but is not present in the written document"
-        }
-    }
-    $stepsWithTurns = @($script:record['steps'] | Where-Object {
-        @(Get-Field (Get-Field $_ 'evidence') 'per_turn').Count -gt 0 })
-    foreach ($swt in $stepsWithTurns) {
-        $sid = [string](Get-Field $swt 'id')
-        $expected = @(Get-Field (Get-Field $swt 'evidence') 'per_turn').Count
-        $got = @($script:renderedTurnPrompts | Where-Object { $_.step -eq $sid }).Count
-        if ($got -ne $expected) {
-            throw "step ${sid}: $expected turn(s) of evidence but $got rendered into the document"
-        }
-    }
+    $renderProblem = Test-RenderedDocument -Record $script:record `
+        -RenderedTurnPrompts $script:renderedTurnPrompts -Written $written
+    if ($renderProblem) { throw $renderProblem }
     Write-Output "  document: $Markdown (run-stamp $script:runStamp)"
   } catch {
     # Recorded in the artifact and pushed into the exit code. A document that

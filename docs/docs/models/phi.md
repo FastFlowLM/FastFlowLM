@@ -85,8 +85,9 @@ the last category is large.
 - **Multi-turn conversation in `flm run` does not retain history.** Each turn
   is answered as though it were the first: after telling the model a fact and
   asking about it on the next turn, the model does not have it. `/history`
-  confirms it — the token count tracks the current turn instead of growing, so
-  the previous turn was replaced rather than appended. This is **not specific
+  confirms it — the conversation it prints contains only the current exchange,
+  with the previous turn's message and reply absent, so each turn replaces the
+  history rather than appending to it. This is **not specific
   to this model or to the AIE4 backend**: the CLI builds a single-message
   prompt from the current input, and every text frontend does the same. Supply
   the whole conversation yourself — the `/api/chat` and `/v1/chat/completions`

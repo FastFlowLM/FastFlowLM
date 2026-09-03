@@ -666,6 +666,21 @@ flm_aie4_install_runtime(DESTINATION bin/aie4 COMPONENT AIE4)
             "With no closure staged, aie4.wxi must define an EMPTY " +
             "Aie4RuntimeComponents group.`n$wxiText")
     }
+    # The namespace is asserted on BOTH shapes, and this one first.
+    #
+    # get_files.bat emits the `<Include xmlns=...>` line twice, once per
+    # branch, and until 2026-09-03 only the closure-PRESENT shape was checked
+    # (below, after the rerun). Dropping it from the else branch would have
+    # sailed past this guard -- and the else branch is the one that produces
+    # the ordinary non-AIE4 MSI, which is the build WIX0200 actually broke.
+    # The empty group is still a ComponentGroup, so it lands in the empty
+    # namespace and is rejected in exactly the same way.
+    if ($wxiText -notmatch '<Include xmlns="http://wixtoolset\.org/schemas/v4/wxs">') {
+        throw (
+            "With no closure staged, aie4.wxi must still declare the WiX " +
+            "namespace or WiX rejects the ordinary non-AIE4 MSI with " +
+            "WIX0200.`n$wxiText")
+    }
     $result = Invoke-GetFiles -Directory (Join-Path $fakeSrc "wix")
     if ($result.ExitCode -ne 0) {
         throw "wix/get_files.bat failed on the closure-present rerun"
@@ -714,6 +729,115 @@ flm_aie4_install_runtime(DESTINATION bin/aie4 COMPONENT AIE4)
         "get_files.bat, both aie4.wxi shapes)")
     $ran += "optional-feature-packaging (no-closure staging exits 0, executed)"
 
+    # ------------------------------------------------------------------
+    # cmake/ReadCorelibVersion.ps1 must survive a build environment's LIB.
+    #
+    # Design 5.4's probe calls Add-Type; PowerShell compiles that C# with
+    # warnings-as-errors; the C# compiler reads LIB and INCLUDE. Under MSBuild
+    # those hold the MSVC toolchain's paths, one of which is RELATIVE
+    # (`lib\um\x64`), and the compiler refuses a relative search path:
+    #
+    #   Warning as Error: Invalid search path 'lib\um\x64' specified in
+    #   'LIB environment variable'
+    #
+    # The staging step that runs the probe is a POST_BUILD command, so that
+    # took the entire flm build down -- and it passed every test beforehand
+    # because every test ran it from a plain shell where LIB is unset. The fix
+    # (clear LIB/INCLUDE around Add-Type, restore afterwards) was then verified
+    # in exactly one environment, once, by hand: no test referenced the script
+    # and no test set LIB. The installer-staging block above cannot help --
+    # its `ryzenai_corelib.dll` contains the text "not a dll" and never reaches
+    # the probe.
+    #
+    # WHAT THIS COVERS: that with a relative entry in LIB the script gets past
+    # Add-Type and past LoadLibraryEx, and then fails where it should -- at the
+    # missing export -- with its own diagnostic rather than a compiler error.
+    # That is the whole of the regression, and it is able to fail: reverting
+    # the save/restore turns the output into the compiler error above.
+    #
+    # WHAT THIS DOES NOT COVER: reading a real version number. That needs a
+    # real ryzenai_corelib.dll, which a machine without the AIE4 runtime does
+    # not have. The success path is asserted in the real-closure block above,
+    # via the staged report's `corelib_version` -- which StageAie4Runtime.cmake
+    # obtained from this same script.
+    #
+    # Launched through powershell.exe by absolute path, and that is
+    # load-bearing rather than incidental: Windows PowerShell 5.1 shells out to
+    # the .NET Framework csc.exe, which reads LIB, while pwsh 7 compiles
+    # in-process with Roslyn and never looks at it. Under pwsh this check
+    # cannot fail, so inheriting the host would make it vacuous on exactly the
+    # machines that run pwsh. 5.1 is also what StageAie4Runtime.cmake invokes.
+    # ------------------------------------------------------------------
+    $probeScript = Join-Path $sourceRoot "cmake/ReadCorelibVersion.ps1"
+    if (-not (Test-Path -LiteralPath $probeScript -PathType Leaf)) {
+        throw "the corelib version probe is missing: $probeScript"
+    }
+    # A real PE, in an approved system directory, that certainly does not
+    # export ryzenai_corelib_get_version.
+    $probeDll = Join-Path $env:SystemRoot "System32\version.dll"
+    $windowsPowerShell = Join-Path $env:SystemRoot `
+        "System32\WindowsPowerShell\v1.0\powershell.exe"
+    foreach ($needed in @($probeDll, $windowsPowerShell)) {
+        if (-not (Test-Path -LiteralPath $needed -PathType Leaf)) {
+            throw (
+                "the corelib-version-probe regression check needs $needed " +
+                "and it is absent, so the check would pass vacuously")
+        }
+    }
+    $savedProbeLib = $env:LIB
+    $savedProbeInclude = $env:INCLUDE
+    $previousPreference = $ErrorActionPreference
+    $probeOutput = ""
+    $probeExit = $null
+    try {
+        # The shape that broke it: a relative entry beside an absolute one,
+        # which is how vcvars64 leaves LIB.
+        $env:LIB = "lib\um\x64;$env:SystemRoot\System32"
+        $env:INCLUDE = "include\um"
+        $ErrorActionPreference = "Continue"
+        $probeOutput = (& $windowsPowerShell -NoProfile -NonInteractive `
+            -ExecutionPolicy Bypass -File $probeScript -Dll $probeDll 2>&1 |
+            ForEach-Object { $_.ToString() } | Out-String)
+        $probeExit = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previousPreference
+        if ($null -eq $savedProbeLib) {
+            Remove-Item Env:LIB -ErrorAction SilentlyContinue
+        } else {
+            $env:LIB = $savedProbeLib
+        }
+        if ($null -eq $savedProbeInclude) {
+            Remove-Item Env:INCLUDE -ErrorAction SilentlyContinue
+        } else {
+            $env:INCLUDE = $savedProbeInclude
+        }
+    }
+    if (
+        $probeOutput -match 'LIB environment variable' -or
+        $probeOutput -match '(?i)Cannot add type'
+    ) {
+        throw (
+            "ReadCorelibVersion.ps1 is environment-sensitive again: an " +
+            "MSBuild-shaped LIB reaches its Add-Type. This is the defect " +
+            "that took the flm build down, because the staging step runs " +
+            "from a POST_BUILD command.`n$probeOutput")
+    }
+    # Positive requirement, so that a probe which failed EARLIER for some other
+    # reason cannot satisfy the check above by never compiling at all.
+    if ($probeOutput -notmatch 'exports no ryzenai_corelib_get_version') {
+        throw (
+            "the probe did not reach GetProcAddress (exit $probeExit), so " +
+            "nothing was proven about Add-Type surviving LIB.`n$probeOutput")
+    }
+    if ($probeExit -eq 0) {
+        throw (
+            "the probe reported success for a DLL that is not corelib.`n" +
+            $probeOutput)
+    }
+    $ran += (
+        "corelib-version-probe (5.4 LIB regression, run under Windows " +
+        "PowerShell 5.1 against a non-corelib PE)")
+
     if ($FlmExe) {
         $resolvedFlm = (Resolve-Path $FlmExe).Path
         # -FlmExe is the first positional parameter, so a stray argument from a
@@ -753,15 +877,76 @@ flm_aie4_install_runtime(DESTINATION bin/aie4 COMPONENT AIE4)
                 throw "Clean-environment flm validate failed.`n$validation"
             }
             if ($RunAie4ModelLoad) {
-                $smoke = "/bye`r`n" |
-                    & $resolvedFlm run phi4-mini-it-aie4:4b 2>&1 |
-                    Out-String
-                if (
-                    $LASTEXITCODE -ne 0 -or
-                    $smoke -notmatch "phi4-mini-it-aie4"
-                ) {
-                    throw "Clean-environment AIE4 model load failed.`n$smoke"
+                # Driven through drive_flm_console.ps1, NOT by piping into
+                # `flm run`.
+                #
+                # This block used to be `"/bye" | & $resolvedFlm run <tag>`.
+                # `flm run` reads keystrokes with ReadConsoleInput, a
+                # console-only API that cannot see a redirected pipe -- Task 16
+                # established that against the real binary -- so the prompt was
+                # never delivered and the block would have sat in the REPL
+                # until the CTest timeout killed it. It had never executed:
+                # nothing in this tree passes -RunAie4ModelLoad, so a latent
+                # hang shipped for five tasks under a line that read
+                # "none skipped".
+                #
+                # The driver injects KEY_EVENT records into the console input
+                # buffer the REPL is actually reading, so this exercises the
+                # product's own interactive path. `/status` rather than a
+                # generation turn: it is the REPL command wired to
+                # AutoModel::show_profile, so it proves the AIE4 model loaded
+                # and names the corelib DLL that answered, without spending a
+                # decode on a packaging test.
+                $driver = Join-Path $PSScriptRoot "drive_flm_console.ps1"
+                if (-not (Test-Path -LiteralPath $driver)) {
+                    throw "the console driver is missing: $driver"
                 }
+                $smokeJson = Join-Path $temporary "aie4-model-load.json"
+                $smokeScreen = Join-Path $temporary "aie4-model-load-screen.txt"
+                # The driver AllocConsole()s and takes its own stdout with it,
+                # so it has to be a separate process and its streams must be
+                # left alone -- piping them makes flm.exe inherit a pipe and
+                # spin on a read it can never satisfy. See the same launch
+                # shape, and the alternatives that were measured to fail, in
+                # run_real_model_acceptance.ps1's Invoke-FlmConsoleSession.
+                $psExe = (Get-Process -Id $PID).Path
+                & $psExe -NoProfile -ExecutionPolicy Bypass -File $driver `
+                    -FlmExe $resolvedFlm `
+                    -ModelTag 'phi4-mini-it-aie4:4b' `
+                    -Turns '/status' `
+                    -OutJson $smokeJson `
+                    -ScreenLog $smokeScreen
+                $driverExit = $LASTEXITCODE
+                if (-not (Test-Path -LiteralPath $smokeJson)) {
+                    throw (
+                        "the console driver exited $driverExit and wrote no " +
+                        "result, so nothing is known about the model load")
+                }
+                $smoke = Get-Content $smokeJson -Raw | ConvertFrom-Json
+                if ($driverExit -ne 0 -or -not $smoke.reached_prompt) {
+                    throw (
+                        "Clean-environment AIE4 model load failed (driver " +
+                        "exit $driverExit): $($smoke.error)`n" +
+                        "$($smoke.screen_final)")
+                }
+                # The screen has to name the tag that was loaded. Reaching a
+                # prompt alone would also be true of a build that fell back to
+                # some other model.
+                if ("$($smoke.screen_final)" -notmatch 'phi4-mini-it-aie4') {
+                    throw (
+                        "the REPL reached its prompt but never named " +
+                        "phi4-mini-it-aie4.`n$($smoke.screen_final)")
+                }
+                $ran += "flm-exe AIE4 model load (console-driven, /status)"
+            } else {
+                # Reported, because it is the block this test is named for and
+                # the one that needs AIE4 hardware. It had no else at all: with
+                # -FlmExe supplied the run printed "none skipped" having never
+                # loaded a model, which is this branch's recurring defect --
+                # a record that reads better than the run it describes.
+                $skipped += (
+                    "flm-exe AIE4 model load (-RunAie4ModelLoad not " +
+                    "supplied; needs AIE4 hardware and the packaged model)")
             }
         } finally {
             $env:PATH = $savedPath
@@ -794,9 +979,14 @@ flm_aie4_install_runtime(DESTINATION bin/aie4 COMPONENT AIE4)
         }
         $ran += "flm-exe (Step 7 clean environment, Step 8 dumpbin)"
     } else {
+        # Names only what this branch skips. It used to also invite
+        # -RunAie4ModelLoad, which is (a) irrelevant here, since that flag does
+        # nothing without -FlmExe, and (b) an invitation to a hang, back when
+        # the model-load block piped a prompt into a REPL that reads through
+        # ReadConsoleInput. The model-load skip is now reported where it
+        # belongs: on the -FlmExe branch, where the flag is actually consulted.
         $skipped += (
-            "flm-exe (Step 7 clean environment, Step 8 dumpbin): " +
-            "pass -FlmExe, and -RunAie4ModelLoad on AIE4 hardware")
+            "flm-exe (Step 7 clean environment, Step 8 dumpbin): pass -FlmExe")
     }
 
     foreach ($item in $ran) {

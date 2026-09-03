@@ -11,7 +11,7 @@
 /// HOST_CACHED | DEVICE_VISIBLE (0x1A), mapped once (persistent). The heap
 /// is not HOST_COHERENT, so FastFlowLM's sync_to_device()/sync_from_device()
 /// map to hrx_buffer_flush_range()/hrx_buffer_invalidate_range(). Dispatch is
-/// hrx_stream_dispatch() + hrx_stream_synchronize().
+/// hrx_stream_dispatch() + hrx_stream_flush()/hrx_stream_wait().
 #pragma once
 
 #include <cassert>
@@ -137,14 +137,11 @@ inline hrx_executable_t build_or_get_executable(
                 2 * sizeof(uint64_t));
     append_key_bytes(key, xclbin_bytes.data(), xclbin_bytes.size());
     append_key_bytes(key, cc, n * sizeof(uint32_t));
-    static bool no_cache = std::getenv("HRX_NOCACHE") != nullptr;
     std::lock_guard<std::mutex> lk(mu);
-    if (!no_cache) {
-        auto it = cache.find(key);
-        if (it != cache.end()) {
-            if (ord_out) *ord_out = it->second.ord;
-            return it->second.exe;
-        }
+    auto it = cache.find(key);
+    if (it != cache.end()) {
+        if (ord_out) *ord_out = it->second.ord;
+        return it->second.exe;
     }
     hrx_const_byte_span_t xclbin = {xclbin_bytes.data(), xclbin_bytes.size()};
     hrx_amdxdna_executable_run_t run = {};
@@ -179,7 +176,7 @@ inline hrx_executable_t build_or_get_executable(
         hrx_executable_release(exe);
         exe = nullptr;
     }
-    if (!no_cache) cache.emplace(std::move(key), CachedExe{exe, ord});
+    cache.emplace(std::move(key), CachedExe{exe, ord});
     if (ord_out) *ord_out = ord;
     return exe;
 }
@@ -338,10 +335,10 @@ public:
     size_t size() const { return size_; }
     hrx_buffer_t handle() const { return hbuf_; }
 
-    // sync_to_device(): the host has new data. Record it as host_dirty and defer
-    // the actual h2d flush to the dispatch that consumes the buffer (matching the
-    // shim). This is NOT an unconditional flush: a buffer the device owns is never
-    // marked host_dirty here, so it can never be clobbered.
+    // sync_to_device(): FLM's buffer abstraction uses whole-BO syncs, matching
+    // xrt::bo::sync(XCL_BO_SYNC_BO_TO_DEVICE). Record that the host has new
+    // contents and defer the actual h2d flush to the dispatch that consumes the
+    // buffer.
     void flush() {
         if (!hbuf_) return;
         std::lock_guard<std::mutex> lk(buf_coh_mu());
@@ -357,7 +354,10 @@ public:
         std::lock_guard<std::mutex> lk(buf_coh_mu());
         BufCoh& st = buf_coh()[hbuf_];
         if (st.dev_dirty) {
-            hrx_buffer_invalidate_range(hbuf_, 0, size_);
+            hrx_status_t s = hrx_buffer_invalidate_range(hbuf_, 0, size_);
+            if (hrx_report(s, "bo::invalidate hrx_buffer_invalidate_range")) {
+                return;
+            }
             st.dev_dirty = false;
         }
     }
@@ -414,17 +414,24 @@ public:
 // host has dirtied (host_dirty), exactly once, right before the device reads
 // them. Device-owned buffers (host_dirty == false) are left untouched so they
 // are never clobbered. Mirrors the shim's "h2d only dirty inputs" phase.
-inline void hrx_h2d_bindings(const std::vector<hrx_buffer_ref_t>& binds) {
+inline bool hrx_h2d_bindings(const std::vector<hrx_buffer_ref_t>& binds) {
+    bool err = false;
     std::lock_guard<std::mutex> lk(buf_coh_mu());
     auto& coh = buf_coh();
     for (const auto& b : binds) {
         if (!b.buffer) continue;
         BufCoh& st = coh[b.buffer];
         if (st.host_dirty) {
-            hrx_buffer_flush_range(b.buffer, b.offset, b.length);
+            hrx_status_t s =
+                hrx_buffer_flush_range(b.buffer, b.offset, b.length);
+            if (hrx_report(s, "run::record hrx_buffer_flush_range")) {
+                err = true;
+                continue;
+            }
             st.host_dirty = false;
         }
     }
+    return err;
 }
 
 // After a dispatch completes, the device holds the freshest copy of every bound
@@ -449,6 +456,9 @@ public:
     hrx_executable_t exe_ = nullptr;
     uint32_t ord_ = 0;
     std::vector<hrx_buffer_ref_t> binds_;
+    bool submitted_ = false;
+    bool flushed_ = false;
+    bool submit_error_ = false;
 
     run() = default;
     explicit run(hrx_executable_t exe, uint32_t ord) : exe_(exe), ord_(ord) {}
@@ -457,32 +467,52 @@ public:
         binds_.push_back({b, 0, size});
     }
 
-    void record() {
+    bool record() {
+        submitted_ = false;
+        flushed_ = false;
+        submit_error_ = false;
         if (!exe_) {
             std::fprintf(stderr, "[hrx][ERROR] run::record with null executable\n");
-            return;
+            submit_error_ = true;
+            return false;
         }
         // Zero bindings is valid: RTP/control-only runs such as
         // set_layer_rtp.create_run() and gemma4e layer_pre_load.create_run().
         // Opcode scalars live in the TXN stream, not as BO bindings.
-        hrx_h2d_bindings(binds_);
+        if (hrx_h2d_bindings(binds_)) {
+            submit_error_ = true;
+            return false;
+        }
         hrx_dispatch_config_t cfg = {{1, 1, 1}, {1, 1, 1}, 0};
         hrx_status_t s = hrx_stream_dispatch(rt().stream, exe_, ord_, &cfg,
                                              nullptr, 0, binds_.data(),
                                              binds_.size(), HRX_DISPATCH_FLAG_NONE);
-        hrx_report(s, "run::record hrx_stream_dispatch");
+        if (hrx_report(s, "run::record hrx_stream_dispatch")) {
+            submit_error_ = true;
+            return false;
+        }
+        submitted_ = true;
+        return true;
     }
 
     void start() {
-        record();
+        if (!record()) return;
         hrx_status_t s = hrx_stream_flush(rt().stream);
-        hrx_report(s, "run::start hrx_stream_flush");
+        if (hrx_report(s, "run::start hrx_stream_flush")) {
+            submit_error_ = true;
+            return;
+        }
+        flushed_ = true;
     }
 
     ert_cmd_state wait() {
+        if (submit_error_) return ERT_CMD_STATE_ERROR;
+        if (!flushed_) {
+            return submitted_ ? ERT_CMD_STATE_ERROR : ERT_CMD_STATE_COMPLETED;
+        }
         hrx_status_t s = hrx_stream_wait(rt().stream);
         bool err = hrx_report(s, "run::wait hrx_stream_wait");
-        hrx_mark_dispatched(binds_);
+        if (!err && submitted_) hrx_mark_dispatched(binds_);
         return err ? ERT_CMD_STATE_ERROR : ERT_CMD_STATE_COMPLETED;
     }
 };
@@ -490,24 +520,51 @@ public:
 class runlist {
 public:
     std::vector<run> runs_;
+    bool flushed_ = false;
+    bool submit_error_ = false;
 
     runlist() = default;
     explicit runlist(const hw_context& /*ctx*/) {}
 
     void add(const run& r) { runs_.push_back(r); }
     void add(run&& r) { runs_.push_back(std::move(r)); }
-    void reset() { runs_.clear(); }
+    void reset() {
+        runs_.clear();
+        flushed_ = false;
+        submit_error_ = false;
+    }
 
     void execute() {
-        for (auto& r : runs_) r.record();
+        flushed_ = false;
+        submit_error_ = false;
+        bool any_submitted = false;
+        for (auto& r : runs_) {
+            if (r.record()) {
+                any_submitted = true;
+            } else {
+                submit_error_ = true;
+            }
+        }
+        if (!any_submitted) return;
         hrx_status_t s = hrx_stream_flush(rt().stream);
-        hrx_report(s, "runlist::execute hrx_stream_flush");
+        if (hrx_report(s, "runlist::execute hrx_stream_flush")) {
+            submit_error_ = true;
+            return;
+        }
+        flushed_ = true;
     }
     ert_cmd_state wait() {
+        if (!flushed_) {
+            return submit_error_ ? ERT_CMD_STATE_ERROR : ERT_CMD_STATE_COMPLETED;
+        }
         hrx_status_t s = hrx_stream_wait(rt().stream);
         bool err = hrx_report(s, "runlist::wait hrx_stream_wait");
-        for (auto& r : runs_) hrx_mark_dispatched(r.binds_);
-        return err ? ERT_CMD_STATE_ERROR : ERT_CMD_STATE_COMPLETED;
+        if (!err) {
+            for (auto& r : runs_) {
+                if (r.submitted_) hrx_mark_dispatched(r.binds_);
+            }
+        }
+        return (submit_error_ || err) ? ERT_CMD_STATE_ERROR : ERT_CMD_STATE_COMPLETED;
     }
 };
 

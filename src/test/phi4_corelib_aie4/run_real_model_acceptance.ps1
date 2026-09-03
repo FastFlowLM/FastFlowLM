@@ -95,6 +95,18 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $script:suiteDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+
+# Guard logic lives in one file, dot-sourced by this harness and by
+# verify_acceptance_guards.ps1. See acceptance_guards.ps1 for why: the verifier
+# used to hold a second copy, and a copy agrees with the original by
+# construction -- which is how a guard that could not work shipped labelled
+# "verified offline".
+#
+# Loaded FIRST, immediately after $script:suiteDir exists and before any other
+# statement runs. It sat two hundred lines further down, which happened to work
+# because nothing above it called a guard function -- an ordering nobody
+# declared and the next edit would have broken silently.
+. (Join-Path $script:suiteDir 'acceptance_guards.ps1')
 if (-not $RepoRoot) {
     $script:sourceDir = (Resolve-Path (Join-Path (Join-Path $suiteDir '..') '..')).Path
     $RepoRoot = (Resolve-Path (Join-Path $script:sourceDir '..')).Path
@@ -336,13 +348,6 @@ function Add-StepResult {
 # revision. Anything else is discarded and reported as not exercised. A
 # carried result is marked `carried_over` with the run stamp that produced it,
 # so nothing in the document can quietly present it as fresh.
-# Guard logic lives in one file, dot-sourced by this harness and by
-# verify_acceptance_guards.ps1. See acceptance_guards.ps1 for why: the verifier
-# used to hold a second copy, and a copy agrees with the original by
-# construction -- which is how a guard that could not work shipped labelled
-# "verified offline".
-. (Join-Path $script:suiteDir 'acceptance_guards.ps1')
-
 function Add-UnselectedStep {
     param(
         [Parameter(Mandatory = $true)][string]$Id,

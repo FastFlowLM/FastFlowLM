@@ -31,6 +31,23 @@ if (-not (Test-Path -LiteralPath $Dll -PathType Leaf)) {
 }
 $resolved = (Resolve-Path -LiteralPath $Dll).Path
 
+# Add-Type compiles C#, the C# compiler reads LIB and INCLUDE, and PowerShell
+# runs it with warnings-as-errors. Under MSBuild those variables are set to the
+# MSVC toolchain's paths, one of which is relative -- so this probe failed with
+#
+#   Warning as Error: Invalid search path 'lib\um\x64' specified in
+#   'LIB environment variable'
+#
+# and took the whole flm build down with it, because the staging step it runs
+# from is a POST_BUILD command. It passed every earlier test because those ran
+# it from a plain shell, where LIB is unset. Nothing here needs either
+# variable, so they are cleared for the compile and restored afterwards.
+$savedLib = $env:LIB
+$savedInclude = $env:INCLUDE
+try {
+    Remove-Item Env:LIB -ErrorAction SilentlyContinue
+    Remove-Item Env:INCLUDE -ErrorAction SilentlyContinue
+
 Add-Type @"
 using System;
 using System.Runtime.InteropServices;
@@ -60,6 +77,10 @@ public static class FlmCorelibVersionProbe {
     public delegate void GetVersion(out uint major, out uint minor, out uint patch);
 }
 "@
+} finally {
+    if ($null -ne $savedLib) { $env:LIB = $savedLib }
+    if ($null -ne $savedInclude) { $env:INCLUDE = $savedInclude }
+}
 
 $module = [FlmCorelibVersionProbe]::LoadLibraryEx(
     $resolved, [IntPtr]::Zero,

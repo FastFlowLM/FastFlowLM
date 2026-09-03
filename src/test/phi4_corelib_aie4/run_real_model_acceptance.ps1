@@ -154,6 +154,25 @@ if ($Append -and (Test-Path $OutJson)) {
 
 function Set-Field { param([string]$Name, $Value) $script:record[$Name] = $Value }
 
+# Every read of the step list goes through this. ASSIGN it; never write
+# `@(Get-RecordSteps)` -- see the note on Get-FieldArray in
+# acceptance_guards.ps1, and the lint in verify_acceptance_guards.ps1 that now
+# fails the build if anyone does.
+#
+# `@($script:record['steps'] | Where-Object { $_.id -eq ... })` was the same
+# trap one level down, and it was NOT hypothetical. Before the first
+# Add-StepResult the 'steps' key does not exist, `$null` piped to Where-Object
+# passes one $null item, and `$_.id` throws under Set-StrictMode -Version
+# Latest. That is why `-Steps 1,2,3` on a fresh record died inside
+# Add-UnselectedStep, in seconds, having recorded nothing -- the documented
+# recovery path for a run interrupted by an SSH drop. `-Steps all` was
+# unaffected only because step 1 is selected and Add-StepResult creates the key
+# first, which is why every real run survived it.
+function Get-RecordSteps {
+    $steps = Get-FieldArray $script:record 'steps'
+    return , @($steps)
+}
+
 function Trace-Progress {
     param([string]$Text)
     try {
@@ -299,7 +318,8 @@ function Add-StepResult {
         [string[]]$Criteria = @()
     )
     if (-not $script:record.Contains('steps')) { $script:record['steps'] = @() }
-    $steps = @($script:record['steps'] | Where-Object { $_.id -ne $Id })
+    $priorSteps = Get-RecordSteps
+    $steps = @($priorSteps | Where-Object { [string](Get-Field $_ 'id') -ne $Id })
     $steps += [ordered]@{
         id        = $Id
         title     = $Title
@@ -353,7 +373,8 @@ function Add-UnselectedStep {
         [Parameter(Mandatory = $true)][string]$Id,
         [Parameter(Mandatory = $true)][string]$Title
     )
-    $prior = @($script:record['steps'] | Where-Object { $_.id -eq $Id })
+    $existingSteps = Get-RecordSteps
+    $prior = @($existingSteps | Where-Object { [string](Get-Field $_ 'id') -eq $Id })
     if ($prior.Count -gt 0) {
         $p = $prior[0]
         $priorStatus = [string](Get-Field $p 'status')
@@ -384,7 +405,7 @@ function Add-UnselectedStep {
             $carriedInto = @()
             if ($copy.Contains('carried_into')) { $carriedInto = @($copy['carried_into']) }
             $copy['carried_into'] = ($carriedInto + $script:runStamp)
-            $others = @($script:record['steps'] | Where-Object { $_.id -ne $Id })
+            $others = @($existingSteps | Where-Object { [string](Get-Field $_ 'id') -ne $Id })
             $script:record['steps'] = @(($others + $copy) | Sort-Object { [double]($_.id -replace '[^0-9.]', '') })
             Save-Record
             $line = "  [{0}] step {1}: carried over from run {2} (same binary, same revision)" -f `
@@ -1370,7 +1391,8 @@ if (Test-Selected '5') {
     Get-ChildItem -Path $ModelDir -File | ForEach-Object { $onDisk += $_.Length }
     $ev['model_dir_bytes_on_disk'] = $onDisk
     $ev['model_dir_gib_on_disk'] = [math]::Round($onDisk / 1GB, 2)
-    $catalogStep = @($script:record['steps'] | Where-Object { (Get-Field $_ 'id') -eq '1' })
+    $soFar = Get-RecordSteps
+    $catalogStep = @($soFar | Where-Object { (Get-Field $_ 'id') -eq '1' })
     if ($catalogStep.Count -gt 0) {
         $catEv = Get-Field $catalogStep[0] 'evidence'
         $ev['catalog_size'] = Get-Field $catEv 'catalog_size'
@@ -1954,10 +1976,30 @@ if (Test-Selected '8') {
         # would leave "remem ber" and the match would fail on a history that is
         # perfectly correct. Deleting whitespace entirely makes the comparison
         # immune to however the console chose to lay the text out.
-        $containment = @(Test-HistoryContainment $perTurn)
+        # ASSIGNED, then used. Never `@(Test-HistoryContainment ...)`.
+        #
+        # This line shipped as `@(Test-HistoryContainment $perTurn)` and that
+        # DISARMED THE GATE. The function ends `return , @($rows)`; `@(f ...)`
+        # preserves the comma-wrap, so $containment became a one-element array
+        # holding the rows array, `-not $_.history_contains_previous_turn` was
+        # `-not @($false,$false,$false)` = $false, $missing.Count was 0, and the
+        # only branch that reports non-accumulation became unreachable. On the
+        # committed record the correct form finds 3 missing turns and the
+        # wrapped form finds 0. verify_acceptance_guards.ps1 now lints this file
+        # for the pattern, because the previous verifier tested the function and
+        # not the statement that calls it.
+        $containment = Test-HistoryContainment $perTurn
         $ev['history_containment'] = $containment
         $missing = @($containment | Where-Object { -not $_.history_contains_previous_turn })
         $ev['turns_whose_history_lost_the_previous_turn'] = @($missing | ForEach-Object { $_.turn })
+        # The reply half is read out of the previous turn's /history by looking
+        # for the chat template's own markers. If they are not there -- a
+        # /history format change, a different model's template -- the reply is
+        # NOT CHECKABLE, which is a different statement from "the reply was
+        # dropped". Recorded here and reported below, so a template change
+        # cannot quietly turn the gate into a prompt-only check.
+        $uncheckableReply = @($containment | Where-Object { -not $_.previous_reply_checkable })
+        $ev['turns_whose_reply_half_could_not_be_checked'] = @($uncheckableReply | ForEach-Object { $_.turn })
 
         # Recorded, not gated. The count sequence is informative -- it is how
         # the runaway-to-the-cap turns show up -- but it decides nothing.
@@ -1969,14 +2011,31 @@ if (Test-Selected '8') {
         $ev['history_tokens_grow_monotonically'] = $growing
         $ev['history_token_count_note'] = 'recorded only; the accumulation verdict comes from containment above, because a token count can rise or stay flat for reasons unrelated to whether the previous turn was kept'
 
+        # ATTRIBUTION, carried in the record rather than only in a report,
+        # because a record travels and a report does not. Project-owner ruling,
+        # review round 4: this branch exists to make FastFlow call corelib to
+        # run the model on AIE4. Defects belonging to FastFlow itself are found
+        # and documented here, NOT fixed on this branch.
+        $ev['history_defect_attribution'] = 'UPSTREAM FASTFLOW, not this branch, and deliberately not fixed here. Phi4::insert (common/AutoModel/modeling_phi4.cpp:559) builds a fresh SINGLE-MESSAGE array from input.prompt at lines 569-573 whenever input.messages is empty, which is every CLI turn; runner/runner.cpp re-declares the input per turn setting only .prompt. That construction sits ABOVE the #if defined(FLM_ENABLE_CORELIB_AIE4) branch, which begins at modeling_phi4.cpp:579 -- this branch''s code starts at that #if, so the history is already lost before any AIE4 code runs. The identical push_back({{"role","user"},{"content",input.prompt}}) construction is in modeling_llama3.cpp, modeling_qwen2.cpp, modeling_qwen3.cpp (4 sites), modeling_gemma3_text.cpp, modeling_lfm2.cpp, modeling_gpt_oss.cpp and modeling_nanbeige.cpp: it is the shared CLI path for every text frontend, not an AIE4 behaviour. The server is structurally unaffected because it always supplies messages.'
+        $ev['degeneration_attribution'] = 'UNATTRIBUTED, and deliberately not folded into the history defect. Two turns ran to the context cap and degenerated -- one repeating a phrase, one emitting ASCII noise. TURN 1 HAS NO HISTORY TO LOSE, so the single-message construction above cannot explain it, and reaching position 4095 is a CONSEQUENCE of a turn that will not stop rather than a cause of it. This sits in tension with the separately verified result that single-turn generation is coherent across five independent processes (step 7). Attribution is PENDING: a comparison on the legacy NPU2 path is planned as a later task and is NOT performed here. Nothing in this record assigns the degeneration to FastFlow or to the AIE4 work.'
+
         if ($perTurn.Count -lt 2) {
             $problems += 'fewer than two turns were captured, so history accumulation could not be measured'
         } elseif (@($perTurn | Where-Object { -not $_.history_verbatim }).Count -gt 0) {
             $problems += '/history produced no output for at least one turn, so history accumulation could not be measured'
-        } elseif ($missing.Count -gt 0) {
-            $problems += ("the conversation history is not accumulating: the /history output at turn(s) " +
-                          (@($missing | ForEach-Object { $_.turn }) -join ', ') +
-                          " does not contain the preceding turn's message, so each turn replaces the previous history rather than appending to it")
+        } else {
+            # Two independent statements, so neither hides the other: what the
+            # gate found, and what the gate could not look at.
+            if ($missing.Count -gt 0) {
+                $problems += ("the conversation history is not accumulating: the /history output at turn(s) " +
+                              (@($missing | ForEach-Object { $_.turn }) -join ', ') +
+                              " does not contain the preceding turn's message, so each turn replaces the previous history rather than appending to it")
+            }
+            if ($uncheckableReply.Count -gt 0) {
+                $problems += ("the reply half of the history check could not be evaluated at turn(s) " +
+                              (@($uncheckableReply | ForEach-Object { $_.turn }) -join ', ') +
+                              ": the preceding turn's /history carries no '<|assistant|>' ... '<|end|>' pair, so only its user message could be looked for. This is a statement about the rendered history, not about the model")
+            }
         }
 
         if ($problems.Count -eq 0) {
@@ -2010,7 +2069,8 @@ if (Test-Selected '8') {
     Write-Section 'Step 8c: the logical KV position the product reports'
     $ev3 = [ordered]@{}
     $problems3 = @()
-    $step8 = @($script:record['steps'] | Where-Object { (Get-Field $_ 'id') -eq '8' })
+    $stepsSoFar = Get-RecordSteps
+    $step8 = @($stepsSoFar | Where-Object { (Get-Field $_ 'id') -eq '8' })
     $turnsSeen = @()
     if ($step8.Count -gt 0) { $turnsSeen = @((Get-Field (Get-Field $step8[0] 'evidence') 'per_turn')) }
     if ($turnsSeen.Count -eq 0) {
@@ -3007,7 +3067,7 @@ $criteria = @(
   @{ id='C17'; text='Nonzero-position prompt continuation uses only one-row calls.'; steps=@(); gap='' }
   @{ id='C18'; text='Prefix hits choose between one-row suffix append and full fresh re-prefill using the measured release-fixed suffix threshold, and both routes meet the same Section 15.3 gates.'; steps=@('8b'); gap='' }
   @{ id='C19'; text='Append-winning sampled suffix lengths are prefix-monotonic; otherwise the published threshold is zero.'; steps=@(); gap='' }
-  @{ id='C20'; text='User-visible prompt plus generated tokens and logical KV position are each bounded at 4096, with over-limit requests rejected before submit.'; steps=@('10','8c'); gap='the enforced bound is 4095, not the 4096 this criterion states -- no token-attention kernel ships for a 4096-token window. The RULE is verified exactly (the remaining capacity is admitted, one more is refused) but against a different constant than the design text, and that discrepancy is a design question, not a measurement' }
+  @{ id='C20'; text='User-visible prompt plus generated tokens and logical KV position are each bounded at 4096, with over-limit requests rejected before submit.'; steps=@('10','8c'); gap='THE CRITERION TEXT IS THE DEFECT, NOT THE MEASUREMENT. Project-owner ruling, review round 4: the AIE4 operators support at most about 4k input, so the cap is expected behaviour by design, the usable Phi-4 AIE4 context is 4095, and asserting against 4095 is CORRECT. What is verified here is the rule and its clean enforcement -- exactly the remaining capacity is admitted, one more is refused with HTTP 400 naming the active cap. This stays PARTIAL rather than being upgraded to met, because the criterion as written still says 4096 and nothing in this run makes that sentence true; the correction belongs in design Section 17, not in a verdict here' }
   @{ id='C21'; text='Limits count complete rendered multi-turn history; no partial append, eviction, or sliding window occurs.'; steps=@('8','10'); gap='' }
   @{ id='C22'; text='set_context_length and update_max_length obey the fixed-pitch behavior in Section 7.3.'; steps=@(); gap='' }
   @{ id='C23'; text='Lowering the soft cap below live logical context is rejected atomically; clearing first permits the lower cap.'; steps=@(); gap='' }
@@ -3089,8 +3149,9 @@ Set-Field 'determinism_scope' ([ordered]@{
 })
 Save-Record
 
+$recordedSteps = Get-RecordSteps
 $stepById = @{}
-foreach ($s in @($script:record['steps'])) { $stepById[$s.id] = $s }
+foreach ($s in $recordedSteps) { $stepById[[string](Get-Field $s 'id')] = $s }
 
 $rank = @{ 'met' = 0; 'partial' = 1; 'not_exercised' = 2; 'not_met' = 3 }
 $rollup = @()
@@ -3147,8 +3208,9 @@ foreach ($c in $criteria) {
         $byStep[$sid] += $c.id
     }
 }
-foreach ($st in @($script:record['steps'])) {
-    $st.criteria = $(if ($byStep.ContainsKey($st.id)) { $byStep[$st.id] } else { @() })
+foreach ($st in $recordedSteps) {
+    $sid = [string](Get-Field $st 'id')
+    $st.criteria = $(if ($byStep.ContainsKey($sid)) { $byStep[$sid] } else { @() })
 }
 Save-Record
 
@@ -3156,9 +3218,9 @@ $met = @($rollup | Where-Object { $_.status -eq 'met' }).Count
 $partial = @($rollup | Where-Object { $_.status -eq 'partial' }).Count
 $notMet = @($rollup | Where-Object { $_.status -eq 'not_met' }).Count
 $notEx = @($rollup | Where-Object { $_.status -eq 'not_exercised' }).Count
-$stepsMet = @($script:record['steps'] | Where-Object { $_.status -eq 'met' }).Count
-$stepsNotMet = @($script:record['steps'] | Where-Object { $_.status -eq 'not_met' }).Count
-$stepsNotEx = @($script:record['steps'] | Where-Object { $_.status -eq 'not_exercised' }).Count
+$stepsMet = @($recordedSteps | Where-Object { [string](Get-Field $_ 'status') -eq 'met' }).Count
+$stepsNotMet = @($recordedSteps | Where-Object { [string](Get-Field $_ 'status') -eq 'not_met' }).Count
+$stepsNotEx = @($recordedSteps | Where-Object { [string](Get-Field $_ 'status') -eq 'not_exercised' }).Count
 Set-Field 'summary' ([ordered]@{
     criteria_total = $rollup.Count
     criteria_met = $met
@@ -3272,7 +3334,8 @@ if ($Markdown) {
     $md.Add('')
     $md.Add('| Step | Result | What was checked |')
     $md.Add('| --- | --- | --- |')
-    foreach ($st in @($script:record['steps'])) {
+    $mdSteps = Get-RecordSteps
+    foreach ($st in $mdSteps) {
         $mk = switch ($st.status) { 'met' { 'MET' } 'not_met' { '**NOT MET**' } default { '*not exercised*' } }
         $d = ($st.detail -replace '\|', '\|')
         $md.Add("| $($st.id). $($st.title) | $mk | $d |")
@@ -3300,7 +3363,7 @@ if ($Markdown) {
     $md.Add('## Verbatim prompts and completions')
     $md.Add('')
     $any = $false
-    foreach ($st in @($script:record['steps'])) {
+    foreach ($st in $mdSteps) {
         $e = $st.evidence
         if (-not $e) { continue }
         # @($e.PSObject.Properties | ForEach-Object { $_.Name }), not
@@ -3328,17 +3391,27 @@ if ($Markdown) {
                 $md.Add('```')
                 $md.Add('')
             }
-            # No `continue` here.
+            # No `continue` here, and the next branch is an `elseif`.
             #
-            # It used to skip the rest of the branches for any step carrying
-            # `probes`, which would silently drop the per-turn blocks of a step
-            # that had both -- and the populated-document check counts a step's
-            # per_turn evidence as expected output, so such a step would be
-            # counted and never rendered, failing the run for a reason that has
-            # nothing to do with the run. No step carries both today; letting
-            # the branches fall through means none has to.
+            # A `continue` used to skip BOTH remaining branches for any step
+            # carrying `probes`, which would silently drop the per-turn blocks
+            # of a step that had both -- and the populated-document check counts
+            # a step's per_turn evidence as expected output, so such a step
+            # would be counted, never rendered, and fail the run for a reason
+            # that has nothing to do with the run. Falling through fixes that.
+            #
+            # But it must not fall through into the SINGLE prompt/completion
+            # branch, and the comment that stood here claimed "no step carries
+            # both today", which was wrong: STEP 7 CARRIES BOTH. It surfaces its
+            # first probe under `prompt_verbatim`/`completion_verbatim` (see the
+            # step) so the headline pair is easy to find, and that pair is
+            # already printed above as probe 1. Falling through would emit a
+            # second `### Step 7` heading duplicating content the reader has
+            # just read. `elseif` renders the richer probes block and skips the
+            # redundant one; `per_turn` below is a separate `if` and still
+            # falls through, which is the case the `continue` broke.
         }
-        if ($names -contains 'prompt_verbatim' -and $names -contains 'completion_verbatim') {
+        elseif ($names -contains 'prompt_verbatim' -and $names -contains 'completion_verbatim') {
             $any = $true
             $md.Add("### Step $($st.id): $($st.title)")
             $md.Add('')
@@ -3387,7 +3460,7 @@ if ($Markdown) {
     $md.Add('')
     $md.Add('| Measurement | Value | From |')
     $md.Add('| --- | ---: | --- |')
-    foreach ($st in @($script:record['steps'])) {
+    foreach ($st in $mdSteps) {
         $e = $st.evidence
         if (-not $e) { continue }
         foreach ($n in @($e.PSObject.Properties | ForEach-Object { $_.Name })) {

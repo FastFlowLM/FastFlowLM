@@ -22,6 +22,23 @@
 
 # Read one field from either shape a record node can take: an ordered
 # dictionary built in-session, or a PSCustomObject loaded from the JSON.
+#
+# `$Object.PSObject.Properties[$Name]` -- an indexer lookup -- NOT
+# `$Object.PSObject.Properties.Name -contains $Name`, which is member
+# enumeration and THROWS on a property-less object under
+# Set-StrictMode -Version Latest: "The property 'Name' cannot be found on this
+# object."
+#
+# That is not hypothetical. A step recorded with no evidence gets the default
+# `@{}`, which serialises as `{}` and reloads as a PSCustomObject with zero
+# properties -- and the harness reloads the record from disk before rendering.
+# Any run that leaves a step `not_exercised` through Add-UnselectedStep
+# therefore produced `{}`, and the renderer died in the one helper written to
+# make it degrade instead. Reproduced offline: a seeded partial run rendered a
+# complete 80 KB document and then reported DOCUMENT NOT RENDERED and exit 1.
+# The committed `-Steps all` run escaped it only because every step supplied
+# evidence. The renderer already documents this exact trap for a different
+# expression a hundred lines away; the shared helper had it too.
 function Get-Field {
     param($Object, [string]$Name)
     if ($null -eq $Object) { return $null }
@@ -29,7 +46,8 @@ function Get-Field {
         if ($Object.Contains($Name)) { return $Object[$Name] }
         return $null
     }
-    if ($Object.PSObject.Properties.Name -contains $Name) { return $Object.$Name }
+    $prop = $Object.PSObject.Properties[$Name]
+    if ($null -ne $prop) { return $prop.Value }
     return $null
 }
 
@@ -108,6 +126,16 @@ function Test-HistoryContainment {
         # where the frontend rendered it, rather than from the screen text of
         # the reply -- the screen carries the banner lines and the echoed
         # prompt as well, and would never match verbatim.
+        #
+        # THE MARKERS ARE PHI-4'S CHAT TEMPLATE, and that is a coupling, not a
+        # constant. A /history format change, or the same probe pointed at
+        # another model, leaves no marker to find. "No marker" must therefore
+        # mean NOT CHECKABLE, not "the reply was dropped": scoring it as
+        # dropped would fail a perfectly healthy conversation for a rendering
+        # reason, which is the same mistake the whitespace handling above
+        # exists to avoid. `previous_reply_checkable` says which happened, and
+        # the caller is expected to report an uncheckable reply rather than
+        # silently degrade to a prompt-only gate.
         $prevHistory = Remove-AllWhitespace ([string](Get-Field $prev 'history_verbatim'))
         $replyNeedle = ''
         $marker = '<|assistant|>'
@@ -123,15 +151,21 @@ function Test-HistoryContainment {
             if ($tail.Length -gt 40) { $tail = $tail.Substring(0, 40) }
             $replyNeedle = $tail
         }
-        $hasReply = ($replyNeedle.Length -gt 0 -and $thisHistory.Contains($replyNeedle))
+        $replyCheckable = ($replyNeedle.Length -gt 0)
+        $hasReply = ($replyCheckable -and $thisHistory.Contains($replyNeedle))
 
         $rows += [ordered]@{
             turn = (Get-Field $turnList[$k] 'index')
             previous_turn_prompt = $prevPrompt
             history_contains_previous_prompt = $hasPrompt
             history_contains_previous_reply = $hasReply
-            # Both halves, because "complete rendered history" is the claim.
-            history_contains_previous_turn = ($hasPrompt -and $hasReply)
+            previous_reply_checkable = $replyCheckable
+            # Both halves when both can be read, because "complete rendered
+            # history" is the claim. When the reply cannot be read at all the
+            # prompt alone decides -- and the row says so, so the caller can
+            # report the weaker check instead of publishing it as the strong
+            # one.
+            history_contains_previous_turn = $(if ($replyCheckable) { $hasPrompt -and $hasReply } else { $hasPrompt })
             previous_reply_probe = $replyNeedle
         }
     }

@@ -267,15 +267,22 @@ function Wait-ForScreen {
 
 # Count of `>>> ` prompts on screen. Turn N is complete when prompt N+1 shows.
 #
-# The pattern has NO trailing space, and that is not sloppiness. Read-Screen
-# TrimEnd()s every row, so the prompt the user sees as ">>> " arrives here as
-# ">>>". Matching '^>>> ' therefore never fires, the driver waits out its whole
-# load timeout against a REPL that is sitting at the prompt, and the run reads
-# as "the model never loaded". Measured, on the first run of this driver.
+# Two things about this pattern, both learned the same way -- by watching the
+# driver wait out a timeout against a REPL that was sitting at its prompt.
+#
+# No trailing space: Read-Screen TrimEnd()s every row, so the prompt the user
+# sees as ">>> " arrives here as ">>>".
+#
+# Leading whitespace allowed: when a reply ends without a newline -- which
+# happens when it contains emoji or other characters the console does not
+# render one cell per code unit -- the prompt is written at whatever column the
+# cursor stopped at, and the row arrives as spaces followed by ">>>". Anchoring
+# hard at column zero misses it, and the driver hangs for the full turn timeout
+# on a turn that finished normally. Measured on a reply that ended in emoji.
 function Get-PromptCount {
     param([string]$Text)
     if (-not $Text) { return 0 }
-    return ([regex]::Matches($Text, '(?m)^>>>')).Count
+    return ([regex]::Matches($Text, '(?m)^[ 	]*>>>')).Count
 }
 
 try {

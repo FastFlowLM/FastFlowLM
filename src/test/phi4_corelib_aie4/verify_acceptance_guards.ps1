@@ -321,6 +321,373 @@ Check 'the segment scan is silent on a long, wholly alphabetic reply' $true `
     $("$($longHealthy.Length) characters")
 
 # ---------------------------------------------------------------------------
+# The rollup must fail CLOSED on a status nobody recognises
+# ---------------------------------------------------------------------------
+#
+# The acceptance verdict failed OPEN: `$rank['<unknown>']` is $null, `$null -gt 0`
+# is $false, so an unrecognised step status rolled up to `met` and reached none
+# of the counters that feed the exit ladder. `RESULT: ACCEPTED`, exit 0.
+#
+# These cases drive Get-UnrecognisedStepStatus, the function the harness itself
+# calls -- not a copy of it. The harness's use of it is separately checked by
+# the AST section below and by the explicit call-site assertion at the end.
+Write-Output ''
+Write-Output '=== Get-UnrecognisedStepStatus: an unknown status must be a hard failure ==='
+
+# Assigned, never `@(Get-FieldArray ...)`. Same trap as $perTurn above.
+$recordedStepsForCheck = Get-FieldArray $record 'steps'
+$rankTable = Get-StepStatusRank
+Check 'the rank table has exactly the four known statuses' $true `
+    ($rankTable.Count -eq 4 -and $rankTable.ContainsKey('met') -and $rankTable.ContainsKey('partial') -and
+     $rankTable.ContainsKey('not_exercised') -and $rankTable.ContainsKey('not_met'))
+
+# Documentation, not coverage: the language behaviour the bug was made of.
+Note 'witness: $rank[<unknown>] is $null and $null -gt 0 is $false' $true `
+    (($null -eq $rankTable['bogus']) -and (-not ($rankTable['bogus'] -gt $rankTable['met']))) `
+    'the whole defect, in one expression'
+
+# Control first. The committed record must be silent, or every positive case
+# below is meaningless.
+$realUnknown = Get-UnrecognisedStepStatus $recordedStepsForCheck
+Check 'silent on the committed record' $true ($realUnknown.Count -eq 0) `
+    $(if ($realUnknown.Count) { $realUnknown -join '; ' } else { "$($recordedStepsForCheck.Count) steps" })
+
+# The four statuses the harness may legitimately produce, plus the wrong-case
+# spelling. PowerShell hashtable lookup is case-insensitive, so 'MET' IS
+# recognised and correctly ranks as met -- asserting otherwise would be a
+# check that agrees with a wrong belief about the language.
+$legal = @('met', 'partial', 'not_exercised', 'not_met', 'MET') | ForEach-Object {
+    [pscustomobject]@{ id = "legal-$_"; status = $_ } }
+$legalUnknown = Get-UnrecognisedStepStatus $legal
+Check 'silent on every legal status, including wrong case' $true ($legalUnknown.Count -eq 0) `
+    $(if ($legalUnknown.Count) { $legalUnknown -join '; ' } else { 'met, partial, not_exercised, not_met, MET' })
+
+# The reachable shapes: a status from an older schema, a truncated record, a
+# hand-edited one. `-Append` merges $OutJson wholesale and Add-UnselectedStep
+# carries a prior step forward verbatim, so none of these is hypothetical.
+$illegal = @(
+    [pscustomobject]@{ id = '1'; status = 'failed' },
+    [pscustomobject]@{ id = '2'; status = '' },
+    [pscustomobject]@{ id = '3'; status = 'bogus' },
+    [pscustomobject]@{ id = '4'; status = 'met' }
+)
+$illegalUnknown = Get-UnrecognisedStepStatus $illegal
+Check 'fires on every unrecognised status and only those' $true `
+    ($illegalUnknown.Count -eq 3) $($illegalUnknown -join '; ')
+Check 'the diagnostic names the step and the status it did not recognise' $true `
+    ((@($illegalUnknown | Where-Object { $_ -match "^step 1: 'failed'$" }).Count -eq 1) -and
+     (@($illegalUnknown | Where-Object { $_ -match "^step 3: 'bogus'$" }).Count -eq 1))
+
+# A step with no `status` field at all -- the shape a truncated record has.
+# Get-Field returns $null, [string]$null is '', and '' is not in the table.
+$statusless = @('{"id":"9"}' | ConvertFrom-Json)
+$statuslessUnknown = Get-UnrecognisedStepStatus $statusless
+Check 'fires on a step carrying no status field at all' $true ($statuslessUnknown.Count -eq 1) `
+    $($statuslessUnknown -join '; ')
+
+# ---------------------------------------------------------------------------
+# Publishability: a UTF-8 BOM stops a Jekyll page being a page
+# ---------------------------------------------------------------------------
+#
+# The signed-off acceptance record shipped with a BOM and was therefore not a
+# page: no front matter, no layout, no nav entry, no pretty URL, and no entry
+# in search.json. `Set-Content -Encoding utf8` means UTF-8 WITH BOM under
+# Windows PowerShell 5.1, and the harness's read-back stamp check cannot see it
+# because every text reader strips a BOM.
+Write-Output ''
+Write-Output '=== UTF-8 BOM: no .md under docs/ may carry one ==='
+
+$docsRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..\docs')).Path
+$mdCount = @(Get-ChildItem -LiteralPath $docsRoot -Recurse -File -Filter '*.md').Count
+# Non-vacuity: a scan that found no files would pass for the wrong reason.
+Check 'the BOM scan found markdown to scan' $true ($mdCount -ge 40) "$mdCount .md files under docs/"
+$bomFiles = Get-BomMarkdownFile $docsRoot
+Check 'no .md under docs/ carries a UTF-8 BOM' $true ($bomFiles.Count -eq 0) `
+    $(if ($bomFiles.Count) { ($bomFiles | ForEach-Object { Split-Path -Leaf $_ }) -join ', ' } else { "$mdCount files clean" })
+
+# Positive control: the detector must actually detect. Written with the exact
+# cmdlet and parameter that caused the incident, so this case also pins the
+# claim that `Set-Content -Encoding utf8` emits a BOM on this host.
+$bomProbe = Join-Path ([System.IO.Path]::GetTempPath()) ("bomprobe-$PID-" + [guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Force -Path $bomProbe | Out-Null
+try {
+    # The probe file is written with EXPLICIT BOM BYTES, not with
+    # `Set-Content -Encoding utf8`.
+    #
+    # That cmdlet is where the defect came from, but it is not a reliable way
+    # to PRODUCE one: `-Encoding utf8` means UTF-8-with-BOM in Windows
+    # PowerShell 5.1 and UTF-8-without-BOM in PowerShell 7. Building the
+    # positive control out of it made the detector's own test pass vacuously
+    # under pwsh 7 -- a check that cannot fail, in the file whose subject is
+    # checks that cannot fail. The host difference is reported separately
+    # below, as the documentation it is.
+    $withBom = Join-Path $bomProbe 'explicit-bom.md'
+    [System.IO.File]::WriteAllBytes($withBom,
+        ([byte[]](0xEF, 0xBB, 0xBF) + [System.Text.Encoding]::UTF8.GetBytes("---`nlayout: docs`n---`n")))
+    Check 'Test-Utf8Bom detects an explicit BOM' $true (Test-Utf8Bom $withBom)
+
+    # Documentation, not coverage: WHY the defect shipped, and why it would not
+    # have been caught by running the harness under pwsh. Asserted against the
+    # host actually running, so it stays true on both rather than pinning one.
+    $setContentProbe = Join-Path $bomProbe 'set-content-utf8.txt'
+    "x" | Set-Content -Path $setContentProbe -Encoding utf8
+    $setContentBom = Test-Utf8Bom $setContentProbe
+    $isDesktop = ($PSVersionTable.PSEdition -ne 'Core')
+    Note 'witness: Set-Content -Encoding utf8 emits a BOM only on Windows PowerShell' $true `
+        ($setContentBom -eq $isDesktop) `
+        "$($PSVersionTable.PSEdition) $($PSVersionTable.PSVersion): BOM=$setContentBom"
+
+    $withoutBom = Join-Path $bomProbe 'write-utf8-nobom.md'
+    Write-Utf8NoBom -Path $withoutBom -Text "---`nlayout: docs`n---`n"
+    Check 'Write-Utf8NoBom writes no BOM' $true (-not (Test-Utf8Bom $withoutBom))
+
+    $probeHits = Get-BomMarkdownFile $bomProbe
+    Check 'the scan finds a BOM when there is one, and only that file' $true `
+        ($probeHits.Count -eq 1 -and $probeHits[0] -eq $withBom) `
+        "$($probeHits.Count) of 2 files flagged"
+} finally {
+    Remove-Item -LiteralPath $bomProbe -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+# Source lint: the statement that caused it must not come back.
+#
+# Scoped to the PUBLISHED DOCUMENT rather than banning the cmdlet outright.
+# The harness's other `Set-Content -Encoding utf8` calls write run artifacts
+# and HTTP request bodies under $script:artifactDir -- a BOM there is
+# tolerated (nlohmann's lexer skips one) and none of them is parsed by Jekyll.
+# The one that mattered is the one that writes $Markdown, and that write must
+# go through Write-Utf8NoBom.
+$docWrittenBySetContent = @()
+$docWrittenByGuardedWriter = 0
+$otherSetContentUtf8 = @()
+foreach ($p in @((Join-Path $PSScriptRoot 'run_real_model_acceptance.ps1'),
+                 (Join-Path $PSScriptRoot 'acceptance_guards.ps1'))) {
+    # Parsed directly: Get-Ast is defined with the call-site lint further down,
+    # and moving it above this section would put the lint's helper a long way
+    # from the lint.
+    $lintTokens = $null
+    $lintErrors = $null
+    $ast = [System.Management.Automation.Language.Parser]::ParseFile($p, [ref]$lintTokens, [ref]$lintErrors)
+    if (@($lintErrors).Count -gt 0) { throw ("parse error in {0}: {1}" -f $p, $lintErrors[0].Message) }
+    foreach ($cmd in $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] }, $true)) {
+        $cn = $cmd.GetCommandName()
+        $where = "{0}:{1}" -f (Split-Path -Leaf $p), $cmd.Extent.StartLineNumber
+        $touchesDoc = ($cmd.Extent.Text -match '\$Markdown\b')
+        if ($cn -eq 'Set-Content') {
+            if ($touchesDoc) { $docWrittenBySetContent += $where }
+            elseif ($cmd.Extent.Text -match '-Encoding\s+utf8') { $otherSetContentUtf8 += $where }
+        } elseif ($cn -eq 'Write-Utf8NoBom' -and $touchesDoc) {
+            $docWrittenByGuardedWriter++
+        }
+    }
+}
+Check 'the acceptance document is never written with Set-Content' $true `
+    ($docWrittenBySetContent.Count -eq 0) $($docWrittenBySetContent -join ', ')
+# Non-vacuity: the check above is also satisfied by a harness that writes the
+# document nowhere at all.
+Check 'the acceptance document is written through Write-Utf8NoBom' $true `
+    ($docWrittenByGuardedWriter -eq 1) "$docWrittenByGuardedWriter call site(s)"
+Note 'witness: other Set-Content -Encoding utf8 sites, all run artifacts' $true `
+    ($otherSetContentUtf8.Count -gt 0) ($otherSetContentUtf8 -join ', ')
+
+# ---------------------------------------------------------------------------
+# The links out of this branch's pages must resolve
+# ---------------------------------------------------------------------------
+#
+# `docs/_config.yml` sets `permalink: pretty` and `baseurl: ""`, so a page
+# builds to `<name>/index.html` and is served from a DIRECTORY. Two link forms
+# are wrong under that scheme and both shipped on this branch: a `.html`
+# suffix, which no built page has; and a relative link from a non-index page,
+# which resolves one level too deep because the page IS a directory. The
+# acceptance record's new link to the provenance page -- the page carrying the
+# correction to a wrong failure reason in the record itself -- was written the
+# second way in this very fix round and would have 404'd.
+#
+# Scoped to the three pages this branch owns. A repository-wide checker also
+# flags one pre-existing upstream page, and turning an upstream defect into a
+# red gate here is not this round's business.
+Write-Output ''
+Write-Output '=== Internal links out of the branch pages resolve to real pages ==='
+
+$docsForLinks = @('docs\docs\benchmarks\phi4_aie4_acceptance.md',
+                  'docs\docs\benchmarks\phi4_aie4_acceptance_provenance.md',
+                  'docs\docs\models\phi.md')
+$repoRootForLinks = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path
+
+# Every page's built URL, derived the way Jekyll derives it under
+# `permalink: pretty` -- an index page maps to its directory, any other page to
+# a directory of its own name.
+$pageUrls = @{}
+foreach ($f in @(Get-ChildItem -LiteralPath $docsRoot -Recurse -File -Filter '*.md')) {
+    $rel = $f.FullName.Substring($docsRoot.Length).TrimStart('\').Replace('\', '/')
+    $url = $(if ($rel -match '(^|/)index\.md$') {
+        '/' + ($rel -replace '(^|/)index\.md$', '') + '/'
+    } else {
+        '/' + ($rel -replace '\.md$', '') + '/'
+    })
+    $pageUrls[($url -replace '/+', '/')] = $rel
+}
+Check 'the link checker enumerated the site pages' $true ($pageUrls.Count -ge 40) "$($pageUrls.Count) pages"
+
+$linkProblems = @()
+$linksChecked = 0
+foreach ($rel in $docsForLinks) {
+    $full = Join-Path $repoRootForLinks $rel
+    if (-not (Test-Path $full)) { $linkProblems += "$rel : missing"; continue }
+    $relPosix = ($rel -replace '\\', '/') -replace '^docs/', ''
+    $base = $(if ($relPosix -match '(^|/)index\.md$') {
+        '/' + ($relPosix -replace '(^|/)index\.md$', '') + '/'
+    } else {
+        '/' + ($relPosix -replace '\.md$', '') + '/'
+    }) -replace '/+', '/'
+    foreach ($m in [regex]::Matches((Get-Content -LiteralPath $full -Raw), '\]\(([^)\s]+)\)')) {
+        $target = ($m.Groups[1].Value -split '#')[0]
+        if (-not $target -or $target -match '^(https?:|mailto:|#)') { continue }
+        $linksChecked++
+        if ($target -match '\{\{') { $linkProblems += "$rel -> $target (Liquid in an internal link)"; continue }
+        if ($target -match '\.html$') { $linkProblems += "$rel -> $target (.html suffix; permalink is pretty)"; continue }
+        $joined = $(if ($target.StartsWith('/')) { $target } else { $base + $target })
+        $parts = New-Object System.Collections.Generic.List[string]
+        foreach ($seg in ($joined -split '/')) {
+            if ($seg -eq '' -or $seg -eq '.') { continue }
+            if ($seg -eq '..') { if ($parts.Count -gt 0) { $parts.RemoveAt($parts.Count - 1) }; continue }
+            $parts.Add($seg)
+        }
+        $resolved = '/' + ($parts -join '/') + '/'
+        if (-not $pageUrls.ContainsKey($resolved)) {
+            $linkProblems += "$rel -> $target (resolves to $resolved, no such page)"
+        }
+    }
+}
+# Non-vacuity: pages with no links would pass for the wrong reason.
+Check 'the branch pages contain internal links to check' $true ($linksChecked -ge 4) "$linksChecked links"
+Check 'every internal link out of the branch pages resolves' $true ($linkProblems.Count -eq 0) `
+    $(if ($linkProblems.Count) { $linkProblems -join ' | ' } else { "$linksChecked links against $($pageUrls.Count) pages" })
+
+# ---------------------------------------------------------------------------
+# The committed document must be what the renderer produces
+# ---------------------------------------------------------------------------
+#
+# Until now the renderer could only be run by running ninety minutes of
+# hardware, so nothing checked that the committed document and the committed
+# record still agreed -- which is how a BOM, and before it a stale Step 9b
+# claim, reached the published artifact. rerender_acceptance_document.ps1
+# executes the harness's own render block against the committed record and
+# this compares the result with the file in docs/.
+#
+# Only the "Generated <clock> from <path>" line may differ: it is render-time
+# provenance, not content. Exactly one line is allowed to differ, and that is
+# asserted rather than assumed.
+Write-Output ''
+Write-Output '=== The committed acceptance document re-renders from the committed record ==='
+
+$rerenderScript = Join-Path $PSScriptRoot 'rerender_acceptance_document.ps1'
+$committedMd = Join-Path $PSScriptRoot '..\..\..\docs\docs\benchmarks\phi4_aie4_acceptance.md'
+$rerenderOut = Join-Path ([System.IO.Path]::GetTempPath()) ("rerender-$PID-" + [guid]::NewGuid().ToString('N') + '.md')
+try {
+    # Re-invoked in the SAME host that is running this verifier, not a
+    # hard-coded `powershell`. The renderer's output is host-sensitive in
+    # exactly the way that caused the BOM, so checking it under 5.1 while the
+    # operator runs pwsh 7 would be checking the wrong thing.
+    $psHost = (Get-Process -Id $PID).Path
+    $rerenderLog = & $psHost -NoProfile -ExecutionPolicy Bypass -File $rerenderScript `
+        -Harness (Join-Path $PSScriptRoot 'run_real_model_acceptance.ps1') `
+        -RecordPath $json -Out $rerenderOut 2>&1
+    $rendered = Test-Path $rerenderOut
+    Check 'the renderer runs offline against the committed record' $true $rendered `
+        $(if ($rendered) { ($rerenderLog | Select-Object -First 1) } else { ($rerenderLog -join ' | ') })
+    if ($rendered) {
+        Check 'the re-rendered document carries no BOM' $true (-not (Test-Utf8Bom $rerenderOut))
+        $committedLines = @(Get-Content -LiteralPath $committedMd)
+        $renderedLines = @(Get-Content -LiteralPath $rerenderOut)
+        # Non-vacuity: comparing two empty files passes for the wrong reason.
+        Check 'the re-render produced a full document' $true `
+            ($renderedLines.Count -gt 500) "$($renderedLines.Count) lines"
+        Check 'the committed document has the same number of lines' $true `
+            ($committedLines.Count -eq $renderedLines.Count) `
+            "committed $($committedLines.Count), re-rendered $($renderedLines.Count)"
+        $differing = @()
+        for ($i = 0; $i -lt [Math]::Min($committedLines.Count, $renderedLines.Count); $i++) {
+            if ($committedLines[$i] -cne $renderedLines[$i]) { $differing += ($i + 1) }
+        }
+        Check 'exactly one line differs, and it is the render-time stamp' $true `
+            ($differing.Count -eq 1 -and $committedLines[$differing[0] - 1] -match '^Generated .* from `') `
+            $(if ($differing.Count -eq 1) { "line $($differing[0])" } else { "lines $($differing -join ', ')" })
+    }
+} finally {
+    Remove-Item -LiteralPath $rerenderOut -Force -ErrorAction SilentlyContinue
+}
+
+# ---------------------------------------------------------------------------
+# Get-GitRevision: a revision that is typed is not a revision that is known
+# ---------------------------------------------------------------------------
+#
+# The acceptance record's corelib_source_revision was an operator-typed string
+# written straight to disk with no git call and no dirty check, and it asserted
+# a pristine tree that every sibling artifact recorded as `-untracked-only`.
+# The derivation is now shared with run_hardware_suite.ps1 and driven here
+# against real repositories in all three states.
+Write-Output ''
+Write-Output '=== Get-GitRevision ==='
+
+$gitProbe = Join-Path ([System.IO.Path]::GetTempPath()) ("gitprobe-$PID-" + [guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Force -Path $gitProbe | Out-Null
+try {
+    $prevEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    & git -C $gitProbe init --quiet 2>$null | Out-Null
+    & git -C $gitProbe config user.email 'probe@example.invalid' 2>$null | Out-Null
+    & git -C $gitProbe config user.name 'probe' 2>$null | Out-Null
+    Set-Content -LiteralPath (Join-Path $gitProbe 'a.txt') -Value 'one' -NoNewline
+    & git -C $gitProbe add -A 2>$null | Out-Null
+    & git -C $gitProbe commit -m 'probe' --quiet 2>$null | Out-Null
+    $head = ([string](& git -C $gitProbe rev-parse HEAD 2>$null)).Trim()
+    $ErrorActionPreference = $prevEap
+
+    Check 'a clean tree gives the bare SHA with no suffix' $true `
+        ((Get-GitRevision $gitProbe) -eq $head) "$head"
+
+    Set-Content -LiteralPath (Join-Path $gitProbe 'untracked.txt') -Value 'x' -NoNewline
+    Check 'untracked files only are labelled -untracked-only, not -dirty' $true `
+        ((Get-GitRevision $gitProbe) -eq "$head-untracked-only") (Get-GitRevision $gitProbe)
+
+    Set-Content -LiteralPath (Join-Path $gitProbe 'a.txt') -Value 'two' -NoNewline
+    Check 'a tracked modification is labelled -dirty, and outranks untracked' $true `
+        ((Get-GitRevision $gitProbe) -eq "$head-dirty") (Get-GitRevision $gitProbe)
+
+    # Control: a directory that is not a repository must return empty, so the
+    # caller can tell "not derivable" from "clean".
+    $notARepo = Join-Path $gitProbe 'not-a-repo-parent'
+    New-Item -ItemType Directory -Force -Path $notARepo | Out-Null
+    Check 'a path that does not exist yields empty, not a throw' $true `
+        ((Get-GitRevision (Join-Path $gitProbe 'no-such-directory')) -eq '')
+
+    # One definition, or the cases above only cover one of the two callers.
+    # run_hardware_suite.ps1 held a private copy while the acceptance harness
+    # had none at all -- which is exactly how the two artifacts came to
+    # disagree about the same corelib checkout.
+    $privateCopies = @()
+    foreach ($p in @(Get-ChildItem -LiteralPath $PSScriptRoot -File -Filter '*.ps1')) {
+        if ($p.Name -eq 'acceptance_guards.ps1') { continue }
+        $t2 = $null
+        $e2 = $null
+        $a2 = [System.Management.Automation.Language.Parser]::ParseFile($p.FullName, [ref]$t2, [ref]$e2)
+        if (@($e2).Count -gt 0) { throw ("parse error in {0}: {1}" -f $p.Name, $e2[0].Message) }
+        foreach ($fn in $a2.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true)) {
+            if ($fn.Name -eq 'Get-GitRevision') { $privateCopies += ("{0}:{1}" -f $p.Name, $fn.Extent.StartLineNumber) }
+        }
+    }
+    Check 'no script in the suite keeps a private Get-GitRevision' $true `
+        ($privateCopies.Count -eq 0) $($privateCopies -join ', ')
+    # ...and the suite that used to own it now takes the shared one.
+    $suiteText = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'run_hardware_suite.ps1') -Raw
+    Check 'run_hardware_suite.ps1 dot-sources the shared guards' $true `
+        ($suiteText -match "\.\s+\(Join-Path \`$suiteDir 'acceptance_guards\.ps1'\)")
+} finally {
+    Remove-Item -LiteralPath $gitProbe -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+# ---------------------------------------------------------------------------
 # CALL SITES. Everything above tests guard BODIES; both shipped bugs were in
 # how the harness used them.
 #
@@ -454,6 +821,24 @@ foreach ($b in $bad) { Write-Output ("    {0}:{1}  {2}" -f $b.file, $b.line, $b.
 $harnessSites = @($allSites | Where-Object { $_.file -eq 'run_real_model_acceptance.ps1' })
 Check 'the harness contains guard call sites to inspect' $true ($harnessSites.Count -ge 5) "$($harnessSites.Count) found"
 Check 'no call site collapses a comma-wrapped return' $true ($bad.Count -eq 0) $(if ($bad.Count) { "$($bad[0].file):$($bad[0].line)" } else { 'harness, guards and verifier' })
+
+# The guards above prove the FUNCTIONS work. This proves the harness still
+# uses them -- which is the half that was missing when the verdict failed open
+# and when the document shipped with a BOM. Deleting either call restores the
+# original defect and leaves every functional check above green, so the call
+# has to be asserted by name.
+$harnessAst = Get-Ast -Path (Join-Path $PSScriptRoot 'run_real_model_acceptance.ps1')
+$harnessCalls = @($harnessAst.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] }, $true) |
+    ForEach-Object { $_.GetCommandName() } | Where-Object { $_ })
+foreach ($required in @('Get-UnrecognisedStepStatus', 'Write-Utf8NoBom', 'Test-Utf8Bom', 'Get-GitRevision')) {
+    Check "the harness calls $required" $true ($harnessCalls -contains $required)
+}
+# ...and that the rollup's rank table is the shared one, not a fresh literal
+# beside the guard. A local `$rank = @{...}` would drift from the table
+# Get-UnrecognisedStepStatus checks against, and the two disagreeing is the
+# whole failure mode.
+Check 'the harness takes its rank table from Get-StepStatusRank' $true `
+    ($harnessCalls -contains 'Get-StepStatusRank')
 
 # Non-vacuity, part 3: the positive control. A lint that finds nothing is
 # indistinguishable from a lint that passes, so run the detector over source

@@ -483,6 +483,49 @@ Save-Record
 # ---------------------------------------------------------------------------
 
 Write-Section 'Identity'
+
+# The corelib source revision is DERIVED, not typed.
+#
+# It used to be a plain optional string written straight into the record with
+# no git call, no dirty check and no assertion -- unlike $FastFlowRevision in
+# this same file, which is derived and diffed against the checkout. The result
+# was two published artifacts disagreeing about one checkout: every baseline
+# recorded `e5258d29...-untracked-only` and the acceptance record recorded the
+# bare SHA, which claims a pristine tree that the project's own tooling had
+# already recorded as not pristine. The one identifier answering "which
+# corelib source built the DLL these numbers came from" was unverifiable free
+# text.
+#
+# Get-GitRevision is the same function run_hardware_suite.ps1 uses, now shared
+# from acceptance_guards.ps1 rather than copied. An operator-supplied value is
+# still accepted -- the corelib checkout is not always present on the target --
+# but it may not CONTRADICT a checkout that is present, and when nothing can
+# be derived the record says so instead of implying a clean tree.
+$script:corelibRevision = $null
+$script:corelibRevisionDerived = $false
+$derivedCorelib = $(if ($CorelibSource) { Get-GitRevision $CorelibSource } else { '' })
+if ($derivedCorelib) {
+    $script:corelibRevision = $derivedCorelib
+    $script:corelibRevisionDerived = $true
+    if ($CorelibSourceRevision -and $CorelibSourceRevision -ne $derivedCorelib) {
+        Write-Output ''
+        Write-Output ("  -CorelibSourceRevision says '{0}' but {1} is at '{2}'." -f `
+            $CorelibSourceRevision, $CorelibSource, $derivedCorelib)
+        Write-Output '  Refusing to record a revision the checkout contradicts.'
+        Set-Field 'aborted' ("operator-supplied corelib revision '$CorelibSourceRevision' contradicts the checkout at ${CorelibSource}: '$derivedCorelib'")
+        Save-Record
+        exit 1
+    }
+} elseif ($CorelibSourceRevision) {
+    # Undeliverable as a derived fact, so it is labelled as what it is. A
+    # reader must be able to tell a checked SHA from a typed one.
+    $script:corelibRevision = "$CorelibSourceRevision-operator-supplied-unverified"
+    $script:corelibRevisionDerived = $false
+} else {
+    $script:corelibRevision = 'unknown (no -CorelibSource checkout and no -CorelibSourceRevision)'
+    $script:corelibRevisionDerived = $false
+}
+
 $identity = [ordered]@{
     machine            = $env:COMPUTERNAME
     user               = "$env:USERDOMAIN\$env:USERNAME"
@@ -498,7 +541,8 @@ $identity = [ordered]@{
     model_dir          = $ModelDir
     model_tag          = $ModelTag
     corelib_runtime_dir = $CorelibRuntimeDir
-    corelib_source_revision = $CorelibSourceRevision
+    corelib_source_revision = $script:corelibRevision
+    corelib_source_revision_derived = $script:corelibRevisionDerived
     hf_revision        = 'e751fb68c2cfffe6b0d32942118f75ac0a0365bb'
     harness_sha256     = $script:harnessSha
     driver_sha256      = $script:driverSha
@@ -3103,10 +3147,10 @@ $script:record = $reloaded
 # and in the document.
 #
 # Design DETERM-5 (human decision) makes run-to-run divergence a known,
-# measured, bounded defect carried alongside this release rather than a
-# release blocker, so a DETERM breach does not fail this acceptance verdict.
-# The gates and the DETERM-2 seal are untouched -- they are how a CHANGE in
-# the behaviour gets noticed, and nothing here widens a bound or makes a gate
+# measured defect carried alongside this release rather than a release
+# blocker, so a DETERM breach does not fail this acceptance verdict. The gates
+# and the DETERM-2 seal are untouched -- they are how a CHANGE in the
+# behaviour gets noticed, and nothing here widens a bound or makes a gate
 # advisory.
 #
 # What this acceptance run must not do is let the defect go silently absent.
@@ -3115,13 +3159,27 @@ $script:record = $reloaded
 # a run that DID measure and came out clean would not be evidence the defect
 # is gone. Stating that here means the reader cannot infer from a green
 # acceptance that the question is settled.
+#
+# THE WORDING HERE WAS POINTING THE READER AWAY FROM THE SEVERITY. It called
+# the defect "bounded" and explained that non-associative addition means
+# "varying order varies the last bits". Both are true of an individual
+# accumulation and both are the wrong summary of what was measured: in the
+# committed determinism campaign the divergence has changed the EMITTED TEXT,
+# not just the last bits. That is the single most consequential fact on this
+# branch and the record it is attached to must not soften it.
+#
+# No count or magnitude is hard-coded into this text. This run measures none
+# of it, and a figure baked into a harness is a figure that will be published
+# by a run that did not produce it -- the defect class this whole file exists
+# to avoid. The numbers live where they were measured.
 Set-Field 'determinism_scope' ([ordered]@{
     exercised = $false
     why = 'this acceptance run measures the shipped product against the real model; it runs no repeated-golden or bit-identity campaign, so it produces no determinism evidence in either direction'
-    policy = 'DETERM-5: run-to-run divergence is a known, measured, bounded defect carried with this release and is not a blocker for this acceptance verdict. The DETERM-1/2 gates and the sealed constants are unchanged.'
+    policy = 'DETERM-5: run-to-run divergence is a known, measured defect carried with this release and is not a blocker for this acceptance verdict. The DETERM-1/2 gates and the sealed constants are unchanged.'
+    what_diverges = '**What diverges is not only the last bits.** In the committed determinism campaign, two runs of the same binary on the same input have produced DIFFERENT EMITTED TOKENS, and therefore different text. Nor is this a bounded per-value difference propagating: the runs that diverged also BREACHED the DETERM-2 per-value bound the suite gates on, so both halves of "bounded" fail -- the bound was not held, and greedy decoding would not have contained it if it had been, because one flipped argmax makes the two continuations unrelated from that token on. A reader should not take "non-associative addition" as meaning otherwise. Counts, magnitudes and record paths are published in docs/docs/benchmarks/phi4_results.md and summarised in docs/docs/models/phi.md; nothing in this acceptance run measures them.'
     clean_run_is_not_absence = 'the observed divergence rate is a few percent, so a run that did not breach a gate would not be evidence the defect is gone'
     measured_by = 'run_hardware_suite.ps1 -DeterminismRuns <n> with src/tools/compare_phi4_corelib_e2e.py; baseline in docs/docs/benchmarks/phi4_results.md'
-    sharpened_hypothesis = 'precision alone cannot produce this: deterministic rounding of deterministic inputs is reproducible. Identical inputs giving different results additionally requires the ORDER of operations to vary -- a parallel reduction combining partials in completion order, an unpinned tiling or work split, or a dispatch-time scheduling choice. Floating-point addition is not associative, so varying order varies the last bits. The search is therefore for an operator whose accumulation or work-partitioning order is not pinned, not for the least accurate one, and it is confined to the 32-layer model body because the LM head is exonerated against an FP64 host reference.'
+    sharpened_hypothesis = 'precision alone cannot produce this: deterministic rounding of deterministic inputs is reproducible. Identical inputs giving different results additionally requires the ORDER of operations to vary -- a parallel reduction combining partials in completion order, an unpinned tiling or work split, or a dispatch-time scheduling choice. Floating-point addition is not associative, so varying order perturbs the low bits of each accumulation; in a 32-layer autoregressive model those perturbations are then amplified, and once one of them flips an argmax the two continuations diverge outright, which is what the records show. The search is therefore for an operator whose accumulation or work-partitioning order is not pinned, not for the least accurate one, and it is confined to the 32-layer model body because the LM head is exonerated against an FP64 host reference.'
 })
 Save-Record
 
@@ -3129,7 +3187,48 @@ $recordedSteps = Get-RecordSteps
 $stepById = @{}
 foreach ($s in $recordedSteps) { $stepById[[string](Get-Field $s 'id')] = $s }
 
-$rank = @{ 'met' = 0; 'partial' = 1; 'not_exercised' = 2; 'not_met' = 3 }
+$rank = Get-StepStatusRank
+
+# FAIL CLOSED ON A STEP STATUS NOBODY RECOGNISES.
+#
+# `$rank['<anything else>']` is $null, and `$null -gt 0` is $false, so the
+# comparison below silently rolled an unrecognised status up to `met`. The
+# step counters further down match only the three exact literals, so such a
+# step also reached NONE of the counters that feed the exit ladder: the run
+# printed `RESULT: ACCEPTED` and exited 0. Reproduced in both Windows
+# PowerShell 5.1 and pwsh 7 for 'failed', '' and 'bogus'.
+#
+# Add-StepResult's ValidateSet constrains only statuses created in THIS
+# session. Statuses arriving from disk are never validated -- `-Append` merges
+# $OutJson wholesale, and Add-UnselectedStep carries a prior step forward
+# verbatim -- so a truncated or older-schema record turns the strongest gate
+# in this file green.
+#
+# run_hardware_suite.ps1 fixed exactly this shape and called it "the tenth
+# instance of this project's recurring pattern". The fix never reached the
+# harness that writes the record. It has now.
+#
+# The rank table and the check are in acceptance_guards.ps1 so the offline
+# verifier drives the SAME code rather than a copy of it. Every recorded step
+# is checked, not only the ones a criterion cites: a step with an unknown
+# status that no criterion maps to would otherwise still slip through into the
+# summary.
+$unknownStatus = Get-UnrecognisedStepStatus $recordedSteps
+if ($unknownStatus.Count -gt 0) {
+    # Written out before the throw as well as in it: a top-level `throw` under
+    # `pwsh -File` exits 1 with nothing on stdout or stderr, and a verdict this
+    # important must not be able to fail silently.
+    Write-Output ''
+    Write-Output '  UNRECOGNISED STEP STATUS -- refusing to roll up a verdict over it:'
+    $unknownStatus | ForEach-Object { Write-Output "    $_" }
+    Write-Output ("  known statuses: " + (($rank.Keys | Sort-Object) -join ', '))
+    Set-Field 'aborted' ('unrecognised step status: ' + ($unknownStatus -join '; '))
+    Save-Record
+    throw ('unrecognised step status: ' + ($unknownStatus -join '; ') +
+        '. Known statuses are ' + (($rank.Keys | Sort-Object) -join ', ') +
+        '. An unknown status used to roll up to `met` and reach none of the exit counters.')
+}
+
 $rollup = @()
 foreach ($c in $criteria) {
     $status = 'not_exercised'
@@ -3247,6 +3346,32 @@ if ($Markdown) {
     $md.Add('     Every verdict below is derived from phi4_aie4_acceptance.json.')
     $md.Add('     Do not hand-edit: the next run overwrites this file. -->')
     $md.Add('')
+    # This record is never edited after the fact, so it must SAY where its
+    # corrections live. It carries two that a reader cannot get from the
+    # record itself: turn 3's failure reason is wrong here (both failed turns
+    # are given "the reply is dominated by a repeated token", which is right
+    # for turn 1 and wrong for turn 3, and the wrong wording hides the
+    # signature), and the harness_sha256 mismatch is explained only there.
+    # Task 15 added the link from phi.md to the provenance page; the record
+    # itself had none, which is the one direction a reader who lands here
+    # needs.
+    $md.Add('**Corrections to this record are published separately and this document is not')
+    $md.Add('edited after the fact.** Read')
+    # Site-absolute, not relative.
+    #
+    # `docs/_config.yml` sets `permalink: pretty`, so this page is served from
+    # the DIRECTORY /docs/benchmarks/phi4_aie4_acceptance/ and a relative
+    # `phi4_aie4_acceptance_provenance/` would resolve one level too deep.
+    # `baseurl` is "", and the established form in this repo for a link that
+    # crosses directories is the site-absolute path with a trailing slash --
+    # see docs/docs/models/smolvla.md:24. (The relative links in
+    # docs/docs/benchmarks/index.md are correct only because an index page maps
+    # to the directory itself.)
+    $md.Add('[Phi-4 AIE4 acceptance provenance](/docs/benchmarks/phi4_aie4_acceptance_provenance/)')
+    $md.Add('alongside it: it carries the corrected reason for the turn 3 failure below, the')
+    $md.Add('explanation of the harness SHA-256 mismatch, and the derivation of every')
+    $md.Add('correction from this record''s own data.')
+    $md.Add('')
     $id = $script:record['identity']
     $md.Add('## What produced these results')
     $md.Add('')
@@ -3254,7 +3379,24 @@ if ($Markdown) {
     $md.Add('| --- | --- |')
     $md.Add("| Machine | ``$($id.machine)`` |")
     $md.Add("| CPU | $($id.cpu) |")
-    $md.Add("| NPU | $($id.npu), driver $($id.npu_driver), status $($id.npu_status) |")
+    # Get-Field, not `$id.npu_driver`.
+    #
+    # `Set-StrictMode -Version Latest` is on, and these three keys are assigned
+    # only inside `if ($npu)` / `if ($drv)`, both fed by
+    # `-ErrorAction SilentlyContinue` queries. On any box whose NPU friendly
+    # name does not match '*NPU*' -- which is the first thing that happens when
+    # this harness is carried to a second machine -- the raw access throws "The
+    # property 'npu_driver' cannot be found on this object", lands in the catch
+    # below, and a HEALTHY ninety-minute run ends in DOCUMENT NOT RENDERED and
+    # RESULT: FAILED. Reproduced in both 5.1 and pwsh 7, against an ordered
+    # hashtable and a PSCustomObject.
+    #
+    # This is verbatim the incident this file's shared guards were written
+    # about, reintroduced at a different expression.
+    $npuName = Get-Field $id 'npu'
+    $npuDriver = Get-Field $id 'npu_driver'
+    $npuStatus = Get-Field $id 'npu_status'
+    $md.Add("| NPU | $(if ($null -ne $npuName) { $npuName } else { 'not identified' }), driver $(if ($null -ne $npuDriver) { $npuDriver } else { 'not identified' }), status $(if ($null -ne $npuStatus) { $npuStatus } else { 'not identified' }) |")
     $md.Add("| FastFlow commit ``flm.exe`` was built from | ``$($id.binary_revision)`` |")
     $md.Add("| Commit this acceptance ran at | ``$($id.checkout_revision)`` |")
     $md.Add("| Harness SHA-256 | ``$($id.harness_sha256)`` |")
@@ -3264,10 +3406,33 @@ if ($Markdown) {
         $md.Add("| Product sources differing between them | $(@($changedSince).Count) |")
     }
     $md.Add("| ``flm.exe`` SHA-256 | ``$($id.flm_exe_sha256)`` |")
-    $md.Add("| corelib source revision | ``$($id.corelib_source_revision)`` |")
+    $corelibRev = Get-Field $id 'corelib_source_revision'
+    $corelibRevDerived = Get-Field $id 'corelib_source_revision_derived'
+    # Records written before the revision was derived carry no
+    # `corelib_source_revision_derived` key at all. Say "not recorded" rather
+    # than letting an absent flag read as a verified one.
+    $corelibRevHow = $(
+        if ($null -eq $corelibRevDerived) { 'how it was obtained is not recorded' }
+        elseif ($corelibRevDerived) { 'derived from the checkout by `git rev-parse`' }
+        else { 'operator-supplied and not verified against a checkout' })
+    $md.Add("| corelib source revision | ``$corelibRev`` ($corelibRevHow) |")
     $md.Add("| Model | ``amd/phi-4-mini-instruct-oga-dml`` at HF ``$($id.hf_revision)`` |")
     $md.Add("| Model tag | ``$($id.model_tag)`` |")
-    $md.Add("| Run (UTC) | $($id.utc) |")
+    # ConvertFrom-Json parses an ISO-8601 string into a [datetime] under
+    # PowerShell 7 and leaves it a [string] under 5.1. So the SAME record
+    # rendered on two hosts produced two different cells: 5.1 printed
+    # `2026-09-03T05:10:41.3757151Z` and pwsh 7 printed the machine's locale
+    # short-date `09/03/2026 05:10:41`, losing the sub-second precision and
+    # the Z, and varying with the operator's locale. Found by re-rendering the
+    # committed record under both hosts; the acceptance document must not
+    # depend on which one ran it.
+    $runUtc = Get-Field $id 'utc'
+    if ($runUtc -is [datetime]) {
+        $runUtcDt = [datetime]$runUtc
+        if ($runUtcDt.Kind -eq [System.DateTimeKind]::Local) { $runUtcDt = $runUtcDt.ToUniversalTime() }
+        $runUtc = [datetime]::SpecifyKind($runUtcDt, [System.DateTimeKind]::Utc).ToString('o')
+    }
+    $md.Add("| Run (UTC) | $runUtc |")
     $md.Add('')
     $md.Add('AIE4 runtime closure under test:')
     $md.Add('')
@@ -3297,6 +3462,37 @@ if ($Markdown) {
         $md.Add((Get-Field $det 'why') + '.')
         $md.Add('')
         $md.Add((Get-Field $det 'policy'))
+        $md.Add('')
+        # The record is never edited after the fact, and the records written
+        # before this round carry a `policy` line calling the defect "bounded"
+        # and a hypothesis explaining that non-associative addition "varies the
+        # last bits". Both sentences are true of one accumulation and both are
+        # the wrong summary of what the determinism campaign actually measured:
+        # two runs of the same binary produced different EMITTED TEXT.
+        #
+        # So the correction is emitted by the RENDERER, not read out of the
+        # record. A record that carries its own `what_diverges` (every record
+        # from this round on) supplies the wording; an older one gets the
+        # renderer's standing text rather than being silently left uncorrected
+        # or, worse, rewritten.
+        $whatDiverges = Get-Field $det 'what_diverges'
+        if (-not $whatDiverges) {
+            $whatDiverges = (
+                '**What diverges is not only the last bits.** In the committed determinism ' +
+                'campaign, two runs of the same binary on the same input have produced ' +
+                'DIFFERENT EMITTED TOKENS, and therefore different text. Nor is this a ' +
+                'bounded per-value difference propagating: the runs that diverged also ' +
+                'BREACHED the DETERM-2 per-value bound the suite gates on, so both halves of ' +
+                '"bounded" fail -- the bound was not held, and greedy decoding would not have ' +
+                'contained it if it had been, because one flipped argmax makes the two ' +
+                'continuations unrelated from that token on. A reader should not take ' +
+                '"non-associative addition" above as meaning otherwise. Counts, magnitudes and ' +
+                'record paths are published in docs/docs/benchmarks/phi4_results.md and ' +
+                'summarised in docs/docs/models/phi.md; nothing in this acceptance run ' +
+                'measures them. This paragraph is written by the renderer, not read from the ' +
+                'record: the record is not edited after the fact.')
+        }
+        $md.Add($whatDiverges)
         $md.Add('')
         $md.Add('**A clean acceptance run is not evidence that the divergence is gone.** ' +
                 (Get-Field $det 'clean_run_is_not_absence') + '.')
@@ -3473,7 +3669,21 @@ if ($Markdown) {
     # be impossible to mistake for a fresh one, so absence is the failure mode
     # rather than staleness, and the stamp proves which run wrote it.
     Remove-Item -LiteralPath $Markdown -Force -ErrorAction SilentlyContinue
-    ($md -join "`n") | Set-Content -Path $Markdown -Encoding utf8
+    # NOT `Set-Content -Encoding utf8`, which in Windows PowerShell 5.1 means
+    # UTF-8 WITH BOM. That is how the signed-off acceptance record shipped as
+    # a file Jekyll would not parse: front matter is matched against the raw
+    # first line, a BOM makes the first byte not `-`, and the page then has no
+    # layout, no nav entry, no pretty URL and no entry in search.json. The
+    # readback below cannot see it -- every text reader strips a BOM -- so the
+    # stamp check passed on a document that was not a page.
+    #
+    # The JSON writer in this same file already used UTF8Encoding($false); the
+    # markdown writer did not. Both now go through one function, and
+    # verify_acceptance_guards.ps1 scans every `.md` under docs/ for the byte.
+    Write-Utf8NoBom -Path $Markdown -Text (($md -join "`n") + "`n")
+    if (Test-Utf8Bom $Markdown) {
+        throw "the acceptance document at $Markdown was written with a UTF-8 BOM and will not publish as a page"
+    }
     $written = Get-Content -LiteralPath $Markdown -Raw -ErrorAction SilentlyContinue
     if (-not $written -or $written -notmatch [regex]::Escape("run-stamp: $script:runStamp")) {
         throw "the acceptance document at $Markdown was not written by this run"

@@ -301,3 +301,154 @@ function Test-LooksLikeEnglish {
     }
     return @{ Ok = ($reasons.Count -eq 0); Reasons = $reasons; Normalized = $t }
 }
+
+# ---------------------------------------------------------------------------
+# Publishability: a UTF-8 BOM stops a Jekyll page being a page
+# ---------------------------------------------------------------------------
+#
+# The acceptance record -- this branch's headline evidence -- shipped with a
+# UTF-8 BOM and was therefore not published at all. Jekyll's
+# `Utils.has_yaml_header?` matches `\A---\s*\r?\n` against the RAW first line
+# and does not strip a BOM, so a file whose first byte is not `-` has no front
+# matter: no `layout: docs`, no site chrome, no nav entry, no conversion, and
+# no entry in `docs/search.json` (which selects `p.layout == 'docs'`). GitHub
+# Pages copies it through as a static file and the pretty URL does not exist.
+#
+# The cause was `Set-Content -Encoding utf8`, which in Windows PowerShell 5.1
+# means "UTF-8 WITH BOM". The same harness already wrote its JSON correctly
+# with a UTF8Encoding($false); the markdown write did not, and the render guard
+# that reads the file back for its run stamp cannot see a BOM -- it proves the
+# document is fresh and populated and says nothing about whether it is a page.
+#
+# So the write goes through one function, and the check is a byte test the
+# verifier runs over EVERY `.md` under docs/, not just the one that was wrong.
+
+# Write UTF-8 with no byte-order mark, and no trailing-newline surprises.
+# `Set-Content` must not be used for anything that Jekyll parses.
+function Write-Utf8NoBom {
+    param([Parameter(Mandatory = $true)][string]$Path,
+          [Parameter(Mandatory = $true)][AllowEmptyString()][string]$Text)
+    [System.IO.File]::WriteAllText($Path, $Text, (New-Object System.Text.UTF8Encoding($false)))
+}
+
+# True when the file's first three bytes are EF BB BF. Reads bytes, not text:
+# every text reader in PowerShell strips the BOM, which is exactly why this
+# defect survived a read-back check.
+function Test-Utf8Bom {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    $stream = [System.IO.File]::OpenRead($Path)
+    try {
+        $head = New-Object byte[] 3
+        $read = $stream.Read($head, 0, 3)
+    } finally { $stream.Dispose() }
+    return ($read -eq 3 -and $head[0] -eq 0xEF -and $head[1] -eq 0xBB -and $head[2] -eq 0xBF)
+}
+
+# Every `.md` under $Root whose first bytes are a BOM. Comma-wrapped so an
+# empty result survives assignment; assign it, never `@(Get-BomMarkdownFile ...)`
+# -- the lint in verify_acceptance_guards.ps1 enforces that.
+function Get-BomMarkdownFile {
+    param([Parameter(Mandatory = $true)][string]$Root)
+    $hits = @()
+    foreach ($f in @(Get-ChildItem -LiteralPath $Root -Recurse -File -Filter '*.md' | Sort-Object FullName)) {
+        if (Test-Utf8Bom $f.FullName) { $hits += $f.FullName }
+    }
+    return , @($hits)
+}
+
+# ---------------------------------------------------------------------------
+# Derived revisions
+# ---------------------------------------------------------------------------
+#
+# Lifted verbatim from run_hardware_suite.ps1, which derived its revisions
+# while the acceptance harness took -CorelibSourceRevision as a plain optional
+# string and wrote it straight to the record. The two artifacts then disagreed
+# about the same checkout: every baseline says `e5258d29...-untracked-only`
+# and the acceptance record says the bare SHA, i.e. a pristine tree. The one
+# identifier answering "which corelib source built the DLL these numbers came
+# from" must not be free text.
+#
+# Both scripts now use this one definition.
+function Get-GitRevision {
+    param([Parameter(Mandatory = $true)][string]$Directory)
+    if (-not $Directory -or -not (Test-Path $Directory)) { return '' }
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $revision = (& git -C $Directory rev-parse HEAD 2>$null)
+        if ($LASTEXITCODE -ne 0 -or -not $revision) { return '' }
+        $revision = ([string]$revision).Trim()
+        # A tree that is not pristine is recorded as such. A SHA on its own
+        # would claim the baseline describes a committed revision when it does
+        # not, and that is a claim nobody can check later.
+        #
+        # Tracked modifications and untracked files are labelled DIFFERENTLY,
+        # because they mean different things and a single `-dirty` makes the
+        # harmless case look like the serious one. The corelib checkout on the
+        # AIE4 target carries four untracked build output directories and no
+        # tracked change at all; calling that "dirty" would tell a later reader
+        # the source had been edited.
+        $status = @(
+            (& git -C $Directory status --porcelain 2>$null) |
+                Where-Object { $_ })
+        if ($LASTEXITCODE -eq 0 -and $status.Count -gt 0) {
+            $tracked = @(
+                $status | Where-Object { -not $_.StartsWith('??') })
+            if ($tracked.Count -gt 0) {
+                $revision = "$revision-dirty"
+            } else {
+                $revision = "$revision-untracked-only"
+            }
+        }
+        return $revision
+    } finally {
+        $ErrorActionPreference = $prev
+    }
+}
+
+# ---------------------------------------------------------------------------
+# The rollup must fail CLOSED on a status nobody recognises
+# ---------------------------------------------------------------------------
+#
+# The rank table and the check that guards it live here, once, because the
+# verifier has to be able to drive the real thing. A copy in the verifier would
+# agree with the harness by construction -- which is how the last two guard
+# bugs on this branch shipped.
+#
+# The defect: `$rank['<anything else>']` is $null, `$null -gt 0` is $false, so
+# an unrecognised step status rolled up to `met`, and the step counters that
+# feed the exit ladder match only the three exact literals, so it reached none
+# of them either. The run printed `RESULT: ACCEPTED` and exited 0. Reproduced
+# in Windows PowerShell 5.1 and pwsh 7.
+#
+# `run_hardware_suite.ps1` fixed exactly this shape and called it "the tenth
+# instance of this project's recurring pattern"; the fix never reached the
+# harness that writes the record.
+
+# The one rank table. Returned fresh each call so no caller can mutate the
+# shared copy out from under another.
+function Get-StepStatusRank {
+    return @{ 'met' = 0; 'partial' = 1; 'not_exercised' = 2; 'not_met' = 3 }
+}
+
+# One row per step whose status is not in the rank table. Comma-wrapped so an
+# empty result survives assignment -- assign it, never `@(Get-UnrecognisedStepStatus ...)`;
+# the AST lint in verify_acceptance_guards.ps1 enforces that and reads this
+# function's source to learn the convention.
+#
+# Note that PowerShell hashtable lookup and `-eq` are both case-insensitive, so
+# 'MET' is a RECOGNISED status and correctly ranks as `met`. The check is about
+# statuses that are not in the table at all: '', 'failed', 'bogus', and
+# anything an older schema or a truncated record carries.
+function Get-UnrecognisedStepStatus {
+    param($Steps)
+    $rank = Get-StepStatusRank
+    $rows = @()
+    foreach ($s in @($Steps)) {
+        $status = [string](Get-Field $s 'status')
+        if (-not $rank.ContainsKey($status)) {
+            $rows += ("step {0}: '{1}'" -f (Get-Field $s 'id'), $status)
+        }
+    }
+    return , @($rows)
+}

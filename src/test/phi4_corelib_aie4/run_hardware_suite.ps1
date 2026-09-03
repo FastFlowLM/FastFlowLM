@@ -49,6 +49,11 @@ param(
     # rather than quietly omitted.
     [string]$FlmExe,
 
+    # The packaged AIE4 tag `flm run` is driven against in Step 7. Matches
+    # run_real_model_acceptance.ps1's default so the two harnesses exercise the
+    # same catalogue entry.
+    [string]$ModelTag = 'phi4-mini-it-aie4:4b',
+
     # Must match the build's FLM_RUNTIME_NAME. The engine DLLs flm.exe imports
     # live in lib/<backend>, and getting this wrong produces a
     # STATUS_DLL_NOT_FOUND with no output at all.
@@ -103,6 +108,11 @@ $suiteDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 # so the multi-segment form binds the extra segments positionally and fails
 # with a parameter-binding error before the script has done anything.
 $sourceDir = (Resolve-Path (Join-Path (Join-Path $suiteDir '..') '..')).Path
+# Shared guard logic. Side-effect free by contract: dot-sourcing it defines
+# functions and does nothing else. The only name it shares with this file is
+# Get-GitRevision, which this file used to define privately -- see the baseline
+# section for why that mattered.
+. (Join-Path $suiteDir 'acceptance_guards.ps1')
 $ran = @()
 $skipped = @()
 
@@ -850,10 +860,23 @@ if (-not $ModelDir) {
                 Write-Output ("  ${tag}: logits bit-identical " +
                     "$($d.logits_bit_exact_steps)/$($d.logits_total_steps), " +
                     "max |diff| $($d.observed_max_abs_diff)")
-                if ($d.localisation -and $d.localisation.measured) {
+                # Through Get-JsonField, not raw property access.
+                #
+                # `localisation` is the one OPTIONAL field in a DETERM-1
+                # record -- the comparator only started writing it when the
+                # per-step LM-head capture landed -- and these three reads sit
+                # outside both trys above. Under Set-StrictMode -Version Latest
+                # a record without it is a terminating error, so the script
+                # died right here, before the Summary block and the exit ladder
+                # at the bottom of this file ever ran: hours of device time
+                # reduced to a bare exit 1 with no record of what had passed.
+                # That is the same incident the helpers twenty lines up were
+                # added for, and this line did not get the fix.
+                $localisation = Get-JsonField $d 'localisation'
+                if ($localisation -and (Get-JsonField $localisation 'measured')) {
                     Write-Output ("    localisation: " +
-                        "$($d.localisation.source) at " +
-                        "$($d.localisation.step)")
+                        "$(Get-JsonField $localisation 'source') at " +
+                        "$(Get-JsonField $localisation 'step')")
                 }
                 # Keep the raw pair whenever the two runs were NOT
                 # bit-identical, not only when a gate failed.
@@ -1043,35 +1066,16 @@ if (-not $ModelDir) {
         # typed. A transcribed SHA in a baseline is a claim about a tree
         # nobody can go back and check.
         $repoRoot = Split-Path -Parent $sourceDir
-        function Get-GitRevision {
-            param([string]$Directory)
-            $revision = (& git -C $Directory rev-parse HEAD 2>$null)
-            if ($LASTEXITCODE -ne 0 -or -not $revision) { return '' }
-            $revision = ([string]$revision).Trim()
-            # A tree that is not pristine is recorded as such. A SHA on its
-            # own would claim the baseline describes a committed revision when
-            # it does not, and that is a claim nobody can check later.
-            #
-            # Tracked modifications and untracked files are labelled
-            # DIFFERENTLY, because they mean different things and a single
-            # `-dirty` makes the harmless case look like the serious one. The
-            # corelib checkout on the AIE4 target carries four untracked build
-            # output directories and no tracked change at all; calling that
-            # "dirty" would tell a later reader the source had been edited.
-            $status = @(
-                (& git -C $Directory status --porcelain 2>$null) |
-                    Where-Object { $_ })
-            if ($LASTEXITCODE -eq 0 -and $status.Count -gt 0) {
-                $tracked = @(
-                    $status | Where-Object { -not $_.StartsWith('??') })
-                if ($tracked.Count -gt 0) {
-                    $revision = "$revision-dirty"
-                } else {
-                    $revision = "$revision-untracked-only"
-                }
-            }
-            return $revision
-        }
+        # Get-GitRevision is dot-sourced from acceptance_guards.ps1 at the top
+        # of this file. It used to be defined here, and only here -- which is
+        # why the acceptance harness wrote an operator-typed corelib revision
+        # straight into its record with no git call and no dirty check, and the
+        # two published artifacts then disagreed about the same checkout: every
+        # baseline said `e5258d29...-untracked-only` and the acceptance record
+        # said the bare SHA, i.e. a pristine tree. One definition, used by both
+        # scripts, and exercised offline by verify_acceptance_guards.ps1
+        # against real repositories in the clean, untracked-only and
+        # tracked-dirty states.
         $fastflowRevision = Get-GitRevision $repoRoot
         if (-not $fastflowRevision) {
             throw ("cannot identify the FastFlow revision from $repoRoot; " +
@@ -1088,6 +1092,17 @@ if (-not $ModelDir) {
                 'the whole 0.x history.')
         }
         $baselineJson = Join-Path $BuildDir 'phi4_aie4_baseline.json'
+        # The path is FIXED, not run-scoped, so any earlier run's file is
+        # deleted before this one starts. Without this, a benchmark that failed
+        # -- or never ran -- left `Test-Path` true, and the render below
+        # published docs/docs/benchmarks/phi4_results.md from numbers this run
+        # did not produce while $ran claimed it had. That is the optional-guard
+        # shape this file already names and rejects twice above, at the
+        # DETERM-1 record and at the compare summary.
+        if (Test-Path $baselineJson) {
+            Remove-Item -LiteralPath $baselineJson -Force
+        }
+        $baselineProduced = $false
         try {
             Invoke-Checked 'baseline benchmark' $benchmarkExe @(
                 '--model-dir', $ModelDir,
@@ -1096,13 +1111,22 @@ if (-not $ModelDir) {
                 '--fastflow-revision', $fastflowRevision,
                 '--corelib-source-revision', $CorelibSourceRevision
             )
+            # The benchmark has just exited 0 with --output-json passed, so an
+            # absent file means it did not do what it reported. Same fix as the
+            # two above: assert, do not skip.
+            if (-not (Test-Path $baselineJson)) {
+                throw "the baseline benchmark exited 0 but wrote no " +
+                      "--output-json at $baselineJson"
+            }
+            $baselineProduced = $true
             $ran += 'baseline benchmark (load, TTFT, prefill, continuation, decode, memory, V scatter)'
         } catch {
             Write-Output "BASELINE BENCHMARK FAILED: $($_.Exception.Message)"
             $failures += 'baseline benchmark'
         }
 
-        if (Test-Path $baselineJson) {
+        # Gated on THIS run's benchmark, not on a file being present.
+        if ($baselineProduced) {
             $reportTool = Join-Path $repoRoot 'tools/report_phi4_corelib_baseline.py'
             $determGlob = Join-Path (Join-Path $BuildDir 'artifacts') '*/determ1-*.json'
             try {
@@ -1176,14 +1200,93 @@ if ($FlmExe -and (Test-Path $FlmExe)) {
         Write-Output "STEP 7 FAILED: $($_.Exception.Message)"
         $failures += 'Step 7 server endpoints'
     }
-    # `flm run` is NOT driven here. On Windows the CLI reads through
-    # ReadConsoleInput, a console-only API that cannot see redirected stdin, so
-    # the REPL cannot be scripted: it prints its prompt and exits on the first
-    # read. What is verifiable non-interactively -- that `flm run <tag>` loads
-    # the AIE4 model and enters the REPL, and that `flm validate` reports the
-    # corelib backend ready -- is recorded in the task report rather than
-    # asserted here, because a check that cannot fail is worse than none.
-    $skipped += 'Step 7 interactive `flm run` generation (CLI reads via ReadConsoleInput; not scriptable)'
+    # `flm run` IS driven here, through drive_flm_console.ps1.
+    #
+    # This step used to be an unconditional skip whose comment read "the REPL
+    # cannot be scripted: it prints its prompt and exits on the first read".
+    # Task 16 disproved that. ReadConsoleInput cannot see a redirected pipe,
+    # which is true and is why every stdin attempt failed -- but it reads the
+    # console INPUT BUFFER, and any process attached to the same console can
+    # write to that buffer with WriteConsoleInput. The driver did exactly that
+    # and put five real prompts through the real REPL. The comment outlived
+    # the finding that refuted it by two tasks.
+    #
+    # It also saturated the exit code. This line appended to $skipped on EVERY
+    # run with -FlmExe, and the branch below on every run without one, so
+    # $skipped was never empty and the PASS / exit 0 at the bottom of this file
+    # was unreachable: a full run with -BoundarySweep -DeterminismRuns 20
+    # -Baseline and a run that only built the tests both returned 77.
+    $consoleJson = Join-Path $BuildDir 'flm-run-console.json'
+    $consoleScreen = Join-Path $BuildDir 'flm-run-console-screen.txt'
+    $consoleTurns = Join-Path $BuildDir 'flm-run-turns.txt'
+    # The driver AllocConsole()s and its stdout goes with it, so it must be a
+    # separate process whose streams are left alone; Invoke-Checked runs it
+    # unpiped, which is the launch shape measured to work. The host is this
+    # one, resolved rather than assumed: $PSHOME\powershell.exe does not exist
+    # under pwsh.
+    $consoleHost = (Get-Process -Id $PID).Path
+    # Inside the try, with everything else. A terminating error out here would
+    # take the Summary block and the exit ladder with it, which is the failure
+    # shape this file has already been bitten by twice.
+    try {
+        # Turns go through a FILE. `powershell -File driver.ps1 -Turns "a" "b"`
+        # binds only the first value and then fails to place the second,
+        # exiting 1 with no output -- a failure that says nothing about the
+        # product under test.
+        Set-Content -Path $consoleTurns -Encoding utf8 -Value (
+            @('/status', 'Name three primary colours.') -join "`r`n")
+        Invoke-Checked 'interactive flm run' $consoleHost @(
+            '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+            (Join-Path $suiteDir 'drive_flm_console.ps1'),
+            '-FlmExe', $FlmExe,
+            '-ModelTag', $ModelTag,
+            '-TurnsFile', $consoleTurns,
+            '-OutJson', $consoleJson,
+            '-ScreenLog', $consoleScreen
+        )
+        if (-not (Test-Path $consoleJson)) {
+            throw "the console driver exited 0 and wrote no result at $consoleJson"
+        }
+        $console = Get-Content $consoleJson -Raw | ConvertFrom-Json
+        if (-not (Get-JsonField $console 'reached_prompt')) {
+            throw ("flm run $ModelTag never reached a >>> prompt: " +
+                   "$(Get-JsonField $console 'error')")
+        }
+        $consoleTurnResults = @(Get-JsonField $console 'turns')
+        if ($consoleTurnResults.Count -lt 2) {
+            throw ("the driver recorded $($consoleTurnResults.Count) turn(s), " +
+                   'so the generation turn did not happen')
+        }
+        foreach ($t in $consoleTurnResults) {
+            if (-not (Get-JsonField $t 'ok')) {
+                throw ("turn $(Get-JsonField $t 'index') did not complete: " +
+                       "$(Get-JsonField $t 'reason')")
+            }
+        }
+        # A turn that completes and generates NOTHING is the failure this
+        # check exists to catch, and the ok flag alone would not see it: the
+        # turn is "done" as soon as the next prompt appears.
+        #
+        # The echoed keystrokes and that next `>>> ` are part of the screen
+        # delta the driver reports, so both are removed before the reply is
+        # measured. Left in, the echo of the prompt alone is longer than any
+        # threshold worth setting and the assertion could not fail -- measured
+        # against a stub REPL, where the un-stripped form passed on an empty
+        # reply.
+        $generationTurn = $consoleTurnResults[1]
+        $generation = "$(Get-JsonField $generationTurn 'reply_raw')"
+        $generation = $generation -replace [regex]::Escape(
+            "$(Get-JsonField $generationTurn 'prompt')"), ''
+        $generation = ($generation -replace '(?m)^[ \t]*>>>.*$', '').Trim()
+        if ($generation.Length -lt 20) {
+            throw ("the generation turn completed but produced no reply: " +
+                   "[$generation]")
+        }
+        $ran += 'Step 7 interactive `flm run` (console-driven: model load, /status, one generation turn)'
+    } catch {
+        Write-Output "STEP 7 INTERACTIVE flm run FAILED: $($_.Exception.Message)"
+        $failures += 'Step 7 interactive `flm run`'
+    }
 } else {
     Write-Output 'SKIPPED: pass -FlmExe <path to flm.exe> to run the CLI and'
     Write-Output '  server endpoint checks.'
@@ -1209,9 +1312,17 @@ foreach ($item in $bitExactNotes) { Write-Output "BITEXACT: $item" }
 # CTest's SKIP_RETURN_CODE and means INCOMPLETE, and only a run with nothing
 # skipped is allowed to say PASS.
 #
-# Step 7 is currently always skipped, so this script is expected to report
-# INCOMPLETE until flm.exe can be built and exercised. That is the honest
-# result and it should stay visible rather than being special-cased away.
+# PASS is REACHABLE, and that had to be fixed to remain true.
+#
+# Step 7's interactive `flm run` step appended to $skipped unconditionally, so
+# $skipped.Count was never zero and the exit 0 below could not be reached by
+# any invocation at all -- a full acceptance run and a run that only built the
+# tests both returned 77, and the mechanism this ladder exists for carried no
+# signal. Every remaining entry in $skipped is now conditional on an argument:
+# -ModelDir, -CorelibSource, -BoundarySweep, -DeterminismRuns, -Baseline and
+# -FlmExe. A run that supplies all of them and passes everything exits 0.
+# Anything less still reports INCOMPLETE, which is the honest result and should
+# stay visible rather than being special-cased away.
 if ($failures.Count -gt 0) {
     Write-Output "run_hardware_suite: FAIL ($($failures.Count) block(s) failed, $($skipped.Count) skipped)"
     exit 1

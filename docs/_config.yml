@@ -148,6 +148,10 @@ docs_nav:
         url: "/docs/benchmarks/lfm2_results/"
       - label: Microsoft/Phi4
         url: "/docs/benchmarks/phi4_results/"
+      - label: Microsoft/Phi4 AIE4 acceptance
+        url: "/docs/benchmarks/phi4_aie4_acceptance/"
+      - label: Microsoft/Phi4 AIE4 acceptance provenance
+        url: "/docs/benchmarks/phi4_aie4_acceptance_provenance/"
       - label: Nanbeige4.1
         url: "/docs/benchmarks/nanbeige4.1_results/"
       - label: SmolVLA

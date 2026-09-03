@@ -177,7 +177,9 @@ Undecided points, which is where the bracket's width comes from: history 2048 at
 
 ##### The same measurement, run to run
 
-**The bracket's upper edge is not stable and its lower edge is.** This table is every render of this document that recorded a crossover, from the committed baseline artifacts.
+**⚠ Corrected by hand on 2026-09-03; this block was NOT re-rendered.** The sentence generated here, and the guidance below the table, both said the bracket's lower edge was stable. A third interleaved run — `2026-09-03T08:20:08Z`, committed at `phi4_aie4_baseline_task15_rerun.json` — falsifies that, and it is now the fifth record in `phi4_aie4_crossover_history.json`. The two paragraphs that follow are what `report_phi4_corelib_baseline.py`'s own `crossover_edge_stability()` / `crossover_stability_narrative()` return when fed that updated history file, pasted here verbatim because the generator refuses to re-render this block at all (see [Why this is not rendered into the block above](#why-this-is-not-rendered-into-the-block-above)). **The table itself is unchanged and still shows only the four runs that existed when it was generated**; the fifth run's brackets are tabulated in [Task 15 re-measurement, 2026-09-03](#task-15-re-measurement-2026-09-03), which is also where every other consequence of that run is recorded. Read that section before citing anything in this one about edge stability.
+
+**Neither edge of the bracket is stable between runs.** This table is every render of this document that recorded a crossover, from the committed baseline artifacts.
 
 | measured (UTC) | interleaved | grid | history 2048 | history 512 | decided | note |
 | --- | :---: | ---: | ---: | ---: | ---: | :--- |
@@ -186,7 +188,7 @@ Undecided points, which is where the bracket's width comes from: history 2048 at
 | 2026-09-02T15:34:01Z | yes | 11 points | `(12, 16]` | `(4, 8]` | 22/22 |  |
 | 2026-09-02T16:32:18Z | yes | 11 points | `(12, 64]` | `(4, 12]` | 18/22 |  |
 
-> **Read the lower edge as measured and the upper edge as an upper bound.** Across the 2 interleaved runs the lower edge has been 12 at history 2048; 4 at history 512 every time, while the upper edge has taken 16, 64 at history 2048; 8, 12 at history 512 on the same binary and the same model. The upper edge moves with how quiet the machine was, because that is what decides how many points near the crossover can be called at all.
+> **Neither edge can be read as measured.** Across 3 interleaved runs of the same binary the lower edge has taken 12, 24 at history 2048; 4 at history 512 and the upper edge 16, 32, 64 at history 2048; 8, 12 at history 512. Whatever a single run reports is one observation on an unstable machine, and the crossover is not resolved by this data.
 
 2 of the 4 rows are non-interleaved and are excluded from that comparison, because they measured the routes in blocks rather than paired in time. They are shown for provenance.
 
@@ -275,7 +277,7 @@ The rule is a conjunction: the constant is the largest sampled length in the INT
 
 Those are measured losses taken deliberately. The alternative — a threshold above the selected one — is optimal for the longer history and WRONG for the shorter one, where it would append past the point at which append has already lost. Conceding measured throughput at one history is the cheaper error than routing against the measurement at the other.
 
-There is a second reason to prefer the lower candidate, and it is about confidence rather than cost. Task 13 measured this crossover three times and found the bracket's LOWER edge stable across runs and its UPPER edge not: the upper edge moves with how quiet the machine was, because that is what decides how many points near the crossover can be called at all. The threshold selected here sits at or below the lower edge at every measured history, so it is inside the append-wins region on every run. A threshold chosen from the upper edge would be supported by some runs and not others.
+There is a second reason to prefer the lower candidate, and it is about confidence rather than cost. Across the 3 interleaved run(s) on record the bracket's LOWER edge has been 4 at history 512; 12, 24 at history 2048. It is NOT a measured constant: at history 2048 it took more than one value across runs of the same binary, so a threshold cannot be justified by pointing at one run's edge. What carries the choice is the inequality rather than the stability: 4 is at or below EVERY recorded lower edge, so it is inside the append-wins region on every interleaved run on record. A larger threshold would be supported by some of them and contradicted by others.
 
 ### The measurement behind it
 
@@ -310,16 +312,17 @@ At least 5 warm samples per route per point, append and re-prefill interleaved W
 
 Not: would they have selected it. Each recorded crossover run carries, per history, the bracket `[lower, upper]`, and the lower edge is that run's per-history winner CEILING. The minimum of those ceilings is an **upper bound** on what Section 10.7 would have selected from that run, and in general only an upper bound: the rule takes the largest suffix in the INTERSECTION of the winner sets, which equals the minimum of the ceilings only when each winner set is downward-closed. A crossover record stores the edges and never the winner sets, so that property cannot be checked from it. What holds with no assumption is the inequality — any suffix winning at every history is at most every ceiling — so that is what is enforced here.
 
-Task 13 measured the lower edges to be stable and the upper edges not. This bound touches only the lower edges, which is why an unstable upper edge cannot move it.
+This bound touches only the lower edges and never the upper ones, so however far an upper edge moves between runs it cannot move the bound. The lower edges are printed per run below rather than reduced away, because their MINIMUM cannot answer whether the edge itself held still: where a history shows different values on different runs the edge moved, the bound is still their minimum, and the inequality is still sound — but nothing here may then call that edge stable.
 
-| measured (UTC) | interleaved | bounds the threshold at | permits 4 | meets the bound exactly |
-| --- | :---: | ---: | :---: | :---: |
-| 2026-09-02T13:12:13Z | no | (2) | excluded — routes not measured against the same machine state | — |
-| 2026-09-02T14:55:44Z | no | (4) | excluded — routes not measured against the same machine state | — |
-| 2026-09-02T15:34:01Z | yes | 4 | yes | yes |
-| 2026-09-02T16:32:18Z | yes | 4 | yes | yes |
+| measured (UTC) | interleaved | lower edge per history | bounds the threshold at | permits 4 | meets the bound exactly |
+| --- | :---: | :--- | ---: | :---: | :---: |
+| 2026-09-02T13:12:13Z | no | 512: 2, 2048: 2 | (2) | excluded — routes not measured against the same machine state | — |
+| 2026-09-02T14:55:44Z | no | 512: 4, 2048: 12 | (4) | excluded — routes not measured against the same machine state | — |
+| 2026-09-02T15:34:01Z | yes | 512: 4, 2048: 12 | 4 | yes | yes |
+| 2026-09-02T16:32:18Z | yes | 512: 4, 2048: 12 | 4 | yes | yes |
+| 2026-09-03T08:20:08Z | yes | 512: 4, 2048: 24 | 4 | yes | yes |
 
-Every interleaved run on record permits 4, and 2 of 2 bound it there exactly. An exactly-met bound is what "that run would have selected the same constant" would need, but only under the downward-closure assumption above, which its record does not attest.
+Every interleaved run on record permits 4, and 3 of 3 bound it there exactly. An exactly-met bound is what "that run would have selected the same constant" would need, but only under the downward-closure assumption above, which its record does not attest.
 
 This run's own per-history winner sets ARE downward-closed at every history, checked directly from the sampled points rather than assumed. That is only a property of this run; it says nothing about the earlier ones, whose winner sets were never recorded.
 
@@ -390,14 +393,58 @@ history 512 it is 4 again.
 | **2026-09-03T08:20:08Z** | **`(4, 12]`** | **`(24, 32]`** |
 
 So the stability claim holds at history 512 on three runs and **does not hold**
-at history 2048. Read the generated statement above with that correction.
+at history 2048. The generated statement above has been corrected in place, by
+hand, and says so where it is corrected.
 
-**2. On this run alone, Section 10.7's rule would select 8, not the shipped 4.**
-Run against this measurement the calibrator selects `8` and then **refuses to
-write anything**, with the diagnostic *"the constant exceeds what an interleaved
-run can support: 2026-09-02T15:34:01Z bounds it at 4, 2026-09-02T16:32:18Z bounds
-it at 4, and the selected threshold is 8 … A release-fixed constant that one
-recorded run contradicts is a decision for a human, not for this script."*
+**This run is now in the file the tooling reads.** For one review round it was
+not: the falsification lived only in this paragraph while
+`phi4_aie4_crossover_history.json` still held four records ending at
+`2026-09-02T16:32:18Z`, so every calibrator run kept cross-checking the shipped
+constant against only the two runs that agree. The 2026-09-03 run is now the
+fifth record in that file. Every field of it was derived from
+`phi4_aie4_baseline_task15_rerun.json` by `report_phi4_corelib_baseline.py`'s own
+`crossover_entry()` rather than typed in, and
+`test_the_run_that_moved_the_lower_edge_reached_the_history_file` in
+`tools/tests/test_calibrate_phi4_corelib_continuation.py` fails if it ever goes
+missing again. Three published statements moved as a direct result: the table
+under "Do the earlier runs permit this constant?" now carries three interleaved
+rows and reads **3 of 3** where it read *"2 of 2"*; the refusal diagnostic quoted
+below now names three runs instead of two; and the two paragraphs of that
+section which used to assert the lower edge was stable were **constant strings
+in the generator** — they could not change when the data did, and one of them
+said "three times" above a table of two comparable runs. They are now derived
+from the per-run lower edges, which that table also prints, so the sentence and
+the table it sits beside cannot disagree again.
+
+**2. On this run alone, Section 10.7's rule would select 8, not the shipped 4 —
+and the calibrator refuses on two independent grounds, not one.** Run against
+this measurement it selects `8` and then **refuses to write anything**. Both
+`failed` conditions fire (`tools/calibrate_phi4_corelib_continuation.py:1177-1180`):
+
+> diagnostic: history 512: the recorded bracket says append wins up to 4, the Section 10.7 p95 rule says 8
+>
+> diagnostic: the constant exceeds what an interleaved run can support: 2026-09-02T15:34:01Z bounds it at 4, 2026-09-02T16:32:18Z bounds it at 4, 2026-09-03T08:20:08Z bounds it at 4, and the selected threshold is 8. At that run, some history had already stopped favouring append below this suffix length. A release-fixed constant that one recorded run contradicts is a decision for a human, not for this script.
+
+The second is the cross-run check. The **first** is `crossover_disagreements`
+(`:339-367`) and needs no other run at all: this run's own recorded bracket says
+append wins up to 4 at history 512, and the p95 rule applied to this run's own
+samples says 8. Two statistics disagree about one measurement.
+
+**The 8 rests entirely on one comparison** — the single point history 512,
+suffix 8:
+
+| history 512, suffix 8 | append | re-prefill | gap |
+| --- | ---: | ---: | ---: |
+| p95 | 337.6 ms | 351.7 ms | 14.2 ms, to **append** |
+| p50 | 332.5 ms | 332.0 ms | 0.4 ms, to **re-prefill** |
+
+The p95 row is the whole of why 8 is a winner. Its p50 counterpart runs the other
+way by 0.4 ms against **19.7 ms** of measurement uncertainty at that point — the
+run's own record marks it `"decided": false`, `uncertainty_ns` 19,683,000,
+`gap_over_uncertainty` 0.02 — i.e. undecided under the bracket rule this document
+uses everywhere else, and the reason the recorded bracket stops at 4. "On this
+run the rule would select 8" is true, and it is one p95 comparison away from
+selecting 4.
 
 **The shipped constant is unchanged at 4, and it is not wrong.** 4 is inside the
 append-wins region on this run too — append still wins at suffixes 1, 2 and 4 at

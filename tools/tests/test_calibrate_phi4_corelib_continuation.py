@@ -39,6 +39,7 @@ import re
 import tempfile
 import unittest
 
+from tools.report_phi4_corelib_baseline import crossover_entry
 from tools.calibrate_phi4_corelib_continuation import (
     CalibrationError,
     MIN_WARM_SAMPLES,
@@ -51,8 +52,10 @@ from tools.calibrate_phi4_corelib_continuation import (
     conceded_points,
     history_agreement,
     load_continuation_samples,
+    lower_edge_confidence,
     main,
     percentile_ns,
+    recorded_lower_edges,
     select_threshold,
     select_threshold_detailed,
 )
@@ -1077,6 +1080,83 @@ class DocumentSectionTest(unittest.TestCase):
             build_document_section(loaded, selection, agreement),
         )
 
+    @staticmethod
+    def _records(*edges_by_run, interleaved=True):
+        return [
+            {
+                "utc": f"2026-09-0{index + 2}T00:00:00Z",
+                "samples_interleaved": interleaved,
+                "edges": {str(h): [low, None] for h, low in edges.items()},
+            }
+            for index, edges in enumerate(edges_by_run)
+        ]
+
+    def test_a_moved_lower_edge_is_never_called_stable(self):
+        """The paragraph that went false, at the branch that made it false.
+
+        It was a constant string asserting the lower edge was stable, so it
+        could not respond to a third run recording 24 where the first two
+        recorded 12. This is that exact shape.
+        """
+        agreement = history_agreement(
+            self._records(
+                {512: 4, 2048: 12}, {512: 4, 2048: 12}, {512: 4, 2048: 24}
+            ),
+            4,
+        )
+        self.assertEqual(recorded_lower_edges(agreement), {512: (4,), 2048: (12, 24)})
+        text = lower_edge_confidence(Selection(4, "selected", (1, 2, 4), (), ()), agreement)
+        self.assertIn("12, 24 at history 2048", text)
+        self.assertIn("NOT a measured constant", text)
+        self.assertNotIn("stable across runs", text)
+        # And the inequality, which does still hold, is what carries it.
+        self.assertIn("at or below EVERY recorded lower edge", text)
+
+    def test_an_unmoved_lower_edge_is_reported_without_overclaiming(self):
+        agreement = history_agreement(
+            self._records({512: 4, 2048: 12}, {512: 4, 2048: 12}), 4
+        )
+        self.assertEqual(recorded_lower_edges(agreement), {512: (4,), 2048: (12,)})
+        text = lower_edge_confidence(Selection(4, "selected", (1, 2, 4), (), ()), agreement)
+        self.assertIn("has not moved between runs", text)
+        # Two runs agreeing is not a guarantee, and the sentence has to say so
+        # -- this is the wording whose absence let one run falsify the claim.
+        self.assertIn("not a guarantee about the next one", text)
+
+    def test_a_non_interleaved_run_does_not_vote_on_the_edge(self):
+        agreement = history_agreement(
+            self._records({512: 4, 2048: 24}, interleaved=False), 4
+        )
+        self.assertEqual(recorded_lower_edges(agreement), {})
+        text = lower_edge_confidence(Selection(4, "selected", (1, 2, 4), (), ()), agreement)
+        self.assertIn("no interleaved run is on record", text)
+
+    def test_a_contradicted_threshold_does_not_claim_the_inequality(self):
+        agreement = history_agreement(self._records({512: 4, 2048: 12}), 8)
+        self.assertFalse(agreement.permits)
+        text = lower_edge_confidence(Selection(8, "selected", (), (), ()), agreement)
+        self.assertIn("is NOT at or below every recorded lower edge", text)
+
+    def test_the_rendered_section_prints_the_lower_edges_it_reasons_from(self):
+        """The claim and the table it sits beside read the same field.
+
+        They used to be independent: the table printed `min(lowers)` and the
+        prose asserted a stability result from nowhere, so nothing made them
+        agree. Against the committed history the section must show the run
+        that moved the edge, in the table AND in the sentence.
+        """
+        loaded = load_continuation_samples(
+            json.loads(_BASELINE.read_text(encoding="utf-8"))
+        )
+        selection = select_threshold_detailed(loaded.samples())
+        agreement = history_agreement(
+            json.loads(_HISTORY.read_text(encoding="utf-8")), selection.threshold
+        )
+        section = build_document_section(loaded, selection, agreement)
+        self.assertIn("| 2026-09-03T08:20:08Z | yes | 512: 4, 2048: 24 |", section)
+        self.assertIn("12, 24 at history 2048", section)
+        self.assertIn("NOT a measured constant", section)
+
     def test_the_section_says_so_when_no_length_wins(self):
         document = _synthetic_document(reprefill_ns=1_000_000)
         loaded = load_continuation_samples(document)
@@ -1279,10 +1359,64 @@ class RetractedClaimsTest(unittest.TestCase):
             "penalty is reprefill - append, append grows with suffix length "
             "and re-prefill does not, so the cost is read off the narrow end.",
         ),
+        # Task 15's re-measurement (2026-09-03T08:20:08Z, committed at
+        # `phi4_aie4_baseline_task15_rerun.json` and now the fifth record in
+        # `phi4_aie4_crossover_history.json`) measured the lower edge at
+        # history 2048 to be 24. Two claims in the baseline block asserted the
+        # opposite in the present tense, and the correction reached only the
+        # hand-written section 200 lines below them.
+        (
+            "the lower edge has been 12 at history 2048",
+            "the third interleaved run on record measured it at 24. Across "
+            "the three interleaved runs in the committed crossover history "
+            "the lower edge at history 2048 has taken 12 and 24, so it is not "
+            "a measured constant.",
+        ),
+        (
+            "upper edge is not stable and its lower edge is",
+            "neither edge is stable. `crossover_edge_stability` over the "
+            "committed crossover history reports lower_is_stable false once "
+            "the 2026-09-03 run is included, and its own narrative for that "
+            "case reads \"Neither edge of the bracket is stable between "
+            "runs.\"",
+        ),
+        # The same falsification, in the two paragraphs the CALIBRATOR emitted.
+        # Both were constant strings: they could not change when the data did,
+        # and one of them said "three times" above a table of two comparable
+        # runs. `build_document_section` now derives both from
+        # `HistoryRow.lower_edges`, so the claim and the table it sits beside
+        # cannot disagree. Attributed past-tense wording about what Task 13
+        # measured is NOT retracted -- only the unattributed present-tense form
+        # that says the edges are stable.
+        (
+            "found the bracket's LOWER edge stable across runs",
+            "the lower edge at history 2048 took 12 on the first two "
+            "interleaved runs and 24 on the third. The renderer now prints "
+            "the per-run lower edges and derives whether they held still.",
+        ),
+        (
+            "measured the lower edges to be stable",
+            "they are not stable: history 2048 recorded 12 and 24 across the "
+            "three interleaved runs. What the bound actually relies on is "
+            "that it touches only the lower edges, which is a property of the "
+            "construction and is what the paragraph says now.",
+        ),
     )
 
     @staticmethod
-    def _asserts(claim, text):
+    def _collapse(text):
+        """Whitespace-collapse, so a line wrap cannot hide a claim.
+
+        The report matcher collapsed and the DOCUMENT matcher did not, which
+        made the strict check score zero on any wrapped occurrence. It was
+        harmless only because `build_document_section` emits one-line
+        paragraphs -- and it went vacuous the moment the check was widened to
+        the whole committed document, which contains hand-wrapped prose.
+        """
+        return " ".join(text.split())
+
+    @classmethod
+    def _asserts(cls, claim, text):
         """Does `text` contain `claim` as a phrase, not inside a longer word?
 
         Plain `in` was wrong in a way that took a failing run to see: "at the
@@ -1291,8 +1425,19 @@ class RetractedClaimsTest(unittest.TestCase):
         widest conceded suffix is the cheapest. Third variant of the same trap
         -- a matcher loose enough to catch the claim also catches its
         correction -- so the left edge is anchored to a word boundary.
+
+        Both sides are whitespace-collapsed. Without that, a claim broken over
+        a line wrap scored zero here while the report matcher (which reads
+        collapsed blocks) found it -- see
+        `test_the_strict_matcher_also_finds_a_claim_split_across_a_line_wrap`,
+        which fails against the uncollapsed version.
         """
-        return re.search(r"(?<!\w)" + re.escape(claim), text) is not None
+        return (
+            re.search(
+                r"(?<!\w)" + re.escape(cls._collapse(claim)), cls._collapse(text)
+            )
+            is not None
+        )
 
     def _violations(self, text):
         return [
@@ -1311,23 +1456,29 @@ class RetractedClaimsTest(unittest.TestCase):
     # what it was built to catch.
     _INLINE_QUOTE = re.compile(r"\"[^\"]{0,400}\"|`[^`]{0,400}`")
 
-    def _collect_unquoted(self, text):
+    def _collect_unquoted(self, text, blockquote_is_citation=True):
         """Retracted claims ASSERTED rather than cited.
 
-        Prose that retracts a claim has to be able to quote it. The rendered
-        document never needs to -- it states conclusions, not their history --
-        so it gets the strict check. The report does, so it gets this one.
+        Prose that retracts a claim has to be able to quote it, so a claim is
+        treated as cited, and allowed, when it sits inside an inline
+        quotation. The inline case is not a nicety: every citation in fix
+        round 3's own prose is inline, and a blockquote-only rule failed on
+        the round that introduced it. Assert the claim in your own unquoted
+        voice and it is still caught.
 
-        A claim is treated as cited, and allowed, when it sits inside a
-        blockquote (a marked correction) or inside an inline quotation. The
-        inline case is not a nicety: every citation in fix round 3's own prose
-        is inline, and a blockquote-only rule failed on the round that
-        introduced it. Assert the claim in your own unquoted voice and it is
-        still caught.
+        `blockquote_is_citation` is FALSE for the published document and true
+        for the task report, and the difference is not a preference. In a
+        report a blockquote is how a human marks a quotation. In
+        `phi4_results.md` a blockquote is a paragraph the RENDERER emits --
+        `crossover_stability_narrative` returns its guidance as one -- so
+        treating it as a citation exempted the generator's own voice. Measured:
+        with the exemption on, the falsified sentence "the lower edge has been
+        12 at history 2048" sat unflagged in the committed document because it
+        was rendered behind a `>`.
         """
         violations = []
         for block, quoted in _markdown_blocks(text):
-            if quoted:
+            if quoted and blockquote_is_citation:
                 continue
             cited = [
                 match.span() for match in self._INLINE_QUOTE.finditer(block)
@@ -1347,8 +1498,8 @@ class RetractedClaimsTest(unittest.TestCase):
                     break
         return violations
 
-    def _assert_clean_unless_quoted(self, text, where):
-        violations = self._collect_unquoted(text)
+    def _assert_clean_unless_quoted(self, text, where, blockquote_is_citation=True):
+        violations = self._collect_unquoted(text, blockquote_is_citation)
         self.assertEqual(violations, [], f"{where} " + "; ".join(violations))
 
     def _task14_section(self):
@@ -1367,7 +1518,26 @@ class RetractedClaimsTest(unittest.TestCase):
         return document[begin:end]
 
     def test_the_committed_document_asserts_no_retracted_claim(self):
-        self._assert_clean(self._task14_section(), str(_DOCUMENT))
+        """The WHOLE committed document, not one block.
+
+        This used to read `self._task14_section()`, on the reasoning that
+        Task 14 may not edit prose it does not own. The cost of that reasoning
+        was I4/I9: Task 15 retracted a stability claim, the retraction reached
+        a hand-written section 200 lines below the claim, and the guard built
+        over three fix rounds to stop exactly that could not see it -- the
+        claim lives in the Task 13 baseline block, which was out of scope.
+
+        Scope is now the file. A retracted claim is not allowed to survive
+        anywhere in the published document, whoever generated the paragraph
+        it sits in. The citation rule is the report's, not the strict one,
+        because the document now carries retraction prose of its own and
+        prose that retracts a claim has to be able to quote it.
+        """
+        self._assert_clean_unless_quoted(
+            _DOCUMENT.read_text(encoding="utf-8"),
+            str(_DOCUMENT),
+            blockquote_is_citation=False,
+        )
 
     def test_the_committed_report_asserts_no_retracted_claim(self):
         """The file that documents the retractions is not exempt from them.
@@ -1472,6 +1642,52 @@ class RetractedClaimsTest(unittest.TestCase):
         head, tail = claim.split(" ", 1)
         self.assertEqual(len(self._collect_unquoted(f"Prose {head}\n{tail}.\n")), 1)
 
+    def test_the_strict_matcher_also_finds_a_claim_split_across_a_line_wrap(self):
+        """The parked defect: only the REPORT matcher collapsed whitespace.
+
+        `_collect_unquoted` reads whitespace-collapsed blocks; `_asserts` read
+        the raw text, so a claim broken over a line wrap scored ZERO under the
+        strict check that guards the rendered section. It was harmless only
+        because `build_document_section` emits one-line paragraphs, and it goes
+        vacuous the day that generator wraps prose -- or, as here, the day the
+        check is pointed at a hand-wrapped file. This case failed before the
+        collapse was added to `_asserts`.
+        """
+        for claim, _ in self._RETRACTED:
+            head, tail = claim.split(" ", 1)
+            wrapped = f"prose prose {head}\n{tail} prose"
+            with self.subTest(claim=claim):
+                self.assertEqual(len(self._violations(wrapped)), 1)
+                with self.assertRaises(AssertionError):
+                    self._assert_clean(wrapped, "a wrapped synthetic document")
+
+    def test_a_blockquote_does_not_launder_a_claim_in_the_document(self):
+        """`crossover_stability_narrative` returns its guidance AS a
+        blockquote, so in the published document a leading `>` is the
+        renderer's voice and not a human marking a citation. Measured: with
+        blockquotes exempt, the falsified "the lower edge has been 12 at
+        history 2048" sat unflagged in the committed document."""
+        claim = "the lower edge has been 12 at history 2048"
+        self.assertIn(claim, [entry[0] for entry in self._RETRACTED])
+        quoted_block = f"> **Read the lower edge as measured.** Across runs {claim}.\n"
+        # Report rules: a blockquote is a citation.
+        self.assertEqual(self._collect_unquoted(quoted_block), [])
+        # Document rules: it is not.
+        self.assertEqual(
+            len(self._collect_unquoted(quoted_block, blockquote_is_citation=False)),
+            1,
+        )
+        # An inline citation is still allowed under document rules, because
+        # the document now carries its own retraction prose.
+        self.assertEqual(
+            self._collect_unquoted(
+                f'The table concluded "{claim}", which the 2026-09-03 run '
+                f"falsified.\n",
+                blockquote_is_citation=False,
+            ),
+            [],
+        )
+
     def test_the_corrected_wording_is_not_itself_flagged(self):
         """"would have selected" appears in the correction. A matcher that
         forbade it would make the fix unwritable."""
@@ -1545,6 +1761,62 @@ class CheckedInArtefactsTest(unittest.TestCase):
         report = history_agreement(records, 4)
         self.assertTrue(report.comparable)
         self.assertTrue(report.permits)
+
+    def test_the_run_that_moved_the_lower_edge_reached_the_history_file(self):
+        """The falsification has to reach the file the TOOLING reads.
+
+        Task 15 measured a third interleaved run whose lower edge at history
+        2048 is 24, wrote it up in prose, and never appended it to
+        `phi4_aie4_crossover_history.json` -- so `--crossover-history` kept
+        feeding `history_agreement` the two runs that agree, and the calibrator
+        kept rendering "2 of 2 bound it there exactly" from data that had been
+        falsified. Prose is not an input to anything.
+
+        Every figure below is derived, not typed: it is what
+        `report_phi4_corelib_baseline.crossover_entry()` produces from the
+        committed `phi4_aie4_baseline_task15_rerun.json`.
+        """
+        rerun = (
+            _REPO_ROOT
+            / "docs"
+            / "docs"
+            / "benchmarks"
+            / "phi4_aie4_baseline_task15_rerun.json"
+        )
+        derived = crossover_entry(
+            json.loads(rerun.read_text(encoding="utf-8")), source=""
+        )
+        records = json.loads(_HISTORY.read_text(encoding="utf-8"))
+        by_utc = {record.get("utc"): record for record in records}
+        self.assertIn(
+            derived["utc"],
+            by_utc,
+            f"{rerun.name} is committed but its run is absent from "
+            f"{_HISTORY.name}, so nothing that reads the history can see it",
+        )
+        committed = by_utc[derived["utc"]]
+        for field in (
+            "edges",
+            "samples_interleaved",
+            "suffix_grid",
+            "points_decided",
+            "points_total",
+            "undecided_suffixes",
+            "fastflow_revision",
+            "corelib_dll_sha256",
+        ):
+            self.assertEqual(committed[field], derived[field], field)
+
+        # And the property that makes it matter: across the interleaved runs
+        # the lower edge at history 2048 is NOT a single value.
+        lowers = sorted(
+            {
+                record["edges"]["2048"][0]
+                for record in records
+                if record.get("samples_interleaved")
+            }
+        )
+        self.assertEqual(lowers, [12, 24])
 
 
 if __name__ == "__main__":

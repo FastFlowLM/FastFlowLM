@@ -137,6 +137,96 @@ generation: whether it reproduces, whether the onset is stable near that point
 (roughly decode step 3,470), and whether it depends on the prompt are all
 unknown, and no run has been made to find out.
 
+## Correction: the record's `corelib_source_revision` claims a tree that was not pristine
+
+Fix round after Task 15, 2026-09-03. `phi4_aie4_acceptance.json` records
+`identity.corelib_source_revision` as the bare SHA
+`e5258d29b5cb979d4a538994409b90ceff6e6e7a`, rendered in the record's identity
+table. Every other committed artifact describing the **same** corelib checkout
+records that SHA with a suffix:
+
+| artifact | value |
+| --- | --- |
+| `phi4_aie4_acceptance.json` → `identity.corelib_source_revision` | `e5258d29…` |
+| `phi4_aie4_baseline.json` | `e5258d29…-untracked-only` |
+| `phi4_aie4_baseline_task15_rerun.json` | `e5258d29…-untracked-only` |
+| `phi4_results.md`, both identity tables | `e5258d29…-untracked-only` |
+
+`-untracked-only` is **derived** — `run_hardware_suite.ps1` runs `git rev-parse`
+and a dirty check and appends what it finds, with the comment that a bare SHA
+*"would claim the baseline describes a committed revision when it does not, and
+that is a claim nobody can check later."* The acceptance harness, at the time of
+this run, took the value as a plain optional string and wrote it into the record
+unchecked. So the figure the record publishes is **operator-typed free text**,
+and it asserts a pristine tree that this project's own other tooling recorded as
+not pristine. **`-untracked-only` is the correct label for that checkout**; the
+bare SHA is not.
+
+Two things bound the consequence.
+
+1. **The identifier that actually pins the binary is derived and is not in
+   doubt.** The record's own `identity.corelib_dlls` gives
+   `ryzenai_corelib.dll` SHA-256 `a523b238…` — byte-identical to the DLL both
+   baselines record. Which binary produced these numbers is answerable; which
+   source tree produced that binary is answerable only to a commit plus
+   "untracked files were present".
+2. **It cannot recur.** `run_real_model_acceptance.ps1` now derives the corelib
+   revision itself, with the same shared `Get-GitRevision` that
+   `run_hardware_suite.ps1` uses (from `acceptance_guards.ps1`); it records
+   `corelib_source_revision_derived` beside the value so a reader can tell a
+   checked SHA from a typed one; it aborts the run if an operator-supplied
+   `-CorelibSourceRevision` contradicts the checkout; and where there is no
+   checkout to check against it labels the value
+   `-operator-supplied-unverified` rather than passing it off as derived. No
+   line numbers are given here on purpose — the file is under active edit, and
+   a line number in prose is the kind of citation that rots silently.
+
+As everywhere else on this page, the record is not edited after the fact, which
+is why the correction lives here.
+
+## On determinism: the record's word "bounded" is true of a number, not of what a user sees
+
+`phi4_aie4_acceptance.json`'s `determinism_scope.policy` reads *"DETERM-5:
+run-to-run divergence is a known, measured, **bounded** defect carried with this
+release"*, and the same object's `sharpened_hypothesis` explains the mechanism
+with *"Floating-point addition is not associative, so varying order varies the
+last bits."* Both sentences are about the difference between two numbers. The
+observable defect is not that difference, and on this record's own terms the
+word does not survive either half of the check:
+
+- **The per-value bound is what `DETERM-2` specifies, and in the divergent runs
+  it did not hold.** The gate is two relative BF16 ULP — the records carry it as
+  `determ2_bound_ulps: 2`, `determ2_bound_kind: relative_bf16_ulp`. The three
+  records whose runs emitted different text carry **17, 8 and 10** separate
+  gate-breach lines, with absolute logit differences up to **49.25**.
+  `phi4_results.md` counts two of the three as `DETERM-2` HARD GATE breaches
+  rather than all three, because the earliest carries no harness SHA-256 and is
+  one of the 64 records excluded from the pooled window — not because it was
+  inside the bound.
+- **Inside the bound it would still not be bounded in effect.** Decoding here is
+  greedy, so a difference large enough to flip a single argmax changes the
+  emitted token, and from that token onward the two continuations are unrelated.
+  Nothing bounds how far apart the resulting text can then be. Three committed
+  records show exactly that: the sequences part at the 8th emitted token in one
+  and the 14th in the other two.
+
+**The rendered record is not silent about this and must not be read as though it
+were.** `phi4_aie4_acceptance.md` carries a paragraph headed *"What diverges is
+not only the last bits"*, which states that two runs of the same binary have
+produced different emitted tokens, tells the reader not to take the
+non-associativity sentence above it as meaning the divergence is confined to
+rounding, and points at `phi4_results.md` and `phi.md`. That paragraph is written
+by the renderer rather than read from the record, because the record is not
+edited after the fact — the same rule the rest of this page follows. What
+remains, and what this note is about, is the wording of the record's own
+`policy` and `sharpened_hypothesis` fields: accurate about the arithmetic, and
+on their own an understatement of the defect.
+
+Counts, magnitudes, the route split and the localisation are in
+[the Phi-4 benchmarks](/docs/benchmarks/phi4_results/); the user-facing statement
+is the fourth bullet of
+[Phi's known limitations](/docs/models/phi/#known-limitations).
+
 ## What that means for the record
 
 **The record is not stale and has not been edited.** It is an accurate,
@@ -167,6 +257,56 @@ Two consequences worth stating plainly:
 The next hardware run will emit a record whose `harness_sha256` matches the
 harness beside it again, and this note should be updated or removed when it
 does.
+
+## Known gap: nothing automated compiles this backend or runs any of its tests
+
+Stated as a gap, not as a plan. It is recorded here because this is the page
+whose subject is what was and was not verified, and because everything else on
+this page describes evidence that only exists if somebody runs something.
+
+**No continuous-integration job builds the AIE4 path, and no job runs any test
+of any kind.** Verified against the tree at the time of writing:
+
+- The branch did not touch CI at all: `git diff --stat 2d6c4838..6a516f7f -- .github/`
+  is empty.
+- No workflow under `.github/workflows/` invokes `ctest`, `pytest` or
+  `unittest` — grep over the whole directory returns nothing. The four
+  workflows (`windows-build.yml`, `ubuntu-build.yml`, `debian-portable.yml`,
+  `build-container.yml`) build and package; none of them tests.
+- `windows-build.yml` configures with `cmake --preset windows-vs18`
+  (`:34`, `:88`). That preset sets `CMAKE_BUILD_TYPE` and nothing else, and
+  `FLM_ENABLE_CORELIB_AIE4` is set by no preset and by no workflow — so the
+  AIE4 product C++ behind the `#if` is **never compiled** in CI. A change that
+  breaks it compiles green.
+- `src/test/phi4_corelib_aie4/CMakeLists.txt` is a standalone CMake project.
+  `src/CMakeLists.txt` never `add_subdirectory`s it (its only
+  `add_subdirectory` is `third_party/tokenizers-cpp`), so the host test suite
+  is not part of the product build's `ctest` either.
+- `src/test/phi4_corelib_aie4/verify_acceptance_guards.ps1` — the offline
+  verifier that drives the real guard functions against this record, including
+  the AST call-site lint that caught the round-4 accumulation-gate bug — is
+  registered nowhere. It runs when a human remembers.
+
+**And one job is named as though it tests.** `debian-portable.yml:122` defines
+a job called **`test-summary`**. It runs no test: its single step
+(`:127-133`) echoes `# Portable Build Test Results` and four hard-coded `✅`
+lines — *built successfully*, *FFmpeg statically linked*, *XRT and XDNA plugin
+bundled*, *FFTW bundled* — into `$GITHUB_STEP_SUMMARY`, unconditionally, with
+`if: always()`. They are restatements of what the build job was configured to
+do, emitted whether or not it did it. A maintainer scanning job names, or
+reading a green run's summary, has every reason to conclude that tests ran.
+This is pre-existing upstream FastFlow — the branch did not touch `.github/` —
+so it is recorded here rather than fixed, but it is why the gap above is worse
+than an absence: **the absence of testing is currently reported as four green
+ticks.**
+
+The consequence is worth stating in one sentence: **the evidence on this page,
+and in the acceptance record beside it, was produced by hand on one machine and
+nothing will reproduce it automatically.** Re-running it is a manual act. Until
+that changes, treat a green build as saying nothing about this backend.
+
+CI was ruled out of scope for the round in which this note was written. The gap
+is recorded so it is inherited deliberately rather than by accident.
 
 ## Verifying the chain yourself
 

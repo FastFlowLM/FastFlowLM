@@ -518,6 +518,17 @@ class HistoryRow:
     permits: bool
     tight: bool
     note: str
+    # The per-history lower edges this run recorded, as `(history, lower)`
+    # pairs in `REQUIRED_HISTORIES` order, kept rather than reduced away.
+    #
+    # `upper_bound` is their minimum, and the minimum cannot answer the
+    # question the document was asking of it: whether the lower edge is the
+    # same value from run to run. The renderer asserted an answer instead --
+    # "Task 13 measured the lower edges to be stable" -- which was true when it
+    # was written and false once a third run recorded 24 where the first two
+    # recorded 12, and the generator had thrown away the only data that could
+    # have told it so.
+    lower_edges: tuple = ()
 
 
 @dataclasses.dataclass(frozen=True)
@@ -561,10 +572,14 @@ def history_agreement(records: Sequence[Mapping], threshold: int) -> HistoryRepo
     reported as tight only under the stated assumption. A run whose bound it
     falls below permits the constant without confirming it.
 
-    Task 13's finding is that the lower edges are stable and the upper edges
-    are not; because this bound touches only the lower edges, an unstable upper
-    edge cannot move it. Non-interleaved records are shown but excluded from
-    the verdict.
+    This bound touches only the lower edges, so an unstable UPPER edge cannot
+    move it. That is a property of the construction and is all this docstring
+    ever meant to claim. It used to add that Task 13 had found the lower edges
+    stable, which was a claim about data rather than about the bound, and it
+    went false when a later run recorded a different lower edge -- so the
+    lower edges are now carried through on `HistoryRow.lower_edges` and
+    whether they held still is derived where it is published, never asserted
+    here. Non-interleaved records are shown but excluded from the verdict.
     """
     if not _is_int(threshold) or threshold < 0:
         raise CalibrationError(f"threshold {threshold!r} is not a non-negative int")
@@ -607,6 +622,7 @@ def history_agreement(records: Sequence[Mapping], threshold: int) -> HistoryRepo
                 permits=interleaved and threshold <= upper_bound,
                 tight=interleaved and threshold == upper_bound,
                 note=str(record.get("note", "")),
+                lower_edges=tuple(zip(REQUIRED_HISTORIES, lowers)),
             )
         )
 
@@ -636,6 +652,88 @@ def history_agreement(records: Sequence[Mapping], threshold: int) -> HistoryRepo
         permits=bool(comparable_rows) and not contradicting,
         tight=tuple(row for row in comparable_rows if row.tight),
         diagnostics=tuple(diagnostics),
+    )
+
+
+def recorded_lower_edges(agreement: HistoryReport) -> dict:
+    """Per history, the DISTINCT lower edges the interleaved runs recorded.
+
+    `{512: (4,), 2048: (12, 24)}` reads: at history 512 every comparable run
+    put the lower edge at 4; at history 2048 the runs disagree, so the edge is
+    not a measured constant and no sentence may call it one. Non-interleaved
+    runs are excluded, exactly as they are from the verdict.
+    """
+    observed: dict = {}
+    for row in agreement.rows:
+        if not row.comparable:
+            continue
+        for history, lower in row.lower_edges:
+            observed.setdefault(history, set()).add(lower)
+    return {
+        history: tuple(sorted(values))
+        for history, values in sorted(observed.items())
+    }
+
+
+def _edge_list(observed: Mapping) -> str:
+    return "; ".join(
+        f"{', '.join(str(value) for value in values)} at history {history}"
+        for history, values in observed.items()
+    )
+
+
+def lower_edge_confidence(selection: Selection, agreement: HistoryReport) -> str:
+    """The confidence argument for the selected constant, DERIVED.
+
+    This paragraph used to be a constant string asserting that Task 13 had
+    found the lower edge stable and the upper edge not. Two things were wrong
+    with that even before it was falsified: it said "three times" while the
+    record it sat above showed two comparable runs, and it could not change
+    when the data did. It is now computed from the same rows the table below
+    it prints, so the two cannot disagree.
+    """
+    comparable = [row for row in agreement.rows if row.comparable]
+    if not comparable:
+        return (
+            "There is a second consideration, and on this record it cannot be "
+            "settled: no interleaved run is on record, so nothing cross-checks "
+            "where the crossover sat on any other run."
+        )
+    observed = recorded_lower_edges(agreement)
+    moved = {
+        history: values for history, values in observed.items() if len(values) > 1
+    }
+    lead = (
+        f"There is a second reason to prefer the lower candidate, and it is "
+        f"about confidence rather than cost. Across the {len(comparable)} "
+        f"interleaved run(s) on record the bracket's LOWER edge has been "
+        f"{_edge_list(observed)}."
+    )
+    if moved:
+        lead += (
+            f" It is NOT a measured constant: at "
+            f"{', '.join(f'history {history}' for history in moved)} it took "
+            f"more than one value across runs of the same binary, so a "
+            f"threshold cannot be justified by pointing at one run's edge."
+        )
+    else:
+        lead += (
+            " Every history reports one value, so on this record the lower "
+            "edge has not moved between runs — which is a property of these "
+            "runs and not a guarantee about the next one."
+        )
+    if agreement.permits:
+        return lead + (
+            f" What carries the choice is the inequality rather than the "
+            f"stability: {selection.threshold} is at or below EVERY recorded "
+            f"lower edge, so it is inside the append-wins region on every "
+            f"interleaved run on record. A larger threshold would be supported "
+            f"by some of them and contradicted by others."
+        )
+    return lead + (
+        f" And {selection.threshold} is NOT at or below every recorded lower "
+        f"edge — see the refusal below. That is the condition this argument "
+        f"needs and this run does not meet."
     )
 
 
@@ -877,18 +975,7 @@ def build_document_section(
             "against the measurement at the other."
         )
         add("")
-        add(
-            "There is a second reason to prefer the lower candidate, and it is "
-            "about confidence rather than cost. Task 13 measured this crossover "
-            "three times and found the bracket's LOWER edge stable across runs "
-            "and its UPPER edge not: the upper edge moves with how quiet the "
-            "machine was, because that is what decides how many points near the "
-            "crossover can be called at all. The threshold selected here sits "
-            "at or below the lower edge at every measured history, so it is "
-            "inside the append-wins region on every run. A threshold chosen "
-            "from the upper edge would be supported by some runs and not "
-            "others."
-        )
+        add(lower_edge_confidence(selection, agreement))
     else:
         add(
             "Nothing. At every measured history length, append wins at no "
@@ -938,23 +1025,31 @@ def build_document_section(
     )
     add("")
     add(
-        "Task 13 measured the lower edges to be stable and the upper edges not. "
-        "This bound touches only the lower edges, which is why an unstable "
-        "upper edge cannot move it."
+        "This bound touches only the lower edges and never the upper ones, so "
+        "however far an upper edge moves between runs it cannot move the "
+        "bound. The lower edges are printed per run below rather than reduced "
+        "away, because their MINIMUM cannot answer whether the edge itself "
+        "held still: where a history shows different values on different runs "
+        "the edge moved, the bound is still their minimum, and the inequality "
+        "is still sound — but nothing here may then call that edge stable."
     )
     add("")
-    add("| measured (UTC) | interleaved | bounds the threshold at | permits "
-        f"{selection.threshold} | meets the bound exactly |")
-    add("| --- | :---: | ---: | :---: | :---: |")
+    add("| measured (UTC) | interleaved | lower edge per history | bounds the "
+        f"threshold at | permits {selection.threshold} | meets the bound "
+        f"exactly |")
+    add("| --- | :---: | :--- | ---: | :---: | :---: |")
     for row in agreement.rows:
+        edges = ", ".join(
+            f"{history}: {lower}" for history, lower in row.lower_edges
+        )
         if not row.comparable:
             add(
-                f"| {row.utc} | no | ({row.upper_bound}) | excluded — routes "
-                f"not measured against the same machine state | — |"
+                f"| {row.utc} | no | {edges} | ({row.upper_bound}) | excluded — "
+                f"routes not measured against the same machine state | — |"
             )
         else:
             add(
-                f"| {row.utc} | yes | {row.upper_bound} | "
+                f"| {row.utc} | yes | {edges} | {row.upper_bound} | "
                 f"{'yes' if row.permits else 'NO'} | "
                 f"{'yes' if row.tight else 'no'} |"
             )

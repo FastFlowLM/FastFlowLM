@@ -29,13 +29,31 @@ flm run phi4-mini-it:4b
 The `phi4-mini-it-aie4:4b` tag uses the optional `corelib_aie4`
 backend and the pinned AMD
 [OGA DML package](https://huggingface.co/amd/phi-4-mini-instruct-oga-dml).
-It has a 4096-token default and maximum prefill length and requires
-FastFlowLM 1.0.4 or newer.
+It requires FastFlowLM 1.0.4 or newer.
+
+**Size prompts against 4,094 tokens, not 4,096.** The catalog entry lists a
+4096-token default and maximum prefill length, and the backend is stricter than
+its catalog entry: the prompt and the generated tokens together are capped at
+**4,095**, and a prompt is refused once it reaches that figure on its own, so
+**the largest prompt this tag will accept is 4,094 tokens** — it needs at least
+one token of room to answer in. Sizing a prompt to the advertised 4,096 gets
+HTTP 400 before any work is submitted. The rule is
+`Phi4::validate_aie4_capacity` (`src/common/AutoModel/modeling_phi4.cpp:437`),
+which refuses when the rendered prompt length reaches the cap; see
+[Known limitations](#known-limitations) for why the cap is what it is.
 
 **Windows and AIE4 only.** The backend is compiled in only when FastFlowLM is
 built with `FLM_ENABLE_CORELIB_AIE4=ON`, the packaging step is Windows-only,
 and the tag runs on an AIE4 NPU. There is no Linux build of it and it does not
 run on XDNA2 hardware.
+
+**Building it against a shared dependency prefix also needs
+`-DFLM_WIN_STATIC_DEPS=OFF`.** That option defaults to `ON`, which is the static
+Boost and curl layout CI and the MSI ship; a conda or other shared prefix — the
+usual way the AIE4 work is built — has to opt out, or the Boost linkage macros
+and the library name the build picks describe two different Boosts. Getting it
+wrong is a configure-time hard failure naming both halves, not a mystery link
+error at the end.
 
 **The existing NPU2 tag is unchanged.** `phi4-mini-it:4b` still resolves to the
 legacy `phi4_npu` engine, still uses the `Q4_1` `model.q4nx` package with a
@@ -113,7 +131,7 @@ Ryzen AI NPU. The signed-off record — machine and driver identity, the
 FastFlowLM commit, corelib DLL hashes, every measured timing, the verbatim
 prompts and completions, and a line-by-line result against the design's
 acceptance criteria — is at
-[Phi-4 AIE4 acceptance](../benchmarks/phi4_aie4_acceptance.html).
+[Phi-4 AIE4 acceptance](/docs/benchmarks/phi4_aie4_acceptance/).
 
 Read that document before relying on any claim here. It states plainly which
 criteria were met, which were not, and which were **not tested at all**, and
@@ -134,7 +152,7 @@ below roughly 2x against any figure here as unresolved.
 | — of which weight pack and upload (161 objects) | 1,603.4 ms | 1,596.0 ms |
 | cold TTFT (19-token prompt) | 3,169.4 ms | 3,061.7 ms |
 | warm TTFT (same stream, context cleared) | 49.1 ms | 53.5 ms |
-| prefill, 4096 rows | 1,746.3 ms / 2,345.5 tok/s | 1,748.6 ms / 2,342.5 tok/s |
+| prefill, 4096 rows † | 1,746.3 ms / 2,345.5 tok/s | 1,748.6 ms / 2,342.5 tok/s |
 | decode from 128 tokens | 20.04 tok/s | 24.89 tok/s |
 | decode from 512 tokens | 21.16 tok/s | 24.38 tok/s |
 | decode from 2048 tokens | 20.68 tok/s | 22.68 tok/s |
@@ -142,8 +160,21 @@ below roughly 2x against any figure here as unresolved.
 | peak host working set | 9.52 GiB | 9.60 GiB |
 | V-cache reads per model step | 32 | 32 |
 | per-head V writes per model step | 256 | 256 |
+| V-cache read calls, whole run | 231,264 | 231,264 |
+| per-head V write calls, whole run | 1,850,112 | 1,850,112 |
+| model steps those calls span | 7,227 | 7,227 |
 | V bytes transferred | 44.60 GiB | 44.60 GiB |
 | V scatter wall time | 3,315.9 ms | 3,081.7 ms |
+
+† The 4096-row prefill is measured by driving the engine directly. It is **not**
+a prompt size you can submit — see the cap above: the largest admissible prompt
+is 4,094 tokens.
+
+The three V-scatter call and step figures are counted by the engine, not inferred
+from a rate: both baselines record `v_scatter.counts_are_measured: true`, and the
+per-step figures in the two rows above them are those counts divided by
+`model_steps`. They are identical in both runs because the workload is; only the
+wall time moved.
 
 **Model load is dominated by one thing.** 86% of it is interrogating the
 corelib helpers for every row extent from 1 to 4096. That is a fixed startup
@@ -177,7 +208,7 @@ append-wins region on every run measured, whereas a higher value has not been
 supported by every run — on one run the rule would have chosen 8, and on two
 earlier ones it would not. The full per-suffix tables, and that disagreement,
 are in
-[the Phi-4 benchmarks]({{ site.baseurl }}/docs/benchmarks/phi4_results.html).
+[the Phi-4 benchmarks](/docs/benchmarks/phi4_results/).
 
 **A terminal device failure restarts the process, by design.** If a corelib
 call fails after work has already been submitted to the device, the state of
@@ -213,8 +244,56 @@ alone.
   frontends: it is the shared CLI path for every text model. Supply the whole
   conversation yourself — the `/api/chat` and `/v1/chat/completions` endpoints
   take a full `messages` array and count it in full — until this is fixed.
+- **Two runs of the same binary, on the same input, have produced different
+  text.** This backend is **not deterministic run to run**, and the difference
+  is not a rounding difference in the last bits — it is a different answer. In
+  the committed determinism campaign, **3 of the 150 recorded run-pair
+  comparisons** ended with the two runs emitting different token sequences. One
+  pair parts at the **8th** emitted token, the other two at the 14th. Two
+  measures of severity are recorded and **they do not rank the three records
+  the same way**, so each figure below is given against the record it came
+  from rather than rolled into one "worst": the largest absolute logit
+  difference is **49.25**, while the largest number of logits moving at a
+  single step is **196,835 of 200,064** — and those are different records.
+  Each comparison is a committed JSON file:
+
+  - `src/test/phi4_corelib_aie4/determinism_records/20260902T120919Z-10264/determ1-force_append-010.json`
+    — max abs diff **48.34**; up to **196,154** of 200,064 logits differing at
+    one step (`decode[13]`) by more than the 2-BF16-ULP bound the suite gates
+    on; sequences part at token 8
+  - `src/test/phi4_corelib_aie4/determinism_records/20260902T140230Z-11788/determ1-force_append-022.json`
+    — **49.25**; up to **196,748** at `decode[15]`; part at token 14
+  - `src/test/phi4_corelib_aie4/determinism_records/20260902T140230Z-11788/determ1-force_append-026.json`
+    — **49.21**; up to **196,835** at `decode[15]`; part at token 14
+
+  All three are on the **append** continuation route. Two re-prefill records
+  also carry a logit difference, but in both the emitted text still matched.
+  The pooled rates, the two runs that breached a `DETERM-2` hard gate, and the
+  measurement showing that the divergence enters the **model body** rather than
+  the LM-head dispatch are published in
+  [the Phi-4 benchmarks](/docs/benchmarks/phi4_results/), which reports them
+  honestly and refuses to call that window a settled baseline. Nothing here is
+  a fix: the cause is not known, and no run has been made to find it.
+
+  **What this means for you:** do not assume the same prompt gives the same
+  answer, do not use output equality as a test oracle against this backend, and
+  do not cache or diff on the assumption that a repeat is a repeat.
 - **Long, open-ended generations can collapse. Set an explicit generation
-  limit.** A request with no limit is bounded only by the model emitting an end
+  limit — and know which interface gives you one.** There is **no command-line
+  flag**: nothing in `src/include/utils/vm_args.hpp` takes a generation limit,
+  so `flm run phi4-mini-it-aie4:4b` cannot be launched with one. Two mechanisms
+  exist, and they cover both ways of using this tag:
+  - **In the `flm run` session, type `/set gen-lim <value>`** before the prompt
+    you want bounded (`src/runner/runner.cpp:643`). It sets the per-round token
+    limit for the rest of the session, and the AIE4 admission check reads it
+    (`CliRequestedMaxNewTokens`, `src/server/generation_limit.cpp:176-182`).
+    It is a REPL command, not a startup option, so it has to be typed each
+    session; `/set` on its own prints the list it appears in
+    (`src/runner/runner.cpp:572-586`).
+  - **Over HTTP, send `max_tokens` (OpenAI and `/api/generate`) or
+    `options.num_predict` (`/api/chat`)** — `src/server/generation_limit.cpp:65,73`.
+
+  A request with no limit is bounded only by the model emitting an end
   token. When it does not, generation runs to the cap. In the acceptance run,
   two open-ended turns did exactly that, taking **186.9 s** and **179.9 s**;
   neither emitted a stop token and both ended on *"Max length reached, stopping
@@ -262,13 +341,22 @@ alone.
   reply is dominated by a repeated token"*, which is right about the repetition
   and silent about the collapse. The record is not edited after the fact; the
   correction, with the derivation from the record's own data, is in
-  [Phi-4 AIE4 acceptance provenance](../benchmarks/phi4_aie4_acceptance_provenance.html).
+  [Phi-4 AIE4 acceptance provenance](/docs/benchmarks/phi4_aie4_acceptance_provenance/).
 - **The limit is 4095 tokens** for the prompt and the generated tokens
-  together, counted over the complete rendered conversation. This is **by
-  design, not a shortfall**: the AIE4 operators support at most about 4k input.
-  The KV window is 4096 rows and the usable cap is one less, because no
-  token-attention kernel ships for a 4096-token window. Requests over the cap
-  are refused before any work is submitted, with HTTP 400 on the server and a
-  message naming the cap and the rendered prompt length. The acceptance run
-  verifies the enforcement exactly: the remaining capacity is admitted and one
-  token more is refused.
+  together, counted over the complete rendered conversation, **so the largest
+  prompt you can submit is 4,094.** This is **by design, not a shortfall**: the
+  AIE4 operators support at most about 4k input. The KV window is 4096 rows and
+  the usable cap is one less, because no token-attention kernel ships for a
+  4096-token window; and a prompt that fills the cap exactly leaves no room to
+  answer, so `Phi4::validate_aie4_capacity`
+  (`src/common/AutoModel/modeling_phi4.cpp:437`) refuses at 4,095 rendered
+  tokens rather than at 4,096. Requests over the cap are refused before any work
+  is submitted, with HTTP 400 on the server and a message naming the cap and the
+  rendered prompt length. The acceptance run verifies the enforcement exactly:
+  the remaining capacity is admitted and one token more is refused.
+
+  **The catalog says 4096, and it is describing a different thing.**
+  `src/model_list.json` gives `phi4-mini-it-aie4:4b` a `default_context_length`
+  and `max_prefill_len` of 4096, which is the KV window the engine allocates.
+  The admission gate is one token tighter than the window and two tighter than
+  a full-window prompt; the figure to size against is **4,094**.

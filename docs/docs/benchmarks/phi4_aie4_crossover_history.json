@@ -138,5 +138,42 @@
       ]
     },
     "source": "git:90300b0a:docs/docs/benchmarks/phi4_aie4_baseline.json"
+  },
+  {
+    "utc": "2026-09-03T08:20:08Z",
+    "fastflow_revision": "a975b6394223f322532e158286894894a9c6715a-dirty",
+    "corelib_dll_sha256": "a523b23837c9bea3b06f8f8ae74e1e8292092eb73aaa93791022c448b865ecdb",
+    "samples_interleaved": true,
+    "suffix_grid": [
+      1,
+      2,
+      4,
+      8,
+      12,
+      16,
+      24,
+      32,
+      64,
+      128,
+      256
+    ],
+    "edges": {
+      "2048": [
+        24,
+        32
+      ],
+      "512": [
+        4,
+        12
+      ]
+    },
+    "points_decided": 21,
+    "points_total": 22,
+    "undecided_suffixes": {
+      "512": [
+        8
+      ]
+    },
+    "source": "git:1b6db540:docs/docs/benchmarks/phi4_aie4_baseline_task15_rerun.json"
   }
 ]

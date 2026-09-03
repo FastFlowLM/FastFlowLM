@@ -1494,38 +1494,14 @@ function Invoke-FlmConsoleSession {
     return @{ Ok = ($code -eq 0); Reason = $doc.error; Json = $doc; Path = $outJson; Screen = $screen; ExitCode = $code }
 }
 
-# Does a reply read like English a person wrote, rather than fluent-looking
-# garbage?
+# Test-LooksLikeEnglish now lives in acceptance_guards.ps1, dot-sourced above.
 #
-# This is deliberately weak, and says so. The first thing a wrong weight map or
-# a stale KV row produces is text that passes every mechanical check, which is
-# why the brief requires the verbatim completion in the document for a HUMAN to
-# judge. What this function can do is catch the failures that are not subtle --
-# empty output, no letters, one token repeated forever -- so they are caught
-# without waiting for a reader.
-function Test-LooksLikeEnglish {
-    param([string]$Text, [string]$MustContain = '')
-    $t = ($Text -replace '\[FLM\][^\n]*', '') -replace '\s+', ' '
-    $t = $t.Trim()
-    $reasons = @()
-    if ($t.Length -lt 8) { $reasons += 'reply is shorter than 8 characters' }
-    $words = @($t -split '\s+' | Where-Object { $_ -match '[A-Za-z]' })
-    if ($words.Count -lt 3) { $reasons += 'fewer than three alphabetic words' }
-    if ($words.Count -ge 6) {
-        $distinct = @($words | ForEach-Object { $_.ToLowerInvariant() } | Sort-Object -Unique)
-        if ($distinct.Count -lt [math]::Ceiling($words.Count / 4)) {
-            $reasons += 'the reply is dominated by a repeated token'
-        }
-    }
-    $letters = ([regex]::Matches($t, '[A-Za-z]')).Count
-    if ($t.Length -gt 0 -and ($letters / [double]$t.Length) -lt 0.5) {
-        $reasons += 'fewer than half the characters are letters'
-    }
-    if ($MustContain -and ($t -notmatch [regex]::Escape($MustContain))) {
-        $reasons += "the reply does not contain the expected substring '$MustContain'"
-    }
-    return @{ Ok = ($reasons.Count -eq 0); Reasons = $reasons; Normalized = $t }
-}
+# It moved there so verify_acceptance_guards.ps1 can drive the SHIPPED function
+# against the two real degenerate replies in the committed record, instead of
+# restating the rule and agreeing with itself. It also gained a segment scan:
+# the whole-text letter ratio here could not see a reply that produced hundreds
+# of clean tokens and then collapsed into high-entropy punctuation, because the
+# clean part carried the average.
 
 # ---------------------------------------------------------------------------
 # Step 6: first real load

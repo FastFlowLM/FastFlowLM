@@ -346,3 +346,84 @@ The non-interleaved rows are shown for provenance and excluded from the verdict,
 The timing table above is published here and is NOT shipped in the model package: Section 10.7 carries the threshold and no cost table.
 
 <!-- END phi4-continuation-threshold -->
+
+## Task 15 re-measurement, 2026-09-03
+
+Hand-written, outside both generated blocks above, because the generator
+**refused to render this run** — see below. The measurements are committed at
+`phi4_aie4_baseline_task15_rerun.json` beside this file; every figure here comes
+from that artifact.
+
+Same machine, same corelib DLL (`a523b238…`), same model (`d6f503a9…`), on the
+final Task 15 tree. It is a second independent measurement of the run rendered
+above, taken a day later.
+
+| | 2026-09-02 (rendered above) | 2026-09-03 (this run) |
+| --- | ---: | ---: |
+| model load, total | 13,043.9 ms | 12,796.3 ms |
+| — helper interrogation share | 86.5% | 86.4% |
+| cold TTFT (19 tokens) | 3,169.4 ms | 3,061.7 ms |
+| warm TTFT | 49.1 ms | 53.5 ms |
+| prefill 4096 rows | 1,746.3 ms / 2,345.5 tok/s | 1,748.6 ms / 2,342.5 tok/s |
+| decode @128 | 20.04 tok/s | 24.89 tok/s |
+| decode @512 | 21.16 tok/s | 24.38 tok/s |
+| decode @2048 | 20.68 tok/s | 22.68 tok/s |
+| peak host private | 7.67 GiB | 7.68 GiB |
+| V bytes / time | 44.60 GiB / 3,315.9 ms | 44.60 GiB / 3,081.7 ms |
+
+Load, prefill, memory and V-scatter reproduce within a few percent. Decode is
+**20–24% faster** in this run — within the 1.8x instability this document
+already warns about, and in the direction that costs nobody anything.
+
+### Two things this run changes
+
+**1. The published crossover bracket's LOWER edge is not as stable as the table
+above says.** That table concluded *"the lower edge has been 12 at history
+2048; 4 at history 512 every time"*, over two interleaved runs. This is a third
+interleaved run, and at history 2048 its lower edge is **24**, not 12. At
+history 512 it is 4 again.
+
+| interleaved run | history 512 | history 2048 |
+| --- | ---: | ---: |
+| 2026-09-02T15:34:01Z | `(4, 8]` | `(12, 16]` |
+| 2026-09-02T16:32:18Z | `(4, 12]` | `(12, 64]` |
+| **2026-09-03T08:20:08Z** | **`(4, 12]`** | **`(24, 32]`** |
+
+So the stability claim holds at history 512 on three runs and **does not hold**
+at history 2048. Read the generated statement above with that correction.
+
+**2. On this run alone, Section 10.7's rule would select 8, not the shipped 4.**
+Run against this measurement the calibrator selects `8` and then **refuses to
+write anything**, with the diagnostic *"the constant exceeds what an interleaved
+run can support: 2026-09-02T15:34:01Z bounds it at 4, 2026-09-02T16:32:18Z bounds
+it at 4, and the selected threshold is 8 … A release-fixed constant that one
+recorded run contradicts is a decision for a human, not for this script."*
+
+**The shipped constant is unchanged at 4, and it is not wrong.** 4 is inside the
+append-wins region on this run too — append still wins at suffixes 1, 2 and 4 at
+both histories. What this run says is that 4 concedes more than it needed to
+*here*, which is the deliberate trade the selection already documents: the lower
+edge is the safe edge. Raising it is a recalibration decision for a human with
+more than three runs, not something to change in a regression pass. The
+calibrator's `--check` against the committed baseline passed in the same suite
+run.
+
+### Why this is not rendered into the block above
+
+`report_phi4_corelib_baseline.py` **failed**, so the generated baseline document
+is still the 2026-09-02 run. Its reason is a `DETERM-3` pooling rule, not a
+measurement problem:
+
+> the records do not all share one FastFlow harness SHA-256 (3 distinct values),
+> so they do not describe one binary and cannot be pooled into a baseline
+
+The committed determinism records now span three harness binaries, because each
+task rebuilt the test executable, and `DETERM-3` forbids pooling records from
+different binaries into one baseline. That is the rule working as designed, and
+it means **the determinism baseline cannot be re-rendered from the accumulated
+record set at all** — every future rebuild adds a fourth. Resolving it needs a
+decision about how the window is scoped, which belongs with the deferred
+determinism work rather than here. Two further problems the same report lists
+are pre-existing and already described in the block above: 66 records carry no
+harness hash and are excluded, and two `append` runs in the window recorded a
+`DETERM-2` gate failure.

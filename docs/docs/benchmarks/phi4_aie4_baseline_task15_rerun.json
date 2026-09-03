@@ -1,0 +1,2752 @@
+{
+  "continuation": {
+    "crossover": {
+      "2048": {
+        "append_wins_up_to": 24,
+        "bracket_is_tight": false,
+        "crossover_bracket": [
+          24,
+          32
+        ],
+        "decisions": [
+          {
+            "append_p50_ns": 54186600,
+            "decided": true,
+            "drift_across_point_ns": 14727200,
+            "gap_ns": 1095917300,
+            "gap_over_uncertainty": 74.41450513335869,
+            "reprefill_p50_ns": 1150103900,
+            "suffix": 1,
+            "uncertainty_ns": 14727200,
+            "winner": "append",
+            "within_route_spread_ns": 6312200
+          },
+          {
+            "append_p50_ns": 101509100,
+            "decided": true,
+            "drift_across_point_ns": 7753000,
+            "gap_ns": 1049675000,
+            "gap_over_uncertainty": 135.38952663485102,
+            "reprefill_p50_ns": 1151184100,
+            "suffix": 2,
+            "uncertainty_ns": 7753000,
+            "winner": "append",
+            "within_route_spread_ns": 4850800
+          },
+          {
+            "append_p50_ns": 188131600,
+            "decided": true,
+            "drift_across_point_ns": 2862800,
+            "gap_ns": 951793600,
+            "gap_over_uncertainty": 70.99334665990393,
+            "reprefill_p50_ns": 1139925200,
+            "suffix": 4,
+            "uncertainty_ns": 13406800,
+            "winner": "append",
+            "within_route_spread_ns": 13406800
+          },
+          {
+            "append_p50_ns": 358749200,
+            "decided": true,
+            "drift_across_point_ns": 10875400,
+            "gap_ns": 786213200,
+            "gap_over_uncertainty": 72.29280762086911,
+            "reprefill_p50_ns": 1144962400,
+            "suffix": 8,
+            "uncertainty_ns": 10875400,
+            "winner": "append",
+            "within_route_spread_ns": 7067700
+          },
+          {
+            "append_p50_ns": 526311300,
+            "decided": true,
+            "drift_across_point_ns": 12969900,
+            "gap_ns": 619408700,
+            "gap_over_uncertainty": 47.75739982575039,
+            "reprefill_p50_ns": 1145720000,
+            "suffix": 12,
+            "uncertainty_ns": 12969900,
+            "winner": "append",
+            "within_route_spread_ns": 7981700
+          },
+          {
+            "append_p50_ns": 682441800,
+            "decided": true,
+            "drift_across_point_ns": 21189100,
+            "gap_ns": 463406600,
+            "gap_over_uncertainty": 21.870046391776903,
+            "reprefill_p50_ns": 1145848400,
+            "suffix": 16,
+            "uncertainty_ns": 21189100,
+            "winner": "append",
+            "within_route_spread_ns": 7494400
+          },
+          {
+            "append_p50_ns": 1005245900,
+            "decided": true,
+            "drift_across_point_ns": 4466100,
+            "gap_ns": 137566100,
+            "gap_over_uncertainty": 30.802288350014553,
+            "reprefill_p50_ns": 1142812000,
+            "suffix": 24,
+            "uncertainty_ns": 4466100,
+            "winner": "append",
+            "within_route_spread_ns": 4076300
+          },
+          {
+            "append_p50_ns": 1334130600,
+            "decided": true,
+            "drift_across_point_ns": 8662700,
+            "gap_ns": 187255800,
+            "gap_over_uncertainty": 21.616332090456787,
+            "reprefill_p50_ns": 1146874800,
+            "suffix": 32,
+            "uncertainty_ns": 8662700,
+            "winner": "reprefill",
+            "within_route_spread_ns": 7236200
+          },
+          {
+            "append_p50_ns": 2626684000,
+            "decided": true,
+            "drift_across_point_ns": 3021300,
+            "gap_ns": 1481928900,
+            "gap_over_uncertainty": 478.13412273343226,
+            "reprefill_p50_ns": 1144755100,
+            "suffix": 64,
+            "uncertainty_ns": 3099400,
+            "winner": "reprefill",
+            "within_route_spread_ns": 3099400
+          },
+          {
+            "append_p50_ns": 5250833000,
+            "decided": true,
+            "drift_across_point_ns": 10395800,
+            "gap_ns": 4113118000,
+            "gap_over_uncertainty": 69.8038996061021,
+            "reprefill_p50_ns": 1137715000,
+            "suffix": 128,
+            "uncertainty_ns": 58923900,
+            "winner": "reprefill",
+            "within_route_spread_ns": 58923900
+          },
+          {
+            "append_p50_ns": 10422542000,
+            "decided": true,
+            "drift_across_point_ns": 43839700,
+            "gap_ns": 9271308000,
+            "gap_over_uncertainty": 211.48201287873778,
+            "reprefill_p50_ns": 1151234000,
+            "suffix": 256,
+            "uncertainty_ns": 43839700,
+            "winner": "reprefill",
+            "within_route_spread_ns": 41616700
+          }
+        ],
+        "reprefill_wins_from": 32
+      },
+      "512": {
+        "append_wins_up_to": 4,
+        "bracket_is_tight": false,
+        "crossover_bracket": [
+          4,
+          12
+        ],
+        "decisions": [
+          {
+            "append_p50_ns": 47494700,
+            "decided": true,
+            "drift_across_point_ns": 5187200,
+            "gap_ns": 321650000,
+            "gap_over_uncertainty": 62.008405305367056,
+            "reprefill_p50_ns": 369144700,
+            "suffix": 1,
+            "uncertainty_ns": 5187200,
+            "winner": "append",
+            "within_route_spread_ns": 4650700
+          },
+          {
+            "append_p50_ns": 87972900,
+            "decided": true,
+            "drift_across_point_ns": 15405900,
+            "gap_ns": 251701700,
+            "gap_over_uncertainty": 16.338006867498816,
+            "reprefill_p50_ns": 339674600,
+            "suffix": 2,
+            "uncertainty_ns": 15405900,
+            "winner": "append",
+            "within_route_spread_ns": 15405900
+          },
+          {
+            "append_p50_ns": 176413400,
+            "decided": true,
+            "drift_across_point_ns": 6845300,
+            "gap_ns": 168902300,
+            "gap_over_uncertainty": 24.6741998159321,
+            "reprefill_p50_ns": 345315700,
+            "suffix": 4,
+            "uncertainty_ns": 6845300,
+            "winner": "append",
+            "within_route_spread_ns": 4959900
+          },
+          {
+            "append_p50_ns": 332451000,
+            "decided": false,
+            "drift_across_point_ns": 19683000,
+            "gap_ns": 405800,
+            "gap_over_uncertainty": 0.020616775897983032,
+            "reprefill_p50_ns": 332045200,
+            "suffix": 8,
+            "uncertainty_ns": 19683000,
+            "winner": "undecided",
+            "within_route_spread_ns": 19683000
+          },
+          {
+            "append_p50_ns": 488070800,
+            "decided": true,
+            "drift_across_point_ns": 25897000,
+            "gap_ns": 149873400,
+            "gap_over_uncertainty": 5.787288102869058,
+            "reprefill_p50_ns": 338197400,
+            "suffix": 12,
+            "uncertainty_ns": 25897000,
+            "winner": "reprefill",
+            "within_route_spread_ns": 3003100
+          },
+          {
+            "append_p50_ns": 635415700,
+            "decided": true,
+            "drift_across_point_ns": 6566300,
+            "gap_ns": 295946200,
+            "gap_over_uncertainty": 45.07046586357614,
+            "reprefill_p50_ns": 339469500,
+            "suffix": 16,
+            "uncertainty_ns": 6566300,
+            "winner": "reprefill",
+            "within_route_spread_ns": 6272100
+          },
+          {
+            "append_p50_ns": 937499500,
+            "decided": true,
+            "drift_across_point_ns": 46321700,
+            "gap_ns": 599895100,
+            "gap_over_uncertainty": 12.950627891463396,
+            "reprefill_p50_ns": 337604400,
+            "suffix": 24,
+            "uncertainty_ns": 46321700,
+            "winner": "reprefill",
+            "within_route_spread_ns": 11693000
+          },
+          {
+            "append_p50_ns": 1240925900,
+            "decided": true,
+            "drift_across_point_ns": 5983300,
+            "gap_ns": 907233700,
+            "gap_over_uncertainty": 139.4885762607626,
+            "reprefill_p50_ns": 333692200,
+            "suffix": 32,
+            "uncertainty_ns": 6504000,
+            "winner": "reprefill",
+            "within_route_spread_ns": 6504000
+          },
+          {
+            "append_p50_ns": 2445478800,
+            "decided": true,
+            "drift_across_point_ns": 208800,
+            "gap_ns": 2104393200,
+            "gap_over_uncertainty": 16.97173411616691,
+            "reprefill_p50_ns": 341085600,
+            "suffix": 64,
+            "uncertainty_ns": 123994000,
+            "winner": "reprefill",
+            "within_route_spread_ns": 123994000
+          },
+          {
+            "append_p50_ns": 4869900200,
+            "decided": true,
+            "drift_across_point_ns": 6813400,
+            "gap_ns": 4533190400,
+            "gap_over_uncertainty": 541.8911481680713,
+            "reprefill_p50_ns": 336709800,
+            "suffix": 128,
+            "uncertainty_ns": 8365500,
+            "winner": "reprefill",
+            "within_route_spread_ns": 8365500
+          },
+          {
+            "append_p50_ns": 9705341200,
+            "decided": true,
+            "drift_across_point_ns": 78552900,
+            "gap_ns": 9363677900,
+            "gap_over_uncertainty": 119.20219240791874,
+            "reprefill_p50_ns": 341663300,
+            "suffix": 256,
+            "uncertainty_ns": 78552900,
+            "winner": "reprefill",
+            "within_route_spread_ns": 58381500
+          }
+        ],
+        "reprefill_wins_from": 12
+      }
+    },
+    "decision_rule": "append and re-prefill samples are INTERLEAVED, so a machine regime shift moves both routes together; a point is decided only when the gap between the two routes' p50 exceeds BOTH the larger within-point p50-to-p95 spread AND the larger drift between a route's first and last sample at that point. The reported figure is a BRACKET, not a threshold.",
+    "histories": [
+      512,
+      2048
+    ],
+    "points": [
+      {
+        "count": 5,
+        "drift_ns": 5187200,
+        "history_rows": 512,
+        "interleaved_with_reprefill": true,
+        "max_ns": 52145400,
+        "mean_ns": 48283480,
+        "min_ns": 46111000,
+        "model_steps": 1,
+        "p50_ns": 47494700,
+        "p95_ns": 52145400,
+        "route": "append",
+        "sample_starts_ns": [
+          874399800,
+          1514884900,
+          2151859400,
+          2796651000,
+          3442642300
+        ],
+        "samples_ns": [
+          46958200,
+          47494700,
+          46111000,
+          48708100,
+          52145400
+        ],
+        "suffix": 1,
+        "tokens_per_second": 21.05498087154988
+      },
+      {
+        "count": 5,
+        "drift_ns": 3010400,
+        "history_rows": 512,
+        "interleaved_with_append": true,
+        "max_ns": 370404300,
+        "mean_ns": 367779280,
+        "min_ns": 363435300,
+        "model_steps": 1,
+        "p50_ns": 369144700,
+        "p95_ns": 370404300,
+        "route": "reprefill",
+        "sample_starts_ns": [
+          921362100,
+          1562383500,
+          2197974200,
+          2845363100,
+          3494791400
+        ],
+        "samples_ns": [
+          363435300,
+          370404300,
+          369144700,
+          369466400,
+          366445700
+        ],
+        "suffix": 1,
+        "tokens_per_second": 1389.6989446144019
+      },
+      {
+        "count": 5,
+        "drift_ns": 8283600,
+        "history_rows": 512,
+        "interleaved_with_reprefill": true,
+        "max_ns": 93613400,
+        "mean_ns": 88346020,
+        "min_ns": 82725200,
+        "model_steps": 2,
+        "p50_ns": 87972900,
+        "p95_ns": 93613400,
+        "route": "append",
+        "sample_starts_ns": [
+          4739268500,
+          5323650700,
+          5981663100,
+          6543002000,
+          7068293900
+        ],
+        "samples_ns": [
+          92851100,
+          82725200,
+          93613400,
+          87972900,
+          84567500
+        ],
+        "suffix": 2,
+        "tokens_per_second": 22.734273850242516
+      },
+      {
+        "count": 5,
+        "drift_ns": 15405900,
+        "history_rows": 512,
+        "interleaved_with_append": true,
+        "max_ns": 355080500,
+        "mean_ns": 327527680,
+        "min_ns": 286969000,
+        "model_steps": 1,
+        "p50_ns": 339674600,
+        "p95_ns": 355080500,
+        "route": "reprefill",
+        "sample_starts_ns": [
+          4832122800,
+          5406379400,
+          6075282800,
+          6630978100,
+          7152864600
+        ],
+        "samples_ns": [
+          339674600,
+          344375600,
+          311538700,
+          286969000,
+          355080500
+        ],
+        "suffix": 2,
+        "tokens_per_second": 1513.2129396781509
+      },
+      {
+        "count": 5,
+        "drift_ns": 6845300,
+        "history_rows": 512,
+        "interleaved_with_reprefill": true,
+        "max_ns": 179430300,
+        "mean_ns": 173938720,
+        "min_ns": 167535400,
+        "model_steps": 4,
+        "p50_ns": 176413400,
+        "p95_ns": 179430300,
+        "route": "append",
+        "sample_starts_ns": [
+          8366448800,
+          9079496600,
+          9822372900,
+          10558958300,
+          11295804500
+        ],
+        "samples_ns": [
+          169734600,
+          167535400,
+          176413400,
+          179430300,
+          176579900
+        ],
+        "suffix": 4,
+        "tokens_per_second": 22.674014558984748
+      },
+      {
+        "count": 5,
+        "drift_ns": 4238500,
+        "history_rows": 512,
+        "interleaved_with_append": true,
+        "max_ns": 350275600,
+        "mean_ns": 343126220,
+        "min_ns": 329344800,
+        "model_steps": 1,
+        "p50_ns": 345315700,
+        "p95_ns": 350275600,
+        "route": "reprefill",
+        "sample_starts_ns": [
+          8536186500,
+          9247035500,
+          9998789500,
+          10738392100,
+          11472388000
+        ],
+        "samples_ns": [
+          350275600,
+          344657900,
+          329344800,
+          345315700,
+          346037100
+        ],
+        "suffix": 4,
+        "tokens_per_second": 1494.2847950440712
+      },
+      {
+        "count": 5,
+        "drift_ns": 13652200,
+        "history_rows": 512,
+        "interleaved_with_reprefill": true,
+        "max_ns": 337574700,
+        "mean_ns": 330979020,
+        "min_ns": 322933800,
+        "model_steps": 8,
+        "p50_ns": 332451000,
+        "p95_ns": 337574700,
+        "route": "append",
+        "sample_starts_ns": [
+          12927017900,
+          13830470600,
+          14723625700,
+          15617666600,
+          16517808800
+        ],
+        "samples_ns": [
+          322933800,
+          325349600,
+          332451000,
+          337574700,
+          336586000
+        ],
+        "suffix": 8,
+        "tokens_per_second": 24.063696604913204
+      },
+      {
+        "count": 5,
+        "drift_ns": 19683000,
+        "history_rows": 512,
+        "interleaved_with_append": true,
+        "max_ns": 351728200,
+        "mean_ns": 336659200,
+        "min_ns": 330853200,
+        "model_steps": 1,
+        "p50_ns": 332045200,
+        "p95_ns": 351728200,
+        "route": "reprefill",
+        "sample_starts_ns": [
+          13249955200,
+          14155825900,
+          15056080000,
+          15955244900,
+          16854398300
+        ],
+        "samples_ns": [
+          351728200,
+          336915700,
+          330853200,
+          331753700,
+          332045200
+        ],
+        "suffix": 8,
+        "tokens_per_second": 1566.0518507721238
+      },
+      {
+        "count": 5,
+        "drift_ns": 12005000,
+        "history_rows": 512,
+        "interleaved_with_reprefill": true,
+        "max_ns": 491069200,
+        "mean_ns": 486239480,
+        "min_ns": 479064200,
+        "model_steps": 12,
+        "p50_ns": 488070800,
+        "p95_ns": 491069200,
+        "route": "append",
+        "sample_starts_ns": [
+          18456083400,
+          19493277400,
+          20549928700,
+          21607800000,
+          22661499000
+        ],
+        "samples_ns": [
+          491069200,
+          488963800,
+          488070800,
+          484029400,
+          479064200
+        ],
+        "suffix": 12,
+        "tokens_per_second": 24.58659686258633
+      },
+      {
+        "count": 5,
+        "drift_ns": 25897000,
+        "history_rows": 512,
+        "interleaved_with_append": true,
+        "max_ns": 341200500,
+        "mean_ns": 334208800,
+        "min_ns": 315303500,
+        "model_steps": 1,
+        "p50_ns": 338197400,
+        "p95_ns": 341200500,
+        "route": "reprefill",
+        "sample_starts_ns": [
+          18947156000,
+          19982245500,
+          21038004400,
+          22091834300,
+          23140565900
+        ],
+        "samples_ns": [
+          315303500,
+          337053600,
+          338197400,
+          339289000,
+          341200500
+        ],
+        "suffix": 12,
+        "tokens_per_second": 1549.3909769856302
+      },
+      {
+        "count": 5,
+        "drift_ns": 6566300,
+        "history_rows": 512,
+        "interleaved_with_reprefill": true,
+        "max_ns": 640189900,
+        "mean_ns": 634781760,
+        "min_ns": 628849400,
+        "model_steps": 16,
+        "p50_ns": 635415700,
+        "p95_ns": 640189900,
+        "route": "append",
+        "sample_starts_ns": [
+          24914520300,
+          26086763400,
+          27259155400,
+          28463051000,
+          29671963200
+        ],
+        "samples_ns": [
+          628849400,
+          630867900,
+          640189900,
+          638585900,
+          635415700
+        ],
+        "suffix": 16,
+        "tokens_per_second": 25.18036617603248
+      },
+      {
+        "count": 5,
+        "drift_ns": 2450600,
+        "history_rows": 512,
+        "interleaved_with_append": true,
+        "max_ns": 345741600,
+        "mean_ns": 339630820,
+        "min_ns": 334029800,
+        "model_steps": 1,
+        "p50_ns": 339469500,
+        "p95_ns": 345741600,
+        "route": "reprefill",
+        "sample_starts_ns": [
+          25543372900,
+          26717634100,
+          27899348800,
+          29101639800,
+          30307382100
+        ],
+        "samples_ns": [
+          343291000,
+          334029800,
+          335622200,
+          339469500,
+          345741600
+        ],
+        "suffix": 16,
+        "tokens_per_second": 1555.368008024285
+      },
+      {
+        "count": 5,
+        "drift_ns": 2504500,
+        "history_rows": 512,
+        "interleaved_with_reprefill": true,
+        "max_ns": 940552500,
+        "mean_ns": 935120120,
+        "min_ns": 927234400,
+        "model_steps": 24,
+        "p50_ns": 937499500,
+        "p95_ns": 940552500,
+        "route": "append",
+        "sample_starts_ns": [
+          32365088800,
+          33744455600,
+          35161964300,
+          36657489600,
+          38119898300
+        ],
+        "samples_ns": [
+          940552500,
+          927234400,
+          932266200,
+          937499500,
+          938048000
+        ],
+        "suffix": 24,
+        "tokens_per_second": 25.600013653340614
+      },
+      {
+        "count": 5,
+        "drift_ns": 46321700,
+        "history_rows": 512,
+        "interleaved_with_append": true,
+        "max_ns": 349297400,
+        "mean_ns": 328000880,
+        "min_ns": 291596800,
+        "model_steps": 1,
+        "p50_ns": 337604400,
+        "p95_ns": 349297400,
+        "route": "reprefill",
+        "sample_starts_ns": [
+          33305644100,
+          34671693900,
+          36094233800,
+          37594993000,
+          39057948900
+        ],
+        "samples_ns": [
+          291596800,
+          323587300,
+          337604400,
+          349297400,
+          337918500
+        ],
+        "suffix": 24,
+        "tokens_per_second": 1587.6570329059693
+      },
+      {
+        "count": 5,
+        "drift_ns": 5787100,
+        "history_rows": 512,
+        "interleaved_with_reprefill": true,
+        "max_ns": 1247429900,
+        "mean_ns": 1233310780,
+        "min_ns": 1202757200,
+        "model_steps": 32,
+        "p50_ns": 1240925900,
+        "p95_ns": 1247429900,
+        "route": "append",
+        "sample_starts_ns": [
+          41389810500,
+          43149830700,
+          44942913700,
+          46714103800,
+          48409220600
+        ],
+        "samples_ns": [
+          1247429900,
+          1240925900,
+          1202757200,
+          1233798100,
+          1241642800
+        ],
+        "suffix": 32,
+        "tokens_per_second": 25.78719647966087
+      },
+      {
+        "count": 5,
+        "drift_ns": 5983300,
+        "history_rows": 512,
+        "interleaved_with_append": true,
+        "max_ns": 339675500,
+        "mean_ns": 330512200,
+        "min_ns": 318492300,
+        "model_steps": 1,
+        "p50_ns": 333692200,
+        "p95_ns": 339675500,
+        "route": "reprefill",
+        "sample_starts_ns": [
+          42637243400,
+          44390759300,
+          46145674400,
+          47947908200,
+          49650866600
+        ],
+        "samples_ns": [
+          333692200,
+          323793900,
+          336907100,
+          318492300,
+          339675500
+        ],
+        "suffix": 32,
+        "tokens_per_second": 1630.2448783639534
+      },
+      {
+        "count": 5,
+        "drift_ns": 16600,
+        "history_rows": 512,
+        "interleaved_with_reprefill": true,
+        "max_ns": 2569472800,
+        "mean_ns": 2469938720,
+        "min_ns": 2440591700,
+        "model_steps": 64,
+        "p50_ns": 2445478800,
+        "p95_ns": 2569472800,
+        "route": "append",
+        "sample_starts_ns": [
+          53180031400,
+          56151875700,
+          59115343200,
+          62089632800,
+          65132379900
+        ],
+        "samples_ns": [
+          2445478800,
+          2440591700,
+          2448688100,
+          2569472800,
+          2445462200
+        ],
+        "suffix": 64,
+        "tokens_per_second": 26.170744150388874
+      },
+      {
+        "count": 5,
+        "drift_ns": 208800,
+        "history_rows": 512,
+        "interleaved_with_append": true,
+        "max_ns": 345984600,
+        "mean_ns": 334382520,
+        "min_ns": 309997200,
+        "model_steps": 1,
+        "p50_ns": 341085600,
+        "p95_ns": 345984600,
+        "route": "reprefill",
+        "sample_starts_ns": [
+          55625513200,
+          58592471200,
+          61564036600,
+          64659109300,
+          67577845500
+        ],
+        "samples_ns": [
+          341294400,
+          345984600,
+          333550800,
+          309997200,
+          341085600
+        ],
+        "suffix": 64,
+        "tokens_per_second": 1688.7256454098326
+      },
+      {
+        "count": 5,
+        "drift_ns": 6813400,
+        "history_rows": 512,
+        "interleaved_with_reprefill": true,
+        "max_ns": 4872885600,
+        "mean_ns": 4864915500,
+        "min_ns": 4843804800,
+        "model_steps": 128,
+        "p50_ns": 4869900200,
+        "p95_ns": 4872885600,
+        "route": "append",
+        "sample_starts_ns": [
+          73503065100,
+          78933219200,
+          84312750100,
+          89749529300,
+          95160559500
+        ],
+        "samples_ns": [
+          4866072200,
+          4843804800,
+          4869900200,
+          4871914700,
+          4872885600
+        ],
+        "suffix": 128,
+        "tokens_per_second": 26.28390618764631
+      },
+      {
+        "count": 5,
+        "drift_ns": 3484200,
+        "history_rows": 512,
+        "interleaved_with_append": true,
+        "max_ns": 345075300,
+        "mean_ns": 335841040,
+        "min_ns": 322752500,
+        "model_steps": 1,
+        "p50_ns": 336709800,
+        "p95_ns": 345075300,
+        "route": "reprefill",
+        "sample_starts_ns": [
+          78369141300,
+          83777027600,
+          89182653700,
+          94621447600,
+          100033448200
+        ],
+        "samples_ns": [
+          335591700,
+          322752500,
+          336709800,
+          345075300,
+          339075900
+        ],
+        "suffix": 128,
+        "tokens_per_second": 1900.7465776166896
+      },
+      {
+        "count": 5,
+        "drift_ns": 78552900,
+        "history_rows": 512,
+        "interleaved_with_reprefill": true,
+        "max_ns": 9763722700,
+        "mean_ns": 9713494040,
+        "min_ns": 9685169800,
+        "model_steps": 256,
+        "p50_ns": 9705341200,
+        "p95_ns": 9763722700,
+        "route": "append",
+        "sample_starts_ns": [
+          110871434700,
+          121098560900,
+          131366250300,
+          141654144000,
+          151922659400
+        ],
+        "samples_ns": [
+          9685169800,
+          9705341200,
+          9716124700,
+          9697111800,
+          9763722700
+        ],
+        "suffix": 256,
+        "tokens_per_second": 26.377228242114764
+      },
+      {
+        "count": 5,
+        "drift_ns": 933900,
+        "history_rows": 512,
+        "interleaved_with_append": true,
+        "max_ns": 346643300,
+        "mean_ns": 341678520,
+        "min_ns": 333679900,
+        "model_steps": 1,
+        "p50_ns": 341663300,
+        "p95_ns": 346643300,
+        "route": "reprefill",
+        "sample_starts_ns": [
+          120556613100,
+          130803905700,
+          141082378600,
+          151351258900,
+          161686387500
+        ],
+        "samples_ns": [
+          345709400,
+          333679900,
+          341663300,
+          340696700,
+          346643300
+        ],
+        "suffix": 256,
+        "tokens_per_second": 2247.8270273687576
+      },
+      {
+        "count": 5,
+        "drift_ns": 1744000,
+        "history_rows": 2048,
+        "interleaved_with_reprefill": true,
+        "max_ns": 55042000,
+        "mean_ns": 54063880,
+        "min_ns": 53298000,
+        "model_steps": 1,
+        "p50_ns": 54186600,
+        "p95_ns": 55042000,
+        "route": "append",
+        "sample_starts_ns": [
+          164699147700,
+          166631054900,
+          168586312000,
+          170535544800,
+          172491967200
+        ],
+        "samples_ns": [
+          55042000,
+          54400800,
+          53392000,
+          54186600,
+          53298000
+        ],
+        "suffix": 1,
+        "tokens_per_second": 18.454747114600288
+      },
+      {
+        "count": 5,
+        "drift_ns": 14727200,
+        "history_rows": 2048,
+        "interleaved_with_append": true,
+        "max_ns": 1156416100,
+        "mean_ns": 1149205220,
+        "min_ns": 1141688900,
+        "model_steps": 1,
+        "p50_ns": 1150103900,
+        "p95_ns": 1156416100,
+        "route": "reprefill",
+        "sample_starts_ns": [
+          164754201100,
+          166685465200,
+          168639713800,
+          170589740900,
+          172545274500
+        ],
+        "samples_ns": [
+          1141688900,
+          1153156400,
+          1144660800,
+          1150103900,
+          1156416100
+        ],
+        "suffix": 1,
+        "tokens_per_second": 1781.5781687202348
+      },
+      {
+        "count": 5,
+        "drift_ns": 7753000,
+        "history_rows": 2048,
+        "interleaved_with_reprefill": true,
+        "max_ns": 106148700,
+        "mean_ns": 101751920,
+        "min_ns": 98395700,
+        "model_steps": 2,
+        "p50_ns": 101509100,
+        "p95_ns": 106148700,
+        "route": "append",
+        "sample_starts_ns": [
+          176456467700,
+          178466011600,
+          180448568700,
+          182456978400,
+          184442383200
+        ],
+        "samples_ns": [
+          106148700,
+          101841300,
+          101509100,
+          100864800,
+          98395700
+        ],
+        "suffix": 2,
+        "tokens_per_second": 19.70266705152543
+      },
+      {
+        "count": 5,
+        "drift_ns": 5332400,
+        "history_rows": 2048,
+        "interleaved_with_append": true,
+        "max_ns": 1156034900,
+        "mean_ns": 1148028160,
+        "min_ns": 1133600600,
+        "model_steps": 1,
+        "p50_ns": 1151184100,
+        "p95_ns": 1156034900,
+        "route": "reprefill",
+        "sample_starts_ns": [
+          176562625600,
+          178567861100,
+          180550087100,
+          182557852500,
+          184540789700
+        ],
+        "samples_ns": [
+          1151184100,
+          1133600600,
+          1156034900,
+          1153469500,
+          1145851700
+        ],
+        "suffix": 2,
+        "tokens_per_second": 1780.775116682032
+      },
+      {
+        "count": 5,
+        "drift_ns": 1919700,
+        "history_rows": 2048,
+        "interleaved_with_reprefill": true,
+        "max_ns": 191686400,
+        "mean_ns": 188900640,
+        "min_ns": 186211900,
+        "model_steps": 4,
+        "p50_ns": 188131600,
+        "p95_ns": 191686400,
+        "route": "append",
+        "sample_starts_ns": [
+          188515227000,
+          190586735300,
+          192688763300,
+          194774822000,
+          196846170000
+        ],
+        "samples_ns": [
+          188131600,
+          188081300,
+          190392000,
+          191686400,
+          186211900
+        ],
+        "suffix": 4,
+        "tokens_per_second": 21.26171254589872
+      },
+      {
+        "count": 5,
+        "drift_ns": 2862800,
+        "history_rows": 2048,
+        "interleaved_with_append": true,
+        "max_ns": 1153332000,
+        "mean_ns": 1143525840,
+        "min_ns": 1134584700,
+        "model_steps": 1,
+        "p50_ns": 1139925200,
+        "p95_ns": 1153332000,
+        "route": "reprefill",
+        "sample_starts_ns": [
+          188703365600,
+          190774829200,
+          192879162400,
+          194966516500,
+          197032387800
+        ],
+        "samples_ns": [
+          1137447500,
+          1153332000,
+          1152339800,
+          1139925200,
+          1134584700
+        ],
+        "suffix": 4,
+        "tokens_per_second": 1800.1181130130292
+      },
+      {
+        "count": 5,
+        "drift_ns": 2340000,
+        "history_rows": 2048,
+        "interleaved_with_reprefill": true,
+        "max_ns": 365816900,
+        "mean_ns": 359201760,
+        "min_ns": 349629600,
+        "model_steps": 8,
+        "p50_ns": 358749200,
+        "p95_ns": 365816900,
+        "route": "append",
+        "sample_starts_ns": [
+          201112399400,
+          203353684900,
+          205601362600,
+          207858182900,
+          210111847600
+        ],
+        "samples_ns": [
+          356409200,
+          365403900,
+          365816900,
+          349629600,
+          358749200
+        ],
+        "suffix": 8,
+        "tokens_per_second": 22.299701295501148
+      },
+      {
+        "count": 5,
+        "drift_ns": 10875400,
+        "history_rows": 2048,
+        "interleaved_with_append": true,
+        "max_ns": 1149178300,
+        "mean_ns": 1142669980,
+        "min_ns": 1134684500,
+        "model_steps": 1,
+        "p50_ns": 1144962400,
+        "p95_ns": 1149178300,
+        "route": "reprefill",
+        "sample_starts_ns": [
+          201468819700,
+          203719095600,
+          205967187000,
+          208207819200,
+          210470603600
+        ],
+        "samples_ns": [
+          1145559900,
+          1144962400,
+          1138964800,
+          1149178300,
+          1134684500
+        ],
+        "suffix": 8,
+        "tokens_per_second": 1795.6921554803896
+      },
+      {
+        "count": 5,
+        "drift_ns": 4346500,
+        "history_rows": 2048,
+        "interleaved_with_reprefill": true,
+        "max_ns": 530657800,
+        "mean_ns": 522967960,
+        "min_ns": 515031700,
+        "model_steps": 12,
+        "p50_ns": 526311300,
+        "p95_ns": 530657800,
+        "route": "append",
+        "sample_starts_ns": [
+          214759913400,
+          217161232700,
+          219577159600,
+          221996819200,
+          224405770600
+        ],
+        "samples_ns": [
+          526311300,
+          515031700,
+          526581200,
+          516257800,
+          530657800
+        ],
+        "suffix": 12,
+        "tokens_per_second": 22.800194485658963
+      },
+      {
+        "count": 5,
+        "drift_ns": 12969900,
+        "history_rows": 2048,
+        "interleaved_with_append": true,
+        "max_ns": 1153701700,
+        "mean_ns": 1142761560,
+        "min_ns": 1132750100,
+        "model_steps": 1,
+        "p50_ns": 1145720000,
+        "p95_ns": 1153701700,
+        "route": "reprefill",
+        "sample_starts_ns": [
+          215286230500,
+          217676270800,
+          220103747400,
+          222513088200,
+          224936435300
+        ],
+        "samples_ns": [
+          1132750100,
+          1153701700,
+          1146357900,
+          1135278100,
+          1145720000
+        ],
+        "suffix": 12,
+        "tokens_per_second": 1797.9960199699751
+      },
+      {
+        "count": 5,
+        "drift_ns": 12181700,
+        "history_rows": 2048,
+        "interleaved_with_reprefill": true,
+        "max_ns": 688456400,
+        "mean_ns": 682527480,
+        "min_ns": 676274700,
+        "model_steps": 16,
+        "p50_ns": 682441800,
+        "p95_ns": 688456400,
+        "route": "append",
+        "sample_starts_ns": [
+          229385515100,
+          231972745000,
+          234553236400,
+          237142510700,
+          239719230300
+        ],
+        "samples_ns": [
+          688456400,
+          677239000,
+          682441800,
+          688225500,
+          676274700
+        ],
+        "suffix": 16,
+        "tokens_per_second": 23.44522272815059
+      },
+      {
+        "count": 5,
+        "drift_ns": 21189100,
+        "history_rows": 2048,
+        "interleaved_with_append": true,
+        "max_ns": 1153342800,
+        "mean_ns": 1143575320,
+        "min_ns": 1129102500,
+        "model_steps": 1,
+        "p50_ns": 1145848400,
+        "p95_ns": 1153342800,
+        "route": "reprefill",
+        "sample_starts_ns": [
+          230073977400,
+          232649990400,
+          235235684100,
+          237830742500,
+          240395511100
+        ],
+        "samples_ns": [
+          1150291600,
+          1139291300,
+          1153342800,
+          1145848400,
+          1129102500
+        ],
+        "suffix": 16,
+        "tokens_per_second": 1801.285405643539
+      },
+      {
+        "count": 5,
+        "drift_ns": 4466100,
+        "history_rows": 2048,
+        "interleaved_with_reprefill": true,
+        "max_ns": 1009322200,
+        "mean_ns": 1006268580,
+        "min_ns": 1004856100,
+        "model_steps": 24,
+        "p50_ns": 1005245900,
+        "p95_ns": 1009322200,
+        "route": "append",
+        "sample_starts_ns": [
+          245151664400,
+          248040075700,
+          250931531100,
+          253831434300,
+          256726138500
+        ],
+        "samples_ns": [
+          1004856100,
+          1006983500,
+          1005245900,
+          1004935200,
+          1009322200
+        ],
+        "suffix": 24,
+        "tokens_per_second": 23.874755420539394
+      },
+      {
+        "count": 5,
+        "drift_ns": 1162200,
+        "history_rows": 2048,
+        "interleaved_with_append": true,
+        "max_ns": 1144080200,
+        "mean_ns": 1141783140,
+        "min_ns": 1136656900,
+        "model_steps": 1,
+        "p50_ns": 1142812000,
+        "p95_ns": 1144080200,
+        "route": "reprefill",
+        "sample_starts_ns": [
+          246156526100,
+          249047064800,
+          251936784300,
+          254836375900,
+          257735467100
+        ],
+        "samples_ns": [
+          1143974200,
+          1136656900,
+          1144080200,
+          1141392400,
+          1142812000
+        ],
+        "suffix": 24,
+        "tokens_per_second": 1813.071616328845
+      },
+      {
+        "count": 5,
+        "drift_ns": 8662700,
+        "history_rows": 2048,
+        "interleaved_with_reprefill": true,
+        "max_ns": 1341366800,
+        "mean_ns": 1335350500,
+        "min_ns": 1328218200,
+        "model_steps": 32,
+        "p50_ns": 1334130600,
+        "p95_ns": 1341366800,
+        "route": "append",
+        "sample_starts_ns": [
+          262825184900,
+          266049302800,
+          269264805000,
+          272481786700,
+          275707918500
+        ],
+        "samples_ns": [
+          1332704100,
+          1328218200,
+          1334130600,
+          1340332800,
+          1341366800
+        ],
+        "suffix": 32,
+        "tokens_per_second": 23.985657775932882
+      },
+      {
+        "count": 5,
+        "drift_ns": 1797000,
+        "history_rows": 2048,
+        "interleaved_with_append": true,
+        "max_ns": 1148671800,
+        "mean_ns": 1142226140,
+        "min_ns": 1128325700,
+        "model_steps": 1,
+        "p50_ns": 1146874800,
+        "p95_ns": 1148671800,
+        "route": "reprefill",
+        "sample_starts_ns": [
+          264157895100,
+          267377527200,
+          270598941600,
+          273822126100,
+          277049296400
+        ],
+        "samples_ns": [
+          1146874800,
+          1147579800,
+          1139678600,
+          1128325700,
+          1148671800
+        ],
+        "suffix": 32,
+        "tokens_per_second": 1813.6242944739913
+      },
+      {
+        "count": 5,
+        "drift_ns": 1975500,
+        "history_rows": 2048,
+        "interleaved_with_reprefill": true,
+        "max_ns": 2629783400,
+        "mean_ns": 2626382720,
+        "min_ns": 2623542200,
+        "model_steps": 64,
+        "p50_ns": 2626684000,
+        "p95_ns": 2629783400,
+        "route": "append",
+        "sample_starts_ns": [
+          283454503100,
+          287965724600,
+          292482660400,
+          296994362200,
+          301509005200
+        ],
+        "samples_ns": [
+          2629783400,
+          2626684000,
+          2624096100,
+          2623542200,
+          2627807900
+        ],
+        "suffix": 64,
+        "tokens_per_second": 24.365321447117353
+      },
+      {
+        "count": 5,
+        "drift_ns": 3021300,
+        "history_rows": 2048,
+        "interleaved_with_append": true,
+        "max_ns": 1147200400,
+        "mean_ns": 1142970560,
+        "min_ns": 1137190900,
+        "model_steps": 1,
+        "p50_ns": 1144755100,
+        "p95_ns": 1147200400,
+        "route": "reprefill",
+        "sample_starts_ns": [
+          286084291300,
+          290592414700,
+          295106761600,
+          299617910700,
+          304136818600
+        ],
+        "samples_ns": [
+          1140212200,
+          1147200400,
+          1145494200,
+          1144755100,
+          1137190900
+        ],
+        "suffix": 64,
+        "tokens_per_second": 1844.936091571027
+      },
+      {
+        "count": 5,
+        "drift_ns": 10395800,
+        "history_rows": 2048,
+        "interleaved_with_reprefill": true,
+        "max_ns": 5309756900,
+        "mean_ns": 5259730300,
+        "min_ns": 5229183500,
+        "model_steps": 128,
+        "p50_ns": 5250833000,
+        "p95_ns": 5309756900,
+        "route": "append",
+        "sample_starts_ns": [
+          313132122900,
+          320249198400,
+          327393270400,
+          334534069300,
+          341728765500
+        ],
+        "samples_ns": [
+          5240437200,
+          5229183500,
+          5268440900,
+          5309756900,
+          5250833000
+        ],
+        "suffix": 128,
+        "tokens_per_second": 24.377084550203747
+      },
+      {
+        "count": 5,
+        "drift_ns": 6572000,
+        "history_rows": 2048,
+        "interleaved_with_append": true,
+        "max_ns": 1158051200,
+        "mean_ns": 1142271860,
+        "min_ns": 1131143000,
+        "model_steps": 1,
+        "p50_ns": 1137715000,
+        "p95_ns": 1158051200,
+        "route": "reprefill",
+        "sample_starts_ns": [
+          318372566900,
+          325478387900,
+          332661717700,
+          339843832700,
+          346979605900
+        ],
+        "samples_ns": [
+          1131143000,
+          1158051200,
+          1134775600,
+          1149674500,
+          1137715000
+        ],
+        "suffix": 128,
+        "tokens_per_second": 1912.6055295043134
+      },
+      {
+        "count": 5,
+        "drift_ns": 43839700,
+        "history_rows": 2048,
+        "interleaved_with_reprefill": true,
+        "max_ns": 10464158700,
+        "mean_ns": 10430809900,
+        "min_ns": 10395248700,
+        "model_steps": 256,
+        "p50_ns": 10422542000,
+        "p95_ns": 10464158700,
+        "route": "append",
+        "sample_starts_ns": [
+          361157130800,
+          373495461400,
+          385840615400,
+          398132869700,
+          410448302200
+        ],
+        "samples_ns": [
+          10420319000,
+          10451781100,
+          10395248700,
+          10422542000,
+          10464158700
+        ],
+        "suffix": 256,
+        "tokens_per_second": 24.562146163575065
+      },
+      {
+        "count": 5,
+        "drift_ns": 2036000,
+        "history_rows": 2048,
+        "interleaved_with_append": true,
+        "max_ns": 1153774300,
+        "mean_ns": 1149306600,
+        "min_ns": 1141291200,
+        "model_steps": 1,
+        "p50_ns": 1151234000,
+        "p95_ns": 1153774300,
+        "route": "reprefill",
+        "sample_starts_ns": [
+          371577456100,
+          383947249400,
+          396235871000,
+          408555418300,
+          420912467500
+        ],
+        "samples_ns": [
+          1153270000,
+          1153774300,
+          1146963500,
+          1141291200,
+          1151234000
+        ],
+        "suffix": 256,
+        "tokens_per_second": 2001.3307459647647
+      }
+    ],
+    "prefix_monotonic": true,
+    "samples_interleaved": true,
+    "suffixes": [
+      1,
+      2,
+      4,
+      8,
+      12,
+      16,
+      24,
+      32,
+      64,
+      128,
+      256
+    ],
+    "warm_samples_per_point": 5
+  },
+  "decode": {
+    "runs": [
+      {
+        "count": 128,
+        "device_tensor_creates_after_warmup": 0,
+        "dispatches_per_pass": 193,
+        "live_corelib_object_delta": 0,
+        "max_ns": 47158800,
+        "mean_ns": 38897679,
+        "min_ns": 34419000,
+        "p50_ns": 39111100,
+        "p95_ns": 42440200,
+        "samples_ns": [
+          47158800,
+          46726700,
+          42972000,
+          41550100,
+          39905600,
+          39479300,
+          39177000,
+          39717100,
+          39546000,
+          39252500,
+          39254000,
+          39619700,
+          38354500,
+          43033300,
+          38992500,
+          38801900,
+          38846100,
+          40525300,
+          35406000,
+          35201800,
+          35037300,
+          35467000,
+          37789500,
+          36922600,
+          38382000,
+          38179700,
+          43501300,
+          39616800,
+          38548500,
+          39111100,
+          38855900,
+          38942100,
+          39360600,
+          37650600,
+          37444900,
+          39146400,
+          39312100,
+          39441300,
+          38091500,
+          41880300,
+          39616900,
+          39465500,
+          40785600,
+          37512800,
+          36790900,
+          37904400,
+          35314000,
+          35419000,
+          37917600,
+          39146500,
+          39523700,
+          39383900,
+          41845400,
+          38665900,
+          39284400,
+          39176900,
+          39244100,
+          39173100,
+          39260800,
+          39323500,
+          39036000,
+          39121200,
+          39197000,
+          39217300,
+          43094900,
+          39607400,
+          39339600,
+          40865800,
+          35677600,
+          34419000,
+          36596400,
+          36170000,
+          36697200,
+          38214700,
+          36796200,
+          38292900,
+          39216600,
+          38651700,
+          38188600,
+          39408600,
+          38972400,
+          38982700,
+          39173600,
+          39175400,
+          39359500,
+          38605600,
+          38714500,
+          39276300,
+          39351900,
+          39691800,
+          42440200,
+          39337000,
+          39173700,
+          40684400,
+          35511300,
+          36800900,
+          39602900,
+          35039400,
+          35679800,
+          37952900,
+          39062000,
+          37619600,
+          37828700,
+          40371500,
+          40000400,
+          39431700,
+          38854700,
+          39016500,
+          39787000,
+          37627900,
+          38276800,
+          37581300,
+          37588700,
+          38035200,
+          38942600,
+          39387000,
+          41912300,
+          39397400,
+          40073800,
+          36606400,
+          36576300,
+          38528200,
+          37310300,
+          37991100,
+          38659800,
+          38882700,
+          39217800,
+          42043800
+        ],
+        "start_context": 128,
+        "synchronizes_per_pass": 129,
+        "tokens": 128,
+        "tokens_per_second": 24.88807850539933,
+        "total_ns": 5143024600,
+        "v_bytes": 16777216,
+        "v_scatter_ns": 4816100,
+        "weight_creates_after_warmup": 0
+      },
+      {
+        "count": 128,
+        "device_tensor_creates_after_warmup": 0,
+        "dispatches_per_pass": 193,
+        "live_corelib_object_delta": 0,
+        "max_ns": 45563100,
+        "mean_ns": 39646328,
+        "min_ns": 35276400,
+        "p50_ns": 39821200,
+        "p95_ns": 42537100,
+        "samples_ns": [
+          45563100,
+          43718400,
+          42537100,
+          41509700,
+          40482300,
+          41507200,
+          41064800,
+          40778300,
+          41192400,
+          44201600,
+          41377500,
+          35899100,
+          37392800,
+          38999900,
+          38844800,
+          36407400,
+          37823000,
+          39006400,
+          39501400,
+          38633200,
+          39806900,
+          42522400,
+          40194000,
+          40238600,
+          40439800,
+          38920100,
+          40130100,
+          39912800,
+          40197700,
+          40135600,
+          39114600,
+          40169800,
+          39855600,
+          40539500,
+          42725700,
+          35757100,
+          36006000,
+          37076500,
+          36784100,
+          36547300,
+          40163200,
+          38201900,
+          39878300,
+          39821200,
+          38816200,
+          40212900,
+          40690700,
+          39158900,
+          39542600,
+          40392100,
+          40915700,
+          40148500,
+          39343800,
+          40251200,
+          39191600,
+          40263000,
+          40336900,
+          39464100,
+          40811300,
+          43286400,
+          35276400,
+          36460400,
+          36611000,
+          42204500,
+          38850800,
+          39574300,
+          39285900,
+          38385000,
+          39983600,
+          39862900,
+          39102100,
+          39648900,
+          39060600,
+          40104100,
+          40230000,
+          40130300,
+          39299800,
+          39935200,
+          38979100,
+          40119400,
+          40925900,
+          39168100,
+          40448900,
+          40894000,
+          42775800,
+          35452300,
+          36221500,
+          37837900,
+          39479300,
+          39288700,
+          40336000,
+          38565700,
+          39782300,
+          39296900,
+          40093400,
+          40412800,
+          41167600,
+          38522700,
+          40309400,
+          40626700,
+          39472700,
+          39726000,
+          38880000,
+          38830500,
+          39853900,
+          39150700,
+          40807500,
+          39995300,
+          40394000,
+          39401000,
+          36022800,
+          37882500,
+          39558600,
+          41313300,
+          38470900,
+          38572300,
+          38588400,
+          39879100,
+          39014400,
+          40109800,
+          41046400,
+          40837100,
+          39167700,
+          40503500,
+          41170100,
+          39730800,
+          38089200,
+          39146300
+        ],
+        "start_context": 512,
+        "synchronizes_per_pass": 129,
+        "tokens": 128,
+        "tokens_per_second": 24.383626219736133,
+        "total_ns": 5249424300,
+        "v_bytes": 16777216,
+        "v_scatter_ns": 4792300,
+        "weight_creates_after_warmup": 0
+      },
+      {
+        "count": 128,
+        "device_tensor_creates_after_warmup": 0,
+        "dispatches_per_pass": 193,
+        "live_corelib_object_delta": 0,
+        "max_ns": 54702100,
+        "mean_ns": 42710065,
+        "min_ns": 37277200,
+        "p50_ns": 42876100,
+        "p95_ns": 45753600,
+        "samples_ns": [
+          54702100,
+          49840600,
+          46295700,
+          45668900,
+          44009600,
+          42854700,
+          43532700,
+          43459500,
+          43092000,
+          45173500,
+          40554200,
+          38261900,
+          43154100,
+          42363200,
+          42872700,
+          43963100,
+          41225400,
+          41440500,
+          42727000,
+          42817400,
+          42560800,
+          41925600,
+          42087300,
+          44966500,
+          43219700,
+          43530100,
+          42578500,
+          43051100,
+          42979300,
+          42954900,
+          43484000,
+          42170500,
+          45272800,
+          39279400,
+          39478000,
+          43232500,
+          43176000,
+          42746400,
+          42855300,
+          42606900,
+          42590700,
+          42287000,
+          42870100,
+          42974400,
+          43272400,
+          43139900,
+          43199700,
+          41838100,
+          43359100,
+          43758600,
+          43117400,
+          42149200,
+          42832900,
+          43036900,
+          42414000,
+          44341300,
+          38918000,
+          38214100,
+          43359600,
+          41972800,
+          43255500,
+          44823400,
+          41412900,
+          42536000,
+          42677900,
+          43212300,
+          44287900,
+          42762000,
+          41683800,
+          41568200,
+          45753600,
+          43238500,
+          43374500,
+          43037600,
+          42948600,
+          42927600,
+          43002300,
+          43098000,
+          42458900,
+          37964600,
+          41862700,
+          41184300,
+          42556700,
+          42509600,
+          42115600,
+          42803200,
+          41871500,
+          43038100,
+          43280600,
+          42769800,
+          43820700,
+          43875700,
+          42251100,
+          46442200,
+          42353200,
+          43254500,
+          42876100,
+          42968800,
+          43158100,
+          43070500,
+          44964600,
+          38563600,
+          37703900,
+          38472800,
+          38882500,
+          43461900,
+          42757600,
+          45836000,
+          41780700,
+          41570900,
+          42568700,
+          42673300,
+          43033400,
+          43756100,
+          42472500,
+          43249100,
+          46365700,
+          44127800,
+          43070000,
+          43338600,
+          42218600,
+          43112300,
+          44760600,
+          40828800,
+          38304700,
+          37277200,
+          37568300,
+          38270500
+        ],
+        "start_context": 2048,
+        "synchronizes_per_pass": 129,
+        "tokens": 128,
+        "tokens_per_second": 22.677497392176384,
+        "total_ns": 5644361800,
+        "v_bytes": 16777216,
+        "v_scatter_ns": 5193900,
+        "weight_creates_after_warmup": 0
+      }
+    ]
+  },
+  "identity": {
+    "corelib_compiled_version": "0.1.0",
+    "corelib_dll_path": "C:\\Users\\chiz\\work\\aie4-runtime-mirrored\\ryzenai_corelib.dll",
+    "corelib_dll_sha256": "a523b23837c9bea3b06f8f8ae74e1e8292092eb73aaa93791022c448b865ecdb",
+    "corelib_source_revision": "e5258d29b5cb979d4a538994409b90ceff6e6e7a-untracked-only",
+    "corelib_version": "0.1.0",
+    "cpu_sku": "AMD Eng Sample: 100-000001713-33_N",
+    "dynamic_dispatch_version": "9999.0.0.0 (C:\\Users\\chiz\\work\\aie4-runtime-mirrored\\dyn_dispatch_core.dll)",
+    "fastflow_revision": "a975b6394223f322532e158286894894a9c6715a-dirty",
+    "machine": "xcomedusad-43",
+    "model_dir": "C:\\Users\\chiz\\work\\FastFlowLM\\src\\build\\phi4-hardware\\model",
+    "model_files": {
+      "corelib_phi4_manifest.json": {
+        "sha256": "09cee6efafc513a2048c89e75b40d92d096144f0eed3b2459c138032b69dc045"
+      },
+      "model.onnx": {
+        "sha256": "e80b9d83e018784eda6263d09fa2ab7729087722c6073c72123366f2dbec4529",
+        "size": 378325
+      },
+      "model.onnx.data": {
+        "sha256": "c48fd647beb02866e68d6dd1fbc05809a439283501d8abb7f6d6b950f92b7b60",
+        "size": 3248488448
+      }
+    },
+    "model_hash_verified": true,
+    "model_hash_verify_ns": 21683222400,
+    "model_sha256": "d6f503a9ea142c8b6320313d6ae341a88049b1b8ef01e641b2313fe42cdc7309",
+    "npu_driver_version": "32.0.20214.4161",
+    "npu_sku": "AMD XDNA(TM) NPU",
+    "prompt_id": "ff6a21dcdcff126f",
+    "prompt_source": "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\phi4_tokens.json",
+    "ryzen_mm_version": "0.10.2.0 (C:\\Users\\chiz\\work\\aie4-runtime-mirrored\\ryzen_mm.dll)",
+    "utc": "2026-09-03T08:20:08Z",
+    "xrt_version": "32.0.20214.4161 (C:\\Windows\\SYSTEM32\\xrt_coreutil.dll)"
+  },
+  "memory": {
+    "device_tensor_creates_after_warmup": 0,
+    "device_tensors_created_after_load": 0,
+    "device_tensors_created_total": 76,
+    "embedding_bytes": 1229193216,
+    "kv_bytes": 536870912,
+    "live_corelib_object_delta": 0,
+    "live_corelib_objects_after_load": 238,
+    "live_corelib_objects_now": 238,
+    "mapped_source_bytes": 3248488448,
+    "packed_weight_bytes": 2098112512,
+    "peak_private_bytes": 8244830208,
+    "peak_working_set_bytes": 10308235264,
+    "private_bytes_at_end": 8079872000,
+    "private_bytes_at_warmup": 8106467328,
+    "private_bytes_before_load": 13795328,
+    "private_bytes_delta": -26595328,
+    "private_bytes_growth": 0,
+    "private_bytes_slope_exact": -305775.1614973263,
+    "private_bytes_slope_per_token": -305775,
+    "samples": [
+      {
+        "private_bytes": 8106467328,
+        "working_set_bytes": 10169724928
+      },
+      {
+        "private_bytes": 8106467328,
+        "working_set_bytes": 10169733120
+      },
+      {
+        "private_bytes": 8106467328,
+        "working_set_bytes": 10169733120
+      },
+      {
+        "private_bytes": 8106467328,
+        "working_set_bytes": 10169733120
+      },
+      {
+        "private_bytes": 8106467328,
+        "working_set_bytes": 10169733120
+      },
+      {
+        "private_bytes": 8106467328,
+        "working_set_bytes": 10169733120
+      },
+      {
+        "private_bytes": 8106467328,
+        "working_set_bytes": 10169733120
+      },
+      {
+        "private_bytes": 8106467328,
+        "working_set_bytes": 10169733120
+      },
+      {
+        "private_bytes": 8106467328,
+        "working_set_bytes": 10169733120
+      },
+      {
+        "private_bytes": 8106467328,
+        "working_set_bytes": 10169733120
+      },
+      {
+        "private_bytes": 8106467328,
+        "working_set_bytes": 10169741312
+      },
+      {
+        "private_bytes": 8106467328,
+        "working_set_bytes": 10169741312
+      },
+      {
+        "private_bytes": 8106467328,
+        "working_set_bytes": 10169749504
+      },
+      {
+        "private_bytes": 8106467328,
+        "working_set_bytes": 10169749504
+      },
+      {
+        "private_bytes": 8106467328,
+        "working_set_bytes": 10169749504
+      },
+      {
+        "private_bytes": 8106467328,
+        "working_set_bytes": 10169749504
+      },
+      {
+        "private_bytes": 8106467328,
+        "working_set_bytes": 10169749504
+      },
+      {
+        "private_bytes": 8106467328,
+        "working_set_bytes": 10169749504
+      },
+      {
+        "private_bytes": 8106467328,
+        "working_set_bytes": 10169749504
+      },
+      {
+        "private_bytes": 8106467328,
+        "working_set_bytes": 10169749504
+      },
+      {
+        "private_bytes": 8106467328,
+        "working_set_bytes": 10169757696
+      },
+      {
+        "private_bytes": 8106467328,
+        "working_set_bytes": 10169765888
+      },
+      {
+        "private_bytes": 8106467328,
+        "working_set_bytes": 10169765888
+      },
+      {
+        "private_bytes": 8106467328,
+        "working_set_bytes": 10169774080
+      },
+      {
+        "private_bytes": 8106467328,
+        "working_set_bytes": 10169774080
+      },
+      {
+        "private_bytes": 8106467328,
+        "working_set_bytes": 10169774080
+      },
+      {
+        "private_bytes": 8106467328,
+        "working_set_bytes": 10169774080
+      },
+      {
+        "private_bytes": 8106467328,
+        "working_set_bytes": 10169774080
+      },
+      {
+        "private_bytes": 8106467328,
+        "working_set_bytes": 10169782272
+      },
+      {
+        "private_bytes": 8106467328,
+        "working_set_bytes": 10169790464
+      },
+      {
+        "private_bytes": 8106467328,
+        "working_set_bytes": 10169798656
+      },
+      {
+        "private_bytes": 8106467328,
+        "working_set_bytes": 10169798656
+      },
+      {
+        "private_bytes": 8106467328,
+        "working_set_bytes": 10169798656
+      },
+      {
+        "private_bytes": 8106467328,
+        "working_set_bytes": 10169798656
+      },
+      {
+        "private_bytes": 8106467328,
+        "working_set_bytes": 10169798656
+      },
+      {
+        "private_bytes": 8106467328,
+        "working_set_bytes": 10169806848
+      },
+      {
+        "private_bytes": 8106467328,
+        "working_set_bytes": 10169815040
+      },
+      {
+        "private_bytes": 8106467328,
+        "working_set_bytes": 10169815040
+      },
+      {
+        "private_bytes": 8106467328,
+        "working_set_bytes": 10169815040
+      },
+      {
+        "private_bytes": 8106467328,
+        "working_set_bytes": 10169815040
+      },
+      {
+        "private_bytes": 8106467328,
+        "working_set_bytes": 10169815040
+      },
+      {
+        "private_bytes": 8106467328,
+        "working_set_bytes": 10169823232
+      },
+      {
+        "private_bytes": 8106467328,
+        "working_set_bytes": 10169823232
+      },
+      {
+        "private_bytes": 8106467328,
+        "working_set_bytes": 10169823232
+      },
+      {
+        "private_bytes": 8106467328,
+        "working_set_bytes": 10169831424
+      },
+      {
+        "private_bytes": 8106467328,
+        "working_set_bytes": 10169839616
+      },
+      {
+        "private_bytes": 8106467328,
+        "working_set_bytes": 10169839616
+      },
+      {
+        "private_bytes": 8106467328,
+        "working_set_bytes": 10169839616
+      },
+      {
+        "private_bytes": 8106467328,
+        "working_set_bytes": 10169839616
+      },
+      {
+        "private_bytes": 8106467328,
+        "working_set_bytes": 10169839616
+      },
+      {
+        "private_bytes": 8106467328,
+        "working_set_bytes": 10169847808
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153406464
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153414656
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153414656
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153422848
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153431040
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153431040
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153431040
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153431040
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153431040
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153439232
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153447424
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153455616
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153455616
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153455616
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153455616
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153463808
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153463808
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153463808
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153463808
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153463808
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153463808
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153472000
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153472000
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153472000
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153472000
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153472000
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153472000
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153472000
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153472000
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153472000
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153472000
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153472000
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153480192
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153480192
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153480192
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153480192
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153480192
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153480192
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153480192
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153480192
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153480192
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153480192
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153480192
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153480192
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153480192
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153488384
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153496576
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153496576
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153496576
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153496576
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153496576
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153504768
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153504768
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153504768
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153504768
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153504768
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153512960
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153521152
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153521152
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153529344
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153537536
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153537536
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153545728
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153545728
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153545728
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153545728
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153545728
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153545728
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153545728
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153545728
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153545728
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153545728
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153545728
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153553920
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153553920
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153553920
+      },
+      {
+        "private_bytes": 8079872000,
+        "working_set_bytes": 10153553920
+      }
+    ],
+    "scratch_bytes": 169751296,
+    "slope_first_token": 9,
+    "source": "decode@2048",
+    "tokens": 128,
+    "weight_creates_after_warmup": 0,
+    "weight_objects_created_after_load": 0,
+    "weight_objects_created_total": 161
+  },
+  "model_load": {
+    "benchmark_second_shape_plan_ns": 10879859400,
+    "device_setup_ns": 120906300,
+    "device_tensors": 76,
+    "engine_reported_total_ns": 12796321600,
+    "manifest_map_ns": 6402100,
+    "mapped_source_bytes": 3248488448,
+    "packed_weight_bytes": 2098112512,
+    "shape_plan_ns": 11061580200,
+    "shape_plan_share": 0.8644332890998437,
+    "total_ns": 12796337600,
+    "unaccounted_ns": 11402200,
+    "weight_objects": 161,
+    "weight_pack_ns": 1596046800
+  },
+  "prefill": {
+    "points": [
+      {
+        "ns": 129379800,
+        "padded_rows": 1,
+        "rows": 1,
+        "tokens_per_second": 7.729181835186019,
+        "top1_id": 4576,
+        "v_bytes": 131072,
+        "v_scatter_ns": 73800
+      },
+      {
+        "ns": 50950500,
+        "padded_rows": 64,
+        "rows": 2,
+        "tokens_per_second": 39.25378553694272,
+        "top1_id": 477,
+        "v_bytes": 262144,
+        "v_scatter_ns": 72900
+      },
+      {
+        "ns": 70033100,
+        "padded_rows": 128,
+        "rows": 65,
+        "tokens_per_second": 928.1325544635322,
+        "top1_id": 9822,
+        "v_bytes": 8519680,
+        "v_scatter_ns": 264700
+      },
+      {
+        "ns": 86177800,
+        "padded_rows": 256,
+        "rows": 129,
+        "tokens_per_second": 1496.9052354550709,
+        "top1_id": 6864,
+        "v_bytes": 16908288,
+        "v_scatter_ns": 536200
+      },
+      {
+        "ns": 132412500,
+        "padded_rows": 512,
+        "rows": 257,
+        "tokens_per_second": 1940.904370810913,
+        "top1_id": 200020,
+        "v_bytes": 33685504,
+        "v_scatter_ns": 1237100
+      },
+      {
+        "ns": 301184000,
+        "padded_rows": 1024,
+        "rows": 513,
+        "tokens_per_second": 1703.277730556736,
+        "top1_id": 200019,
+        "v_bytes": 67239936,
+        "v_scatter_ns": 2810900
+      },
+      {
+        "ns": 740182800,
+        "padded_rows": 2048,
+        "rows": 1025,
+        "tokens_per_second": 1384.7930538240014,
+        "top1_id": 374,
+        "v_bytes": 134348800,
+        "v_scatter_ns": 8227100
+      },
+      {
+        "ns": 1158438500,
+        "padded_rows": 3072,
+        "rows": 2049,
+        "tokens_per_second": 1768.760275146242,
+        "top1_id": 44643,
+        "v_bytes": 268566528,
+        "v_scatter_ns": 17153100
+      },
+      {
+        "ns": 1698833300,
+        "padded_rows": 4096,
+        "rows": 3073,
+        "tokens_per_second": 1808.8884883525652,
+        "top1_id": 791,
+        "v_bytes": 402784256,
+        "v_scatter_ns": 25868300
+      },
+      {
+        "ns": 1748592400,
+        "padded_rows": 4096,
+        "rows": 4096,
+        "tokens_per_second": 2342.4555659740945,
+        "top1_id": 350,
+        "v_bytes": 536870912,
+        "v_scatter_ns": 35805600
+      }
+    ]
+  },
+  "ttft": {
+    "cold_ns": 3061714800,
+    "cold_top1_id": 1715,
+    "prompt_id": "ff6a21dcdcff126f",
+    "prompt_source": "C:\\Users\\chiz\\work\\FastFlowLM\\src\\test\\phi4_corelib_aie4\\phi4_tokens.json",
+    "prompt_token_count": 19,
+    "row_extent": 64,
+    "stream_rebuilt_for_warm": false,
+    "warm_ns": 53531800,
+    "warm_top1_id": 1715
+  },
+  "v_scatter": {
+    "bytes": 47889514496,
+    "counts_are_measured": true,
+    "design_18_5_expected_reads": 32,
+    "design_18_5_expected_writes": 256,
+    "model_steps": 7227,
+    "nanoseconds": 3081716100,
+    "reads_per_model_step": 32,
+    "reads_per_model_step_source": "v_read_calls / (synchronize_count / 129)",
+    "total_read_calls": 231264,
+    "total_write_calls": 1850112,
+    "writes_per_model_step": 256
+  }
+}

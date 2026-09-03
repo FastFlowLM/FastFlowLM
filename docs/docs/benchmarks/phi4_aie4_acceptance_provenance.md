@@ -74,6 +74,69 @@ the record it sits beside. The changes were:
   because nothing in a run can make that sentence true — the correction belongs
   in design Section 17.
 
+## Correction: the record describes Step 8's two failed turns wrongly
+
+Task 15, 2026-09-03. The record gives **both** long turns of Step 8 the single
+reason *"the reply is dominated by a repeated token"*. That is accurate for one
+of them and wrong for the other, and the wrong wording hides the more alarming
+of the two signatures. The record is not edited — it is the account of a run
+that happened — so the correction lives here, and the classifier that produced
+the wrong wording has been fixed for future runs.
+
+**What the record's own data shows**, re-derived from
+`steps[id=8].evidence.per_turn[*].reply_verbatim`:
+
+| | turn 1 | turn 3 |
+| --- | --- | --- |
+| prompt length | 13 tokens | 9 tokens |
+| reply, whitespace-normalised | 32,004 chars | 23,802 chars |
+| ended on | *Max length reached* — no stop token | *Max length reached* — no stop token |
+| phrase-repetition loop | **yes**, early | **yes**, early |
+| letters, whole reply | 74.2% | 71.6% |
+| collapse into high-entropy ASCII | **no** — alphabetic throughout | **yes**, from character 10,200 of 23,802 |
+
+So the 4,095-token totals on those turns are **output alone**; the inputs were
+tiny. Reaching the cap is a consequence of a reply that will not stop, not a
+cause of one.
+
+**Repetition is common to both turns** and is ordinary greedy-decode
+degeneration. What is not ordinary is the second event, and it happened once:
+turn 3 produced language for about 85% of its reply, then broke **mid-word**
+and emitted uniform punctuation and digits to the cap. A language model losing
+the thread repeats, drifts or confabulates; it does not emit random
+punctuation.
+
+Note that `reply_verbatim` holds each reply **twice** — the streamed copy, then
+the `[FLM]  Model RAW Output:` echo — so any character offset must be read
+within one copy. The figures above are over the normalised whole field, which
+is why the offset reads 10,200 of 23,802.
+
+**Why the harness missed it.** `Test-LooksLikeEnglish` had a whole-text check —
+*fewer than half the characters are letters* — and turn 3 is 71.6% letters,
+because the clean 85% carries the average. The function now also scans in
+200-character windows and reports the first window that stops being language
+after an earlier one that was, with its offset. Driven over this record it
+fires on turn 3 at character 10,200 (22% letters) and is silent on turns 1, 2
+and 4; `verify_acceptance_guards.ps1` asserts exactly that, against the shipped
+text rather than a fixture.
+
+**Hypothesis, attributed and unverified.** From the project owner's direct
+experience of this class of hardware: this signature has come up several times
+before and has essentially always turned out to be the attention kernel. A
+future investigation should start at `ryzenai_corelib_flat_mha_bf16` — bound at
+`src/common/corelib/corelib_api.cpp:195-197`, called at
+`src/common/corelib/phi4_corelib_aie4.cpp:941`, with `active_phase = "flat_mha"`
+set at `:1107`. **Nothing in this project's testing confirms that**, and it must
+not be read as a finding of ours.
+
+**Status: known open issue, accepted, not investigated on this branch.**
+Functionality and accuracy are accepted as sound for normal-length output — the
+five single-turn probes in the same run were all coherent and correct in about
+ten seconds each. This is a **single observation** in a ~4,000-token
+generation: whether it reproduces, whether the onset is stable near that point
+(roughly decode step 3,470), and whether it depends on the prompt are all
+unknown, and no run has been made to find out.
+
 ## What that means for the record
 
 **The record is not stale and has not been edited.** It is an accurate,

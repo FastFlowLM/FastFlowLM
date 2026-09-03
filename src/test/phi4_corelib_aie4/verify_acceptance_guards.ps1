@@ -240,6 +240,87 @@ $firstProblem = Test-RenderedDocument -Record $record -RenderedTurnPrompts $good
 Check 'does not throw on steps that simply have no turns' $true ($null -eq $firstProblem) $(if ($firstProblem) { $firstProblem } else { 'all 20 steps considered' })
 
 # ---------------------------------------------------------------------------
+# Test-LooksLikeEnglish, driven against the two real degenerate replies
+# ---------------------------------------------------------------------------
+#
+# The committed record contains two long turns that failed, and the harness
+# gave BOTH of them the single reason "the reply is dominated by a repeated
+# token". That is accurate for one of them and wrong for the other, and the
+# wrong wording hid the more alarming signature: a reply that produced hundreds
+# of clean tokens and then broke mid-word into high-entropy punctuation. The
+# whole-text letter ratio could not see it, because the clean 85% carried the
+# average above the floor.
+#
+# These cases run the SHIPPED function over the SHIPPED text. No fixture
+# restates what the collapse looks like -- if it did, it would agree with the
+# implementation by construction, which is the failure this verifier exists to
+# avoid.
+Write-Output ''
+Write-Output '=== Test-LooksLikeEnglish against the recorded replies ==='
+
+$replies = @{}
+foreach ($turn in $perTurn) {
+    $replies[[string](Get-Field $turn 'index')] = [string](Get-Field $turn 'reply_verbatim')
+}
+Write-Output ("  turns with a recorded reply: " + (($replies.Keys | Sort-Object) -join ', '))
+Check 'all four recorded turns have reply text to judge' $true `
+    (@($replies.Values | Where-Object { $_.Length -gt 0 }).Count -eq 4)
+
+$collapse = 'stops producing language'
+$verdicts = @{}
+foreach ($index in @('1', '2', '3', '4')) {
+    $verdicts[$index] = Test-LooksLikeEnglish -Text $replies[$index]
+}
+foreach ($index in @('1', '2', '3', '4')) {
+    Write-Output ("  turn {0}: {1}" -f $index,
+        $(if ($verdicts[$index].Ok) { 'reads as English' }
+          else { ($verdicts[$index].Reasons) -join '; ' }))
+}
+
+# The turn that collapsed, and only that turn.
+Check 'the collapse is reported for the turn that collapsed' $true `
+    (@($verdicts['3'].Reasons | Where-Object { $_ -match $collapse }).Count -eq 1)
+Check 'and NOT for the turn that only repeated itself' $true `
+    (@($verdicts['1'].Reasons | Where-Object { $_ -match $collapse }).Count -eq 0)
+Check 'and not for either healthy short reply' $true `
+    ((@($verdicts['2'].Reasons | Where-Object { $_ -match $collapse }).Count -eq 0) -and
+     (@($verdicts['4'].Reasons | Where-Object { $_ -match $collapse }).Count -eq 0))
+
+# Repetition is common to BOTH long turns. The record's original wording was
+# not wrong about that -- it was incomplete.
+Check 'repetition is still reported for both long turns' $true `
+    ((@($verdicts['1'].Reasons | Where-Object { $_ -match 'repeated token or phrase' }).Count -eq 1) -and
+     (@($verdicts['3'].Reasons | Where-Object { $_ -match 'repeated token or phrase' }).Count -eq 1))
+
+# Controls: the two short turns are the healthy case, and they must pass
+# outright. A coherence check that fails everything says nothing.
+Check 'the two healthy short replies pass' $true `
+    ($verdicts['2'].Ok -and $verdicts['4'].Ok) `
+    $(if (-not ($verdicts['2'].Ok -and $verdicts['4'].Ok)) {
+        (($verdicts['2'].Reasons + $verdicts['4'].Reasons) -join '; ') } else { '' })
+
+# The offset is the point of the message: it is the only precise entry point a
+# later investigation has, so require it to be a number inside the text rather
+# than prose.
+$offsetReason = @($verdicts['3'].Reasons | Where-Object { $_ -match $collapse })[0]
+$offsetOk = $offsetReason -match 'at character (\d+) of (\d+)'
+$offset = if ($offsetOk) { [int]$Matches[1] } else { -1 }
+$length = if ($offsetOk) { [int]$Matches[2] } else { -1 }
+Check 'the collapse is reported with a usable character offset' $true `
+    ($offsetOk -and $offset -gt 0 -and $offset -lt $length) `
+    $(if ($offsetOk) { "char $offset of $length" } else { $offsetReason })
+
+# A negative control for the segment scan itself: language throughout, of the
+# same length as the real replies, must stay silent. Without this, a scan that
+# fired on any long text would pass every case above.
+$longHealthy = (('The quick brown fox jumps over the lazy dog and then considers ' +
+                 'the matter carefully before continuing on its way. ') * 300)
+$healthyVerdict = Test-LooksLikeEnglish -Text $longHealthy
+Check 'the segment scan is silent on a long, wholly alphabetic reply' $true `
+    (@($healthyVerdict.Reasons | Where-Object { $_ -match $collapse }).Count -eq 0) `
+    $("$($longHealthy.Length) characters")
+
+# ---------------------------------------------------------------------------
 # CALL SITES. Everything above tests guard BODIES; both shipped bugs were in
 # how the harness used them.
 #

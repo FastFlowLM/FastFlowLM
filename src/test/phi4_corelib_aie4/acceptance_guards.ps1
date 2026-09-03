@@ -227,3 +227,77 @@ function Test-RenderedDocument {
     }
     return $null
 }
+
+# Does a reply read like English a person wrote, rather than fluent-looking
+# garbage?
+#
+# Deliberately weak, and says so. The first thing a wrong weight map or a stale
+# KV row produces is text that passes every mechanical check, which is why the
+# brief requires the verbatim completion in the document for a HUMAN to judge.
+# What this can do is catch the failures that are not subtle -- empty output,
+# no letters, one phrase repeated forever, and language that stops being
+# language partway through.
+#
+# It lives here rather than in the harness because the recorded run contains
+# real examples of two of those failures, so the verifier can drive this
+# function against them offline instead of restating what it believes the rule
+# to be.
+#
+# WHY THE SEGMENT CHECK EXISTS. The whole-text letter ratio below could not see
+# the most alarming thing in the recorded run. One turn produced hundreds of
+# clean tokens and then, about 85% of the way in, broke mid-word and emitted
+# high-entropy punctuation and digits to the cap. Averaged over the whole
+# reply the letter ratio stayed well above the floor, so the only reason
+# recorded for that turn was "dominated by a repeated token" -- true of its
+# earlier repetition loop, and wrong about the collapse. A model losing the
+# thread repeats, drifts or confabulates; it does not emit uniform random
+# punctuation. Those are different failures and the record has to say so.
+function Test-LooksLikeEnglish {
+    param([string]$Text, [string]$MustContain = '')
+    $t = ($Text -replace '\[FLM\][^\n]*', '') -replace '\s+', ' '
+    $t = $t.Trim()
+    $reasons = @()
+    if ($t.Length -lt 8) { $reasons += 'reply is shorter than 8 characters' }
+    $words = @($t -split '\s+' | Where-Object { $_ -match '[A-Za-z]' })
+    if ($words.Count -lt 3) { $reasons += 'fewer than three alphabetic words' }
+    if ($words.Count -ge 6) {
+        $distinct = @($words | ForEach-Object { $_.ToLowerInvariant() } | Sort-Object -Unique)
+        if ($distinct.Count -lt [math]::Ceiling($words.Count / 4)) {
+            $reasons += 'the reply is dominated by a repeated token or phrase'
+        }
+    }
+    $letters = ([regex]::Matches($t, '[A-Za-z]')).Count
+    if ($t.Length -gt 0 -and ($letters / [double]$t.Length) -lt 0.5) {
+        $reasons += 'fewer than half the characters are letters'
+    }
+
+    # Segment scan: a stretch that stops being language, after a stretch that
+    # was. Reported with its offset, because that offset is the only precise
+    # entry point a later investigation has.
+    $window = 200
+    if ($t.Length -ge ($window * 4)) {
+        $ratios = @()
+        for ($start = 0; $start + $window -le $t.Length; $start += $window) {
+            $slice = $t.Substring($start, $window)
+            $ratios += [pscustomobject]@{
+                Start = $start
+                Ratio = ([regex]::Matches($slice, '[A-Za-z]')).Count / [double]$window
+            }
+        }
+        $healthyBefore = $false
+        foreach ($r in $ratios) {
+            if ($r.Ratio -ge 0.7) { $healthyBefore = $true; continue }
+            if ($healthyBefore -and $r.Ratio -lt 0.35) {
+                $reasons += (
+                    'the reply stops producing language at character {0} of {1}: ' -f $r.Start, $t.Length) +
+                    ('that stretch is {0:N0}% letters, after an earlier stretch that was language' -f ($r.Ratio * 100))
+                break
+            }
+        }
+    }
+
+    if ($MustContain -and ($t -notmatch [regex]::Escape($MustContain))) {
+        $reasons += "the reply does not contain the expected substring '$MustContain'"
+    }
+    return @{ Ok = ($reasons.Count -eq 0); Reasons = $reasons; Normalized = $t }
+}

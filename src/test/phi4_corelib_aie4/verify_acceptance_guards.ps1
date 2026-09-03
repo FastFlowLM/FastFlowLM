@@ -593,9 +593,30 @@ try {
     $rerenderLog = & $psHost -NoProfile -ExecutionPolicy Bypass -File $rerenderScript `
         -Harness (Join-Path $PSScriptRoot 'run_real_model_acceptance.ps1') `
         -RecordPath $json -Out $rerenderOut 2>&1
-    $rendered = Test-Path $rerenderOut
+    # The child's EXIT CODE, not Test-Path.
+    #
+    # The harness's render block writes the markdown at
+    # run_real_model_acceptance.ps1:3683 -- BEFORE its BOM check, its stamp
+    # read-back and Test-RenderedDocument. So a render that FAILS still leaves
+    # a complete document on disk, and `Test-Path` is true for it. Measured:
+    # with Test-RenderedDocument stubbed to fail, rerender_acceptance_document
+    # exits 1 and leaves an 81,949-byte document, and this check reported PASS.
+    # That is this branch's signature defect inside the guard added to close
+    # it: a check that reports success for a run that failed.
+    #
+    # Both conditions are required, and they are not redundant: a non-zero exit
+    # with a file present is the failed render above, and a zero exit with no
+    # file would mean the locator silently rendered nothing.
+    $rerenderExit = $LASTEXITCODE
+    $rerenderWrote = Test-Path $rerenderOut
+    $rendered = ($rerenderExit -eq 0) -and $rerenderWrote
     Check 'the renderer runs offline against the committed record' $true $rendered `
-        $(if ($rendered) { ($rerenderLog | Select-Object -First 1) } else { ($rerenderLog -join ' | ') })
+        $(if ($rendered) {
+            ($rerenderLog | Select-Object -First 1)
+        } else {
+            ("exit $rerenderExit, document written = $rerenderWrote :: " +
+             ($rerenderLog -join ' | '))
+        })
     if ($rendered) {
         Check 'the re-rendered document carries no BOM' $true (-not (Test-Utf8Bom $rerenderOut))
         $committedLines = @(Get-Content -LiteralPath $committedMd)

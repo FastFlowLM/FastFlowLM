@@ -127,6 +127,19 @@ _DETERM2_SEALED = {
         "the shortest decode run design 12.4 accepts as evidence; fewer "
         "steps is a smaller experiment, not a passing one",
     ),
+    # TOP_K was the third one left outside, and it is not a threshold: it is
+    # the SIZE OF THE WINDOW the MAX_TOP32_ABS_DIFF threshold is measured
+    # over. Shrinking it trips no bound, it just stops the comparison looking
+    # at the logits where the two implementations disagree -- so it is the
+    # cheapest way to make a red run green, and its value is interpolated
+    # verbatim into the very message that reports the failure.
+    "TOP_K": (
+        32,
+        "the width of the union top-k window MAX_TOP32_ABS_DIFF is measured "
+        "over; design 12.4's '0.25 over the union top-32' is one claim, not "
+        "two independent numbers, so narrowing k narrows the experiment while "
+        "every bound still reads as met",
+    ),
 }
 for _sealed_name, (_sealed_value, _sealed_reason) in _DETERM2_SEALED.items():
     _actual = globals()[_sealed_name]

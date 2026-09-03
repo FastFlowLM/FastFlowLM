@@ -269,7 +269,19 @@ std::uint64_t ElapsedNanoseconds(
         std::max<std::int64_t>(elapsed.count(), 0));
 }
 
-bool RecoverableBeforeSubmit(
+// Named for what it tests, which is no longer "before submit".
+//
+// It was called RecoverableBeforeSubmit while the irrevocable boundary was
+// per STEP: the first successful submit latched it for the rest of the step,
+// so "recoverable" and "nothing submitted yet" were the same predicate. They
+// are not any more. checked_synchronize clears the latch on a COMPLETED
+// synchronize, so this returns true after three submits and a synchronize --
+// the point at which corelib's outstanding list is provably empty and the
+// only residue is a partially-written KV cache the frontend discards.
+//
+// `submission.irrevocable()` therefore means "device work may be outstanding
+// or in an unknown state", not "a submit has happened".
+bool RecoverableBeforeIrrevocableWork(
     bool synchronize_in_progress,
     const corelib::StepSubmissionState& submission) noexcept {
     return !synchronize_in_progress && !submission.irrevocable();
@@ -1241,7 +1253,7 @@ struct phi4_corelib_aie4::Impl final {
             checked_synchronize();
             ReadLogits(logits);
         } catch (const corelib::CorelibError& error) {
-            if (RecoverableBeforeSubmit(
+            if (RecoverableBeforeIrrevocableWork(
                     synchronize_in_progress,
                     submission)) {
                 throw;
@@ -1254,7 +1266,7 @@ struct phi4_corelib_aie4::Impl final {
                 rows,
                 position);
         } catch (const std::exception& error) {
-            if (RecoverableBeforeSubmit(
+            if (RecoverableBeforeIrrevocableWork(
                     synchronize_in_progress,
                     submission)) {
                 throw;
@@ -1267,7 +1279,7 @@ struct phi4_corelib_aie4::Impl final {
                 rows,
                 position);
         } catch (...) {
-            if (RecoverableBeforeSubmit(
+            if (RecoverableBeforeIrrevocableWork(
                     synchronize_in_progress,
                     submission)) {
                 throw;
@@ -1561,7 +1573,7 @@ namespace testing {
     std::optional<int> layer,
     std::int64_t rows,
     std::int64_t position) {
-    if (RecoverableBeforeSubmit(
+    if (RecoverableBeforeIrrevocableWork(
             synchronize_in_progress,
             submission)) {
         throw error;

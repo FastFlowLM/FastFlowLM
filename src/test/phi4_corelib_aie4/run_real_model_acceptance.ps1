@@ -470,6 +470,87 @@ function Invoke-Capture {
     return @{ ExitCode = $code; Log = $log; Text = $text }
 }
 
+# ---------------------------------------------------------------------------
+# Console-driven CLI helper
+#
+# `flm run` reads keystrokes with ReadConsoleInput, which cannot see a
+# redirected stdin, so it is driven through drive_flm_console.ps1 -- a separate
+# PROCESS, because that driver has to AllocConsole() and would take this
+# script's stdout with it. See that file for why this is the product's own
+# interactive path and not a substitute for it.
+# ---------------------------------------------------------------------------
+#
+# Defined HERE, not beside its first heavy user.
+#
+# It used to sit just above Step 6. Step 1c needs it too and runs 600
+# lines earlier, and PowerShell resolves a function at CALL time from what
+# has already been parsed -- so calling it from Step 1c with the definition
+# below would fail at runtime, on the one step whose whole point is to run
+# the product's binary.
+function Invoke-FlmConsoleSession {
+    param(
+        [string[]]$Turns,
+        [string]$Name,
+        [int]$LoadTimeoutSec = 1800,
+        [int]$TurnTimeoutSec = 1800,
+        [int]$IdleSec = 6
+    )
+    $driver = Join-Path $script:suiteDir 'drive_flm_console.ps1'
+    $outJson = Join-Path $script:artifactDir "$Name.json"
+    $screen = Join-Path $script:artifactDir "$Name-screen.txt"
+    if (-not (Test-Path $driver)) {
+        return @{ Ok = $false; Reason = "console driver not found at $driver"; Json = $null; Path = $outJson; ExitCode = $null }
+    }
+    $psExe = (Get-Process -Id $PID).Path
+    # Turns go through a FILE, not as repeated -Turns values.
+    #
+    # `powershell.exe -File driver.ps1 -Turns "a b" "c d"` binds only the
+    # first value and then fails to place the second, exiting 1 with no
+    # output. One turn works, two do not, so Step 7 passed while Step 8 was
+    # reported as "the driver wrote no result" -- a failure mode that says
+    # nothing about the product under test.
+    $turnsFile = Join-Path $script:artifactDir "$Name-turns.txt"
+    Set-Content -Path $turnsFile -Value ($Turns -join "`r`n") -Encoding utf8
+    $callArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $driver,
+              '-FlmExe', $FlmExe, '-ModelTag', $ModelTag,
+              '-OutJson', $outJson, '-ScreenLog', $screen,
+              '-LoadTimeoutSec', "$LoadTimeoutSec", '-TurnTimeoutSec', "$TurnTimeoutSec",
+              '-IdleSec', "$IdleSec", '-TurnsFile', $turnsFile)
+    # Invoked as a plain child of this script, with its output left alone.
+    #
+    # This is the one launch shape measured to work, and each rejected
+    # alternative failed in the same way -- flm.exe spinning at 100% CPU on a
+    # ReadConsoleInput it could never satisfy, against a screen buffer that
+    # stayed empty:
+    #
+    #   & $psExe ... | Out-Null   -> the pipeline redirects the driver's
+    #                               stdout, AllocConsole then leaves the
+    #                               redirected handles alone, and flm inherits
+    #                               a pipe instead of the console;
+    #   Start-Process (plain)     -> the driver gets its own console FIRST,
+    #                               and the later FreeConsole/AllocConsole
+    #                               leaves its standard handles pointing at
+    #                               the console it just abandoned.
+    #
+    # Leaving the driver's streams untouched lets its own FreeConsole /
+    # AllocConsole / SetStdHandle sequence be the only thing that decides what
+    # flm.exe inherits. The driver reports through -OutJson and -ScreenLog, so
+    # nothing is lost by not capturing its output -- there is none to capture
+    # once it has taken a console.
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    $code = $null
+    try {
+        & $psExe @callArgs
+        $code = $LASTEXITCODE
+    } finally { $ErrorActionPreference = $prev }
+    if (-not (Test-Path $outJson)) {
+        return @{ Ok = $false; Reason = "console driver exited $code and wrote no result"; Json = $null; Path = $outJson; ExitCode = $code }
+    }
+    $doc = Get-Content $outJson -Raw | ConvertFrom-Json
+    return @{ Ok = ($code -eq 0); Reason = $doc.error; Json = $doc; Path = $outJson; Screen = $screen; ExitCode = $code }
+}
+
 Set-Field 'schema' 'phi4-aie4-acceptance/1'
 Set-Field 'generated_utc' ((Get-Date).ToUniversalTime().ToString('o'))
 Set-Field 'run_stamp' $script:runStamp
@@ -874,30 +955,70 @@ if (Test-Selected '1') {
                 $corruptText = $cfgText -replace ('"' + $field + '"(\s*:\s*)\d+'), ('"' + $field + '"${1}' + ($original + 1))
                 Trace-Progress '1c: writing corrupted overlay'
                 [System.IO.File]::WriteAllText($cfgPath, $corruptText)
-                Trace-Progress '1c: launching flm run'
-                $run = Invoke-Capture -Exe $FlmExe -Arguments @('run', $ModelTag) -LogName 'step1c-corrupt-load.log'
-                $ev2['flm_exit'] = $run.ExitCode
-                $ev2['flm_output'] = $run.Text
-                $ev2['log'] = $run.Log
+                Trace-Progress '1c: launching flm run through the console driver'
+                # Driven through drive_flm_console.ps1, NOT `Invoke-Capture`.
+                #
+                # This block used to run `flm run <tag>` with its output piped
+                # to a file, and justified reading the screen rather than the
+                # exit code like this:
+                #
+                #   "Under a redirected stdin the REPL prints its banner and
+                #    returns 0 on the first ReadConsoleInput, so exit 0 is what
+                #    a SUCCESSFUL load looks like here too."
+                #
+                # That is false, and it is the same false claim Task 16 removed
+                # from test_packaged_runtime.ps1 one file over.
+                # src/runner/cli_wide.cpp:107-113 `continue`s on a FAILED
+                # read inside `while (true)`: ReadConsoleInput cannot see a
+                # redirected handle, so it fails, and the REPL spins forever
+                # instead of returning 0. On a rejected load flm exits by
+                # itself and the block worked; on a SUCCESSFUL load -- the
+                # not_met case this step exists to detect -- it would have hung
+                # the ~90-minute harness until something killed it. The
+                # committed record only ever exercised the rejected branch
+                # (flm_exit 1), which is why five rounds went past it.
+                #
+                # The driver injects real KEY_EVENT records into the console
+                # input buffer the REPL is actually reading, and Wait-ForScreen
+                # returns the moment the child exits -- so BOTH outcomes are
+                # bounded: a rejected load returns as soon as flm exits, and a
+                # successful one reaches the prompt, runs `/status`, is sent
+                # `/bye` and terminates.
+                $session = Invoke-FlmConsoleSession -Turns @('/status') `
+                    -Name 'step1c-corrupt-load' -LoadTimeoutSec 900 -TurnTimeoutSec 300
+                $ev2['driver_exit'] = $session.ExitCode
+                $ev2['driver_result'] = $session.Path
+                if ($session.Json) {
+                    $ev2['flm_exit'] = $session.Json.exit_code
+                    $ev2['flm_output'] = [string]$session.Json.screen_final
+                    $reachedRepl = [bool]$session.Json.reached_prompt
+                } else {
+                    # No result document at all: the driver could not run. That
+                    # is not evidence that the corrupted overlay was rejected,
+                    # so it must not be scored as met.
+                    $ev2['flm_exit'] = $null
+                    $ev2['flm_output'] = ''
+                    $reachedRepl = $null
+                }
+                $ev2['log'] = $session.Path
                 # A load that SUCCEEDS against a corrupted contract is the
                 # failure: it means the ONNX-validated constants were silently
-                # overridden, or ignored.
-                #
-                # The exit code alone will not do. Under a redirected stdin the
-                # REPL prints its banner and returns 0 on the first
-                # ReadConsoleInput, so exit 0 is what a SUCCESSFUL load looks
-                # like here too. "Did it reach the REPL banner" is the signal
-                # that separates a completed load from a rejected one.
-                Trace-Progress ('1c: flm exited ' + $run.ExitCode)
-                $reachedRepl = ($run.Text -match 'Type /\? for help')
+                # overridden, or ignored. "Did it reach the REPL prompt" is the
+                # signal that separates a completed load from a rejected one.
+                Trace-Progress ('1c: driver exited ' + $session.ExitCode)
                 $ev2['reached_repl_banner'] = $reachedRepl
-                if ($run.ExitCode -eq 0 -and $reachedRepl) {
+                if ($null -eq $reachedRepl) {
+                    Add-StepResult -Id '1c' -Title 'Corrupted overlay config.json fails model load (MODEL-2)' `
+                        -Status 'not_exercised' `
+                        -Detail ("the console driver wrote no result (" + $session.Reason + "), so nothing is known about the load") `
+                        -Evidence $ev2 -Criteria @('C08')
+                } elseif ($reachedRepl) {
                     Add-StepResult -Id '1c' -Title 'Corrupted overlay config.json fails model load (MODEL-2)' `
                         -Status 'not_met' -Detail 'model load reached the REPL banner with a corrupted overlay config.json value; the ONNX-validated constant was not enforced' `
                         -Evidence $ev2 -Criteria @('C08')
                 } else {
                     Add-StepResult -Id '1c' -Title 'Corrupted overlay config.json fails model load (MODEL-2)' `
-                        -Status 'met' -Detail "model load rejected the corrupted overlay value (exit $($run.ExitCode), REPL banner reached = $reachedRepl)" `
+                        -Status 'met' -Detail "model load rejected the corrupted overlay value (flm exit $($ev2['flm_exit']), driver exit $($session.ExitCode), REPL prompt reached = $reachedRepl)" `
                         -Evidence $ev2 -Criteria @('C08')
                 }
             }
@@ -1464,79 +1585,7 @@ if (Test-Selected '5') {
     Add-UnselectedStep -Id '5' -Title 'AIE4 package built from the published model'
 }
 
-# ---------------------------------------------------------------------------
-# Console-driven CLI helper
-#
-# `flm run` reads keystrokes with ReadConsoleInput, which cannot see a
-# redirected stdin, so it is driven through drive_flm_console.ps1 -- a separate
-# PROCESS, because that driver has to AllocConsole() and would take this
-# script's stdout with it. See that file for why this is the product's own
-# interactive path and not a substitute for it.
-# ---------------------------------------------------------------------------
 
-function Invoke-FlmConsoleSession {
-    param(
-        [string[]]$Turns,
-        [string]$Name,
-        [int]$LoadTimeoutSec = 1800,
-        [int]$TurnTimeoutSec = 1800,
-        [int]$IdleSec = 6
-    )
-    $driver = Join-Path $script:suiteDir 'drive_flm_console.ps1'
-    $outJson = Join-Path $script:artifactDir "$Name.json"
-    $screen = Join-Path $script:artifactDir "$Name-screen.txt"
-    if (-not (Test-Path $driver)) {
-        return @{ Ok = $false; Reason = "console driver not found at $driver"; Json = $null; Path = $outJson; ExitCode = $null }
-    }
-    $psExe = (Get-Process -Id $PID).Path
-    # Turns go through a FILE, not as repeated -Turns values.
-    #
-    # `powershell.exe -File driver.ps1 -Turns "a b" "c d"` binds only the
-    # first value and then fails to place the second, exiting 1 with no
-    # output. One turn works, two do not, so Step 7 passed while Step 8 was
-    # reported as "the driver wrote no result" -- a failure mode that says
-    # nothing about the product under test.
-    $turnsFile = Join-Path $script:artifactDir "$Name-turns.txt"
-    Set-Content -Path $turnsFile -Value ($Turns -join "`r`n") -Encoding utf8
-    $callArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $driver,
-              '-FlmExe', $FlmExe, '-ModelTag', $ModelTag,
-              '-OutJson', $outJson, '-ScreenLog', $screen,
-              '-LoadTimeoutSec', "$LoadTimeoutSec", '-TurnTimeoutSec', "$TurnTimeoutSec",
-              '-IdleSec', "$IdleSec", '-TurnsFile', $turnsFile)
-    # Invoked as a plain child of this script, with its output left alone.
-    #
-    # This is the one launch shape measured to work, and each rejected
-    # alternative failed in the same way -- flm.exe spinning at 100% CPU on a
-    # ReadConsoleInput it could never satisfy, against a screen buffer that
-    # stayed empty:
-    #
-    #   & $psExe ... | Out-Null   -> the pipeline redirects the driver's
-    #                               stdout, AllocConsole then leaves the
-    #                               redirected handles alone, and flm inherits
-    #                               a pipe instead of the console;
-    #   Start-Process (plain)     -> the driver gets its own console FIRST,
-    #                               and the later FreeConsole/AllocConsole
-    #                               leaves its standard handles pointing at
-    #                               the console it just abandoned.
-    #
-    # Leaving the driver's streams untouched lets its own FreeConsole /
-    # AllocConsole / SetStdHandle sequence be the only thing that decides what
-    # flm.exe inherits. The driver reports through -OutJson and -ScreenLog, so
-    # nothing is lost by not capturing its output -- there is none to capture
-    # once it has taken a console.
-    $prev = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-    $code = $null
-    try {
-        & $psExe @callArgs
-        $code = $LASTEXITCODE
-    } finally { $ErrorActionPreference = $prev }
-    if (-not (Test-Path $outJson)) {
-        return @{ Ok = $false; Reason = "console driver exited $code and wrote no result"; Json = $null; Path = $outJson; ExitCode = $code }
-    }
-    $doc = Get-Content $outJson -Raw | ConvertFrom-Json
-    return @{ Ok = ($code -eq 0); Reason = $doc.error; Json = $doc; Path = $outJson; Screen = $screen; ExitCode = $code }
-}
 
 # Test-LooksLikeEnglish now lives in acceptance_guards.ps1, dot-sourced above.
 #

@@ -858,8 +858,28 @@ elseif(WIN32)
                      PATHS "${CMAKE_SOURCE_DIR}/lib"
                      NO_DEFAULT_PATH
                      DOC "Import library for ${_flm_dep_key}")
+        # The bare CI runner's two staging directories, as PATHS.
+        #
+        # `target_link_directories(flm PUBLIC C:/dev/...)` above is what made
+        # the PRE-BRANCH raw-name link work: the linker was handed the
+        # directory, and the name never had to be resolved at configure time.
+        # This branch replaced the raw names with find_library, and
+        # target_link_directories contributes NOTHING to find_library -- probed
+        # directly: a stage directory known only that way yields NOTFOUND,
+        # while the same directory on $ENV{LIB} or CMAKE_PREFIX_PATH resolves.
+        #
+        # So without this, `cmake --preset windows-vs18` on that runner resolves
+        # Boost only if the machine happens to carry an ambient LIB covering
+        # C:/dev/boost_1_88_0/stage/lib. The pre-branch link needed no such
+        # ambient state and the branch should not quietly start needing it.
+        # PATHS is the LAST bucket find_library searches, after HINTS and
+        # CMAKE_PREFIX_PATH, so this cannot displace a prefix that is supplied
+        # deliberately -- it only restores the fallback the raw names had.
         find_library(FLM_LIB_${_flm_dep_key}
                      NAMES ${_flm_dep_names}
+                     PATHS
+                         C:/dev/boost_1_88_0/stage/lib
+                         C:/dev/vcpkg/installed/x64-windows/lib
                      DOC "Import library for ${_flm_dep_key}")
         if(NOT FLM_LIB_${_flm_dep_key})
             if(_flm_dep_need STREQUAL "required")

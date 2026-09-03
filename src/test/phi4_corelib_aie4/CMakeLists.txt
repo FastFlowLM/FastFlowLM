@@ -222,6 +222,42 @@ add_task10_production_compile_check(
     task10_production_compile_off
     FALSE)
 
+# The offline acceptance guards, run by `ctest` rather than by remembering.
+#
+# verify_acceptance_guards.ps1 carries 72 assertions -- the harness's guard
+# bodies driven against the committed record, the committed acceptance document
+# re-rendered from that record by the harness's own render block, and an AST
+# lint of the harness's call sites. Until now NOTHING invoked it: not a
+# CMakeLists, not a .cmake, not a workflow. An entire verification tier that
+# runs only when a human remembers is a verification tier that reports on runs
+# it did not have.
+#
+# It needs no hardware, no corelib, no model and no flm.exe -- only PowerShell
+# and the committed record -- so it is registered BEFORE the corelib-less
+# early return below, and it is the one test in this suite that a machine
+# without an AIE4 device can run in full. `enable_testing()` is called here
+# rather than 60 lines down for the same reason.
+enable_testing()
+find_program(FLM_POWERSHELL_EXECUTABLE
+             NAMES pwsh powershell
+             DOC "PowerShell used to run the packaging and guard tests")
+if(FLM_POWERSHELL_EXECUTABLE)
+    add_test(NAME test_acceptance_guards
+             COMMAND "${FLM_POWERSHELL_EXECUTABLE}"
+                     -NoProfile
+                     -ExecutionPolicy Bypass
+                     -File
+                     "${CMAKE_CURRENT_LIST_DIR}/verify_acceptance_guards.ps1")
+    # No SKIP_RETURN_CODE. There is no input it can be missing: if the
+    # committed record is not there, that is a failure and not a skip.
+    set_tests_properties(test_acceptance_guards PROPERTIES TIMEOUT 900)
+else()
+    message(WARNING
+        "PowerShell was not found, so test_acceptance_guards is not "
+        "registered. The offline acceptance guards will not run in this "
+        "build.")
+endif()
+
 if(NOT RYZENAI_CORELIB_INCLUDE_DIR)
     # Guards-only configure. Everything below this point either includes
     # ryzenai/corelib.h or links something that does, so stopping here is the
@@ -439,9 +475,9 @@ target_compile_definitions(benchmark_phi4_aie4 PRIVATE
 #
 # It reports SKIPPED via SKIP_RETURN_CODE when its optional inputs are absent,
 # so a partial run never reads as full coverage.
-find_program(FLM_POWERSHELL_EXECUTABLE
-             NAMES pwsh powershell
-             DOC "PowerShell used to run the packaging tests")
+#
+# FLM_POWERSHELL_EXECUTABLE is found near the top of this file, because
+# test_acceptance_guards needs it on the corelib-less path too.
 
 # Builds the argument vector for test_packaged_runtime.ps1.
 #

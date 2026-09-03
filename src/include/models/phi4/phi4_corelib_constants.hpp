@@ -27,11 +27,22 @@ inline constexpr std::int64_t kMaxSequenceLength = 4096;
 // minus one.
 //
 // This is not a cosmetic limit. The refusal arrives from `flat_mha` AFTER q, k
-// and v have been submitted in the same step, so the failure policy correctly
-// classifies it as past the irrevocable boundary and TERMINATES THE PROCESS.
-// A generation that walks to position 4095 therefore kills the server, which
-// is what it did on 2026-09-02 through a default /api/chat request. Anything
-// that can reach a decode step must respect this, not kMaxSequenceLength.
+// and v have been submitted in the same step. On 2026-09-02 that KILLED THE
+// SERVER through a default /api/chat request, because the failure policy was
+// per STEP and classified everything past the first submit as irrevocable.
+//
+// The policy is now per SUBMISSION GROUP: STREAM-2 puts a completed
+// synchronize between the q/k/v submits and flat_mha, corelib's outstanding
+// list is empty at that point, and the refusal is raised before flat_mha
+// touches the device -- so the same failure is now RECOVERABLE and the
+// process survives. See the note in checked_synchronize in
+// phi4_corelib_aie4.cpp for why, and against which corelib sources.
+//
+// The bound is not thereby optional. Reaching flat_mha means this layer's V
+// cache has already been scattered, so recovery costs the caller the entire
+// conversation; and EnsureDecodeWindow / validate_aie4_capacity turn the same
+// event into an ordinary MAX_LENGTH_REACHED truncation instead. Anything that
+// can reach a decode step must respect this, not kMaxSequenceLength.
 inline constexpr std::int64_t kMaxDecodeWindow = kMaxSequenceLength - 1;
 
 inline constexpr double kRmsEpsilon = 1.0e-5;

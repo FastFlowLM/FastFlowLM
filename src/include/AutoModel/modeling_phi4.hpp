@@ -36,8 +36,12 @@ private:
     // The largest total the AIE4 path can actually reach: MAX_L capped by the
     // token attention kernel's window, which is one below the prefill path's.
     // Admission and the decode loop both use this, never MAX_L, because the
-    // step MAX_L would allow fails past the irrevocable boundary and takes the
-    // process with it.
+    // step MAX_L would allow fails inside flat_mha, mid-step, after this
+    // layer's V cache has already been scattered. That used to take the
+    // process with it; since the engine's irrevocable boundary became per
+    // submission group it is recoverable, but it still costs the caller the
+    // whole conversation. See the fuller note on Phi4::aie4_active_cap in
+    // modeling_phi4.cpp.
     size_t aie4_active_cap() const;
     void validate_aie4_capacity(
         size_t rendered_tokens,

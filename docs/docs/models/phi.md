@@ -211,12 +211,17 @@ are in
 [the Phi-4 benchmarks](/docs/benchmarks/phi4_results/).
 
 **A terminal device failure restarts the process, by design.** If a corelib
-call fails after work has already been submitted to the device, the state of
-that work is unknowable, so FastFlowLM does not try to continue: it writes a
-diagnostic record and terminates the process with exit code `0xE0040001`. Under
-`flm serve` that ends the server and you restart it; under `flm run` the
-session ends. A failure *before* anything was submitted is recoverable — the
-session is cleared, an error is returned, and the process keeps running.
+call fails while work may still be outstanding on the device — or if a
+synchronize itself fails — the state of that work is unknowable, so FastFlowLM
+does not try to continue: it writes a diagnostic record and terminates the
+process with exit code `0xE0040001`. Under `flm serve` that ends the server and
+you restart it; under `flm run` the session ends.
+
+A failure at a point where nothing is outstanding is recoverable: the session
+is cleared, an error is returned, and the process keeps running. That covers
+both a failure before anything was submitted *and* a failure after a
+synchronize has completed and drained the device, so a host-side error between
+two dispatch groups no longer costs you the server — only the conversation.
 
 **Where the record goes.** `%LOCALAPPDATA%\FastFlowLM\logs`, as
 `corelib-fatal-<timestamp>-<pid>.json`, carrying the corelib status code, the

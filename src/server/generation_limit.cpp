@@ -216,8 +216,8 @@ std::string CliModelErrorNotice(
     bool session_cleared) {
     if (session_cleared) {
         return
-            "ERROR: AIE4 inference failed before submission; the current "
-            "conversation was cleared.";
+            "ERROR: AIE4 inference failed at a recoverable point; the "
+            "current conversation was cleared.";
     }
     return "ERROR: " + std::string(message);
 }

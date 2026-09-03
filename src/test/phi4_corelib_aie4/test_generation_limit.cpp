@@ -618,10 +618,17 @@ void TestCliLimitAndRecoverableNotice() {
     CHECK(
         CliModelErrorNotice("capacity exceeded", false) ==
         "ERROR: capacity exceeded");
+    // "at a recoverable point", not "before submission": the engine's
+    // irrevocable boundary is per submission group, so this notice is also
+    // shown for a failure past a COMPLETED synchronize. Pinning the old
+    // wording here is what would let the retraction reach the code and stop.
     CHECK(
         CliModelErrorNotice("ignored", true) ==
-        "ERROR: AIE4 inference failed before submission; the current "
-        "conversation was cleared.");
+        "ERROR: AIE4 inference failed at a recoverable point; the "
+        "current conversation was cleared.");
+    CHECK(
+        CliModelErrorNotice("ignored", true).find("before submission") ==
+        std::string::npos);
 }
 
 void TestAie4ModelInfoDetection() {

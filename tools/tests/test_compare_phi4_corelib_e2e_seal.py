@@ -15,6 +15,7 @@ seal exists to block.
 
 from __future__ import annotations
 
+import re
 import unittest
 from pathlib import Path
 
@@ -47,7 +48,25 @@ TAMPERS = {
         "MIN_DECODE_STEPS = 16",
         "MIN_DECODE_STEPS = 4",
     ),
+    "TOP_K": (
+        "TOP_K = 32",
+        "TOP_K = 2",
+    ),
 }
+
+# Every `{NAME}` an f-string in the comparator interpolates, where NAME looks
+# like a module constant. DERIVED, never typed.
+#
+# The previous version of the test below compared the seal against `TAMPERS`,
+# a literal in this file, and then claimed to be "the assertion that would have
+# caught this omission in the first place". It was not: the universe and the
+# expectation were the same hand-maintained list, so an unsealed constant was
+# invisible to it by construction -- and there was one in the tree, `TOP_K`,
+# whose value is interpolated into the union-top-k failure message and which
+# could be dropped from 32 to 2 with the whole module green. Deriving the
+# universe from the source is the only shape in which this assertion means
+# what it says.
+_INTERPOLATED_CONSTANT = re.compile(r"\{([A-Z][A-Z0-9_]*)\}")
 
 
 def _execute(source: str) -> dict[str, object]:
@@ -65,7 +84,17 @@ def _execute(source: str) -> dict[str, object]:
 class Determ2SealTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.source = COMPARATOR.read_bytes().decode("utf-8")
+        # Newlines normalised, because the tampers below are `\n`-joined
+        # literals. `core.autocrlf` is true by default on Windows and
+        # `.gitattributes` exempts only src/model_overlays, so a fresh clone
+        # gets this file with CRLF -- and every tamper silently stops matching,
+        # turning the whole seal suite red for a reason that has nothing to do
+        # with the seal. Observed on this tree.
+        cls.source = (
+            COMPARATOR.read_bytes()
+            .decode("utf-8")
+            .replace("\r\n", "\n")
+        )
 
     def test_the_committed_comparator_imports(self):
         namespace = _execute(self.source)
@@ -77,10 +106,38 @@ class Determ2SealTests(unittest.TestCase):
     def test_every_threshold_quoted_in_a_failure_message_is_sealed(self):
         # The alias incident, generalised: a constant whose value reaches a
         # failure message is a constant somebody will grep and edit, so it
-        # must be in the dict. This is the assertion that would have caught
-        # `MIN_CORRELATION` and `MIN_DECODE_STEPS` being left out.
+        # must be in the dict.
+        #
+        # The universe is ENUMERATED OUT OF THE SOURCE, not compared against a
+        # list in this file. A literal expectation can only ever agree with
+        # itself, which is how `TOP_K` sat unsealed underneath a test that
+        # claimed to forbid exactly that.
         namespace = _execute(self.source)
         sealed = set(namespace["_DETERM2_SEALED"])
+        quoted = {
+            name
+            for name in _INTERPOLATED_CONSTANT.findall(self.source)
+            if isinstance(namespace.get(name), (int, float))
+            and not isinstance(namespace.get(name), bool)
+        }
+        # Non-vacuity: a regex that stopped matching would make the next
+        # assertion pass by finding nothing to require.
+        self.assertGreaterEqual(
+            len(quoted),
+            len(TAMPERS),
+            f"only {sorted(quoted)} were found interpolated into the "
+            "comparator's messages; the scan is not reading the file",
+        )
+        self.assertEqual(
+            quoted - sealed,
+            set(),
+            f"{sorted(quoted - sealed)} reach a failure message but are not "
+            "in _DETERM2_SEALED. That is the grep-the-message-and-edit path "
+            "the seal exists to block: add each to _DETERM2_SEALED with the "
+            "reason its number cannot move, and to TAMPERS here.",
+        )
+        # And every sealed constant must have a tamper case below, or the
+        # seal's failure path is unexercised for it.
         self.assertEqual(sealed, set(TAMPERS))
         for name in TAMPERS:
             self.assertIn(

@@ -619,6 +619,22 @@ bool Phi4::insert(chat_meta_info_t& meta_info, lm_uniform_input_t& input, std::f
         const auto started = std::chrono::steady_clock::now();
 
         bool inserted = false;
+        // "at a recoverable point", NOT "before submission".
+        //
+        // These strings said "before submission" for as long as the engine's
+        // irrevocable boundary was per STEP: reaching a catch here meant
+        // nothing had been submitted, so the wording was true by
+        // construction. The boundary is now per SUBMISSION GROUP -- see the
+        // note in checked_synchronize in phi4_corelib_aie4.cpp -- and a
+        // failure past a COMPLETED synchronize is recoverable too. A
+        // bad_alloc in the V scatter of layer 0 arrives here after three
+        // submits and one synchronize, so "before submission" is now false
+        // for exactly the cases the boundary change added.
+        //
+        // What is still true, and is all the caller can act on, is that the
+        // engine classified the failure as recoverable and the session was
+        // discarded. The irrevocable classes never reach this handler: they
+        // terminate the process.
         try {
             inserted = this->_shared_insert(
                 meta_info,
@@ -634,21 +650,21 @@ bool Phi4::insert(chat_meta_info_t& meta_info, lm_uniform_input_t& input, std::f
             throw ModelRequestError(
                 500,
                 true,
-                "AIE4 inference failed before submission; the "
+                "AIE4 inference failed at a recoverable point; the "
                 "current conversation was cleared.");
         } catch (const std::exception&) {
             this->clear_after_corelib_error();
             throw ModelRequestError(
                 500,
                 true,
-                "AIE4 inference failed before submission; the "
+                "AIE4 inference failed at a recoverable point; the "
                 "current conversation was cleared.");
         } catch (...) {
             this->clear_after_corelib_error();
             throw ModelRequestError(
                 500,
                 true,
-                "AIE4 inference failed before submission; the "
+                "AIE4 inference failed at a recoverable point; the "
                 "current conversation was cleared.");
         }
 
@@ -694,21 +710,21 @@ std::string Phi4::generate(chat_meta_info_t& meta_info, int length_limit, std::o
             throw ModelRequestError(
                 500,
                 true,
-                "AIE4 inference failed before submission; the "
+                "AIE4 inference failed at a recoverable point; the "
                 "current conversation was cleared.");
         } catch (const std::exception&) {
             this->clear_after_corelib_error();
             throw ModelRequestError(
                 500,
                 true,
-                "AIE4 inference failed before submission; the "
+                "AIE4 inference failed at a recoverable point; the "
                 "current conversation was cleared.");
         } catch (...) {
             this->clear_after_corelib_error();
             throw ModelRequestError(
                 500,
                 true,
-                "AIE4 inference failed before submission; the "
+                "AIE4 inference failed at a recoverable point; the "
                 "current conversation was cleared.");
         }
     }

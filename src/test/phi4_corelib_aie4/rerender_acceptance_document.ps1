@@ -62,7 +62,11 @@ foreach ($fn in $hast.FindAll({ param($n) $n -is [System.Management.Automation.L
 }
 if ($lifted.Count -lt 2) {
     throw ("expected to lift Get-RecordSteps and ConvertTo-PlainData out of the harness, got: " +
-        ($lifted -join ', ') + '. The renderer needs both; a rename here would silently render nothing.')
+        ($lifted -join ', ') + '. Get-RecordSteps IS called by the render block; ConvertTo-PlainData ' +
+        'is not -- it is reached only through Save-Record, which this script stubs out. It is lifted ' +
+        'anyway so that a rename in the harness is reported here rather than discovered the next time ' +
+        'the render path grows a call to it. The earlier text on this line claimed a rename "would ' +
+        'silently render nothing", which was true of Get-RecordSteps and false of ConvertTo-PlainData.')
 }
 
 $lines = Get-Content -LiteralPath $harnessPath

@@ -36,10 +36,24 @@ make every one of those pass.
 
 Set FLM_TEST_WIN_LINKAGE_CMAKELISTS to point the parse at a scratch copy; that
 is how these assertions are themselves verified against mutated inputs.
+FLM_TEST_WIN_LINKAGE_PRESETS does the same for src/CMakePresets.json.
+
+WHY THE PRESET FILE IS READ HERE TOO
+------------------------------------
+The assertions above are about `option(FLM_WIN_STATIC_DEPS ... ON)`, and a
+default is only the shipping value while nothing overrides it. CI runs
+`cmake --preset windows-vs18`, so a single `"FLM_WIN_STATIC_DEPS": "OFF"` in a
+`cacheVariables` block -- on that preset or on anything it inherits from --
+re-breaks CRIT-3 exactly, with the option line untouched and every assertion
+above still green. That vector was demonstrated and this file did not see it,
+because it never opened CMakePresets.json. It does now. The same goes for a
+later `set(FLM_WIN_STATIC_DEPS OFF ...)` in CMakeLists.txt, which reaches the
+same end without touching the `option()` call either.
 """
 
 from __future__ import annotations
 
+import json
 import os
 import pathlib
 import re
@@ -47,6 +61,10 @@ import unittest
 
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 _DEFAULT_CMAKELISTS = _REPO_ROOT / "src" / "CMakeLists.txt"
+_DEFAULT_PRESETS = _REPO_ROOT / "src" / "CMakePresets.json"
+
+# CMake's false constants, which is what a re-break would spell.
+_CMAKE_FALSE = {"OFF", "FALSE", "N", "NO", "0", "", "IGNORE", "NOTFOUND"}
 
 # b2's spellings. A `lib` prefix is the static archive; the bare name is the
 # import library for boost_program_options.dll.
@@ -270,6 +288,42 @@ class WindowsBoostLinkage:
         )
 
 
+def _preset_overrides() -> list[tuple[str, str]]:
+    """Every (preset, value) that sets FLM_WIN_STATIC_DEPS in CMakePresets.json.
+
+    Both spellings of a cache variable are handled: the plain string form and
+    the `{"type": ..., "value": ...}` form.
+    """
+    path = pathlib.Path(
+        os.environ.get("FLM_TEST_WIN_LINKAGE_PRESETS", _DEFAULT_PRESETS)
+    )
+    if not path.is_file():
+        raise CMakeParseError(f"{path} does not exist")
+    document = json.loads(path.read_text(encoding="utf-8"))
+    found = []
+    for preset in document.get("configurePresets", []):
+        variables = preset.get("cacheVariables") or {}
+        if "FLM_WIN_STATIC_DEPS" not in variables:
+            continue
+        entry = variables["FLM_WIN_STATIC_DEPS"]
+        value = entry.get("value") if isinstance(entry, dict) else entry
+        found.append((str(preset.get("name", "<unnamed>")), str(value)))
+    return found
+
+
+def _preset_names() -> list[str]:
+    path = pathlib.Path(
+        os.environ.get("FLM_TEST_WIN_LINKAGE_PRESETS", _DEFAULT_PRESETS)
+    )
+    if not path.is_file():
+        raise CMakeParseError(f"{path} does not exist")
+    document = json.loads(path.read_text(encoding="utf-8"))
+    return [
+        str(preset.get("name", ""))
+        for preset in document.get("configurePresets", [])
+    ]
+
+
 def _load() -> WindowsBoostLinkage:
     path = pathlib.Path(
         os.environ.get("FLM_TEST_WIN_LINKAGE_CMAKELISTS", _DEFAULT_CMAKELISTS)
@@ -458,6 +512,68 @@ class WindowsDependencyLinkageGuardTest(unittest.TestCase):
             "${FLM_LIB_boost_program_options}",
             joined,
             "the guard does not report which library it actually resolved",
+        )
+
+
+class WindowsDependencyLinkageEffectiveValueTest(unittest.TestCase):
+    """Nothing between the `option()` line and the configure may flip it OFF.
+
+    `test_static_is_the_default` reads the option's default and stops there. A
+    default is only the shipping value while nothing overrides it, and the two
+    cheapest overrides -- a preset cache variable and a later `set()` -- leave
+    the option line byte-identical. Both were applied to this tree and the
+    suite stayed green; these are the assertions that turn them red.
+    """
+
+    def test_no_preset_turns_the_option_off(self) -> None:
+        offenders = [
+            f"{name}={value}"
+            for name, value in _preset_overrides()
+            if value.strip().upper() in _CMAKE_FALSE
+        ]
+        self.assertEqual(
+            offenders,
+            [],
+            "a CMake preset sets FLM_WIN_STATIC_DEPS to a false value "
+            f"({', '.join(offenders)}). CI runs `cmake --preset windows-vs18` "
+            "bare, so a preset cache variable IS the shipping linkage: this "
+            "makes flm.exe import boost_program_options.dll, which src/lib "
+            "does not vendor and src/wix/get_files.bat does not stage. "
+            "cacheVariables are inherited, so a false value on ANY preset in "
+            "this file is reported here.",
+        )
+
+    def test_the_preset_file_was_actually_read(self) -> None:
+        # Non-vacuity. A missing, empty or restructured preset file would make
+        # the assertion above pass by finding nothing -- which is precisely
+        # how this file failed to see the preset re-break before.
+        names = _preset_names()
+        self.assertIn(
+            "windows-vs18",
+            names,
+            "src/CMakePresets.json has no `windows-vs18` configure preset, so "
+            "the preset scan is not reading the file CI invokes. Found: "
+            f"{names}",
+        )
+
+    def test_cmakelists_does_not_reassign_the_option(self) -> None:
+        # `set(FLM_WIN_STATIC_DEPS OFF CACHE BOOL "" FORCE)` after the option,
+        # or a plain `set(FLM_WIN_STATIC_DEPS OFF)` before it (CMP0077 makes
+        # `option()` honour an existing normal variable), both reach the same
+        # place without editing the `option()` call.
+        parsed = _load()
+        assignments = re.findall(
+            r"^\s*set\(\s*FLM_WIN_STATIC_DEPS\b[^)]*\)",
+            parsed.code,
+            re.M,
+        )
+        self.assertEqual(
+            assignments,
+            [],
+            "src/CMakeLists.txt assigns FLM_WIN_STATIC_DEPS outside its "
+            f"option() declaration: {assignments}. Under CMP0077 that "
+            "overrides the default the tests above read, so the option line "
+            "no longer tells you the shipping linkage.",
         )
 
 

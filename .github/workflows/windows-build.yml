@@ -136,6 +136,165 @@ jobs:
           path: src/wix/output/flm-setup.msi
           if-no-files-found: error
 
+  build-windows-portable-hrx:
+    runs-on: [self-hosted, windows, x64, portable]
+
+    defaults:
+      run:
+        working-directory: src
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Configure CMake (HRX)
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $lines = & '..\hrx-integration\fetch-hrx-release.ps1' 6>&1 | ForEach-Object { $_.ToString() }
+          $lines | ForEach-Object { Write-Host $_ }
+          $prefix = ($lines | Where-Object { $_ -like 'HRX_CMAKE_PREFIX=*' } | Select-Object -First 1) -replace 'HRX_CMAKE_PREFIX=', ''
+          if (-not $prefix) {
+            throw 'failed to determine HRX_CMAKE_PREFIX from fetch-hrx-release.ps1 output'
+          }
+          cmake --preset windows-vs18 -DFLM_USE_HRX=ON "-DCMAKE_PREFIX_PATH=$prefix"
+
+      - name: Build
+        shell: powershell
+        run: |
+          cmake --build --preset windows-default --config Release --parallel
+
+      - name: Prepare package files
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $dist = "dist"
+
+          if (Test-Path $dist) {
+            Remove-Item $dist -Recurse -Force
+          }
+
+          New-Item -ItemType Directory -Force $dist | Out-Null
+
+          # Main executable
+          Copy-Item -Path .\build\flm.exe -Destination $dist\ -Force
+
+          # Required data assets
+          Copy-Item -Path .\xclbins -Destination $dist\ -Recurse -Force
+          Copy-Item -Path .\model_list.json -Destination $dist\ -Force
+          Copy-Item -Path .\model_info.json -Destination $dist\ -Force
+          Copy-Item -Path .\lib\*.dll -Destination $dist\ -Force
+
+          # HRX-variant op libraries override the default ones
+          Copy-Item -Path .\lib\hrx\*.dll -Destination $dist\ -Force
+
+          # HRX runtime, fetched by the Configure CMake (HRX) step
+          $hrxDll = Get-ChildItem -Path ..\hrx-integration\.hrx-release -Recurse -Filter 'hrx.dll' -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $hrxDll) {
+            throw 'hrx.dll not found under hrx-integration\.hrx-release; HRX fetch step may have failed'
+          }
+          Copy-Item -Path $hrxDll.FullName -Destination $dist\ -Force
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: HRX-fastflowlm-windows-${{ github.sha }}
+          path: src/dist/
+          if-no-files-found: error
+
+  # build-windows-msi-hrx:
+  #   runs-on: [self-hosted, windows, x64, msi]
+
+  #   defaults:
+  #     run:
+  #       working-directory: src
+
+  #   steps:
+  #     - name: Checkout code
+  #       uses: actions/checkout@v4
+  #       with:
+  #         submodules: recursive
+  #         fetch-depth: 0
+  #         fetch-tags: true
+
+  #     - name: Configure CMake (HRX)
+  #       shell: powershell
+  #       run: |
+  #         $ErrorActionPreference = "Stop"
+  #         $lines = & '..\hrx-integration\fetch-hrx-release.ps1' 6>&1 | ForEach-Object { $_.ToString() }
+  #         $lines | ForEach-Object { Write-Host $_ }
+  #         $prefix = ($lines | Where-Object { $_ -like 'HRX_CMAKE_PREFIX=*' } | Select-Object -First 1) -replace 'HRX_CMAKE_PREFIX=', ''
+  #         if (-not $prefix) {
+  #           throw 'failed to determine HRX_CMAKE_PREFIX from fetch-hrx-release.ps1 output'
+  #         }
+  #         cmake --preset windows-vs18 -DFLM_USE_HRX=ON "-DCMAKE_PREFIX_PATH=$prefix"
+
+  #     - name: Build
+  #       shell: powershell
+  #       run: |
+  #         cmake --build --preset windows-default --config Release --parallel
+
+  #     - name: Stage installer package files
+  #       shell: powershell
+  #       run: |
+  #         cd inno
+  #         .\get_files.bat
+
+  #     - name: Overlay HRX runtime files
+  #       shell: powershell
+  #       run: |
+  #         $ErrorActionPreference = "Stop"
+
+  #         # HRX-variant op libraries override the default ones staged above
+  #         Copy-Item -Path .\lib\hrx\*.dll -Destination .\inno\ -Force
+
+  #         # HRX runtime, fetched by the Configure CMake (HRX) step
+  #         $hrxDll = Get-ChildItem -Path ..\hrx-integration\.hrx-release -Recurse -Filter 'hrx.dll' -ErrorAction SilentlyContinue | Select-Object -First 1
+  #         if (-not $hrxDll) {
+  #           throw 'hrx.dll not found under hrx-integration\.hrx-release; HRX fetch step may have failed'
+  #         }
+  #         Copy-Item -Path $hrxDll.FullName -Destination .\inno\hrx.dll -Force
+
+  #     - name: Add WiX to PATH
+  #       shell: powershell
+  #       run: |
+  #         $wixToolsPath = "C:\Users\zani\.dotnet\tools"
+
+  #         if (-not (Test-Path "$wixToolsPath\wix.exe")) {
+  #           throw "WiX was not found at $wixToolsPath\wix.exe"
+  #         }
+
+  #         $wixToolsPath | Out-File `
+  #           -FilePath $env:GITHUB_PATH `
+  #           -Encoding utf8 `
+  #           -Append
+
+  #     - name: Verify WiX
+  #       shell: powershell
+  #       run: |
+  #         Write-Host "Runner identity: $(whoami)"
+  #         Write-Host "Runner profile: $env:USERPROFILE"
+
+  #         $wix = Get-Command wix -ErrorAction Stop
+  #         Write-Host "Using WiX: $($wix.Source)"
+  #         wix --version
+
+  #     - name: Build MSI installer
+  #       shell: powershell
+  #       run: |
+  #         .\wix\build.ps1 -Hrx
+
+  #     - name: Upload MSI artifact
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: HRX-fastflowlm-windows-msi-${{ github.sha }}
+  #         path: src/wix/output/flm-setup.msi
+  #         if-no-files-found: error
+
   release:
     runs-on: ubuntu-latest
     needs: [build-windows-portable, build-windows-msi]

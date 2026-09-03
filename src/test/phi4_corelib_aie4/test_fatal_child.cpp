@@ -33,7 +33,10 @@
 
 #include <windows.h>
 
+#include <algorithm>
 #include <array>
+#include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
@@ -53,6 +56,7 @@ namespace constants = flm::phi4::constants;
 using flm::corelib::CorelibApi;
 using flm::corelib::CorelibError;
 using flm::corelib::CorelibRuntime;
+using flm::corelib::FailureContext;
 using flm::corelib::FatalRecordStore;
 using flm::corelib::StepSubmissionState;
 
@@ -171,7 +175,72 @@ CorelibError RealCorelibFailure(const std::shared_ptr<CorelibApi>& api) {
 // Child
 // ---------------------------------------------------------------------------
 
+// The record-store half of the terminal path, in a real process, with no
+// device.
+//
+// Design 12.4's concurrency properties -- unique files per process, a pending
+// file preserved while its owner is still alive, ordered reporting of every
+// completed record -- have only ever been checked in ONE process against
+// injected PIDs, start times and process probes. That leaves the production
+// probe itself unexercised: nothing had ever confirmed that
+// `ProbeProcessStart` recognises a genuinely live sibling process, which is
+// the single decision that stands between a live process's pending file and
+// its deletion.
+//
+// This child deliberately does NOT load corelib. Two processes holding AIE4
+// device contexts at once fail in ways that look like defects, and none of the
+// four properties under test needs a device -- so the concurrency is real and
+// the device contention is not introduced.
+int RunRecordOnlyChild() {
+    auto store = FatalRecordStore::ForCurrentProcess();
+    store.Prepare();
+    WriteMarker(L"pid.marker", std::to_string(GetCurrentProcessId()));
+    WriteMarker(L"pending.marker", store.pending_path().string());
+    // Written LAST, and empty on purpose.
+    //
+    // The other scenarios read a child's markers only after it has exited, so
+    // they never had to care that `ofstream` CREATES a file before it writes
+    // to it. This scenario reads while the child is still alive, and polling
+    // `exists("pending.marker")` returns true the instant the stream is
+    // opened -- so the parent read a zero-length path, decided the pending
+    // file did not exist, and failed. It failed intermittently, which is
+    // worse than failing. Existence of this marker is ordered after the other
+    // two are flushed and closed, so it means "the markers are complete"
+    // rather than "a marker has begun".
+    WriteMarker(L"ready.marker", "");
+
+    // Both children hold their pending file open until the parent has drained
+    // once with both of them alive. The go file is a sibling of the marker
+    // directories so no extra argument has to be threaded through.
+    const auto go = g_marker_dir.parent_path() / "go.marker";
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(120);
+    while (!std::filesystem::exists(go)) {
+        if (std::chrono::steady_clock::now() > deadline) {
+            std::cerr << "record_only child timed out waiting for "
+                      << go.string() << '\n';
+            return 3;
+        }
+        Sleep(25);
+    }
+
+    const FailureContext failure{
+        ryzenai_corelib_status_bad_argument,
+        "matmul_q",
+        "concurrent record child",
+        "qkv",
+        7,
+        13,
+        29};
+    const auto final_path = store.Persist(failure);
+    WriteMarker(L"final.marker", final_path.string());
+    return 0;
+}
+
 int RunChild(std::string_view scenario) {
+    if (scenario == "record_only") {
+        return RunRecordOnlyChild();
+    }
     AddExtraDllDirectories(FLM_REAL_CORELIB_EXTRA_DLL_DIRS);
 
     // GetOrCreate builds the production runtime: the real DLL, the real
@@ -318,10 +387,18 @@ int RunChild(std::string_view scenario) {
 
 class TempDirectory final {
 public:
+    // PID alone is not unique enough. Windows reuses process IDs freely, and
+    // a run that fails can leave child processes polling this directory for
+    // up to their timeout; a later run that happens to get the same PID then
+    // shares a directory with somebody else's children. That produced an
+    // intermittent failure that only ever appeared in the run immediately
+    // after a failed one, which is the hardest kind to read. The tick count
+    // makes reuse impossible in any window that matters.
     TempDirectory() {
         path_ = std::filesystem::temp_directory_path() /
                 ("fastflowlm-fatal-child-" +
-                 std::to_string(GetCurrentProcessId()));
+                 std::to_string(GetCurrentProcessId()) + "-" +
+                 std::to_string(GetTickCount64()));
         std::filesystem::create_directories(path_);
     }
 
@@ -346,7 +423,37 @@ struct ChildResult {
     std::string output;
 };
 
+// A child that has been started but not yet waited for. Needed because the
+// concurrency scenario has to have two of them alive at the same moment; every
+// other scenario starts one and waits.
+struct RunningChild {
+    PROCESS_INFORMATION process{};
+    std::filesystem::path log;
+    std::filesystem::path marker_dir;
+    std::string scenario;
+};
+
+RunningChild StartChild(
+    const std::filesystem::path& executable,
+    const std::filesystem::path& log_path,
+    const std::filesystem::path& marker_dir,
+    std::string_view scenario);
+
+ChildResult AwaitChild(RunningChild& child, DWORD timeout_ms);
+
 ChildResult RunScenario(
+    const std::filesystem::path& executable,
+    const std::filesystem::path& log_path,
+    const std::filesystem::path& marker_dir,
+    std::string_view scenario) {
+    RunningChild child =
+        StartChild(executable, log_path, marker_dir, scenario);
+    // Generous, but bounded: the child loads the real corelib, and a hang
+    // must fail the suite rather than wedge it.
+    return AwaitChild(child, 300000);
+}
+
+RunningChild StartChild(
     const std::filesystem::path& executable,
     const std::filesystem::path& log_path,
     const std::filesystem::path& marker_dir,
@@ -407,21 +514,33 @@ ChildResult RunScenario(
             std::to_string(GetLastError()) + ")");
     }
 
-    ChildResult result;
-    // Generous, but bounded: the child loads the real corelib, and a hang
-    // must fail the suite rather than wedge it.
-    if (WaitForSingleObject(process.hProcess, 300000) != WAIT_OBJECT_0) {
-        TerminateProcess(process.hProcess, 1);
-        CloseHandle(process.hThread);
-        CloseHandle(process.hProcess);
-        throw std::runtime_error(
-            "child scenario " + std::string(scenario) + " did not exit");
-    }
-    GetExitCodeProcess(process.hProcess, &result.exit_code);
-    CloseHandle(process.hThread);
-    CloseHandle(process.hProcess);
+    RunningChild child;
+    child.process = process;
+    child.log = log_path;
+    child.marker_dir = marker_dir;
+    child.scenario = std::string(scenario);
+    return child;
+}
 
-    std::ifstream stream(log_path, std::ios::binary);
+ChildResult AwaitChild(RunningChild& child, DWORD timeout_ms) {
+    ChildResult result;
+    if (
+        WaitForSingleObject(child.process.hProcess, timeout_ms) !=
+        WAIT_OBJECT_0
+    ) {
+        TerminateProcess(child.process.hProcess, 1);
+        CloseHandle(child.process.hThread);
+        CloseHandle(child.process.hProcess);
+        child.process = PROCESS_INFORMATION{};
+        throw std::runtime_error(
+            "child scenario " + child.scenario + " did not exit");
+    }
+    GetExitCodeProcess(child.process.hProcess, &result.exit_code);
+    CloseHandle(child.process.hThread);
+    CloseHandle(child.process.hProcess);
+    child.process = PROCESS_INFORMATION{};
+
+    std::ifstream stream(child.log, std::ios::binary);
     std::ostringstream buffer;
     buffer << stream.rdbuf();
     result.output = buffer.str();
@@ -547,6 +666,228 @@ void CheckDetailedRecord(
     CHECK(!FieldValue(record, "process_start_utc").empty());
 }
 
+// Design 12.4 concurrency, with two processes that are genuinely concurrent.
+//
+// Four properties, and what each one adds over the in-process tests in
+// test_corelib_fatal_record:
+//
+//  1. Unique files. There the two stores were given PIDs 1001 and 1002 by the
+//     test. Here they are whatever Windows assigned, and the start times are
+//     whatever the real `GetProcessTimes` reported.
+//  2. A live process's pending file is preserved. There the probe was a lambda
+//     that returned a chosen answer. Here it is the production
+//     `ProbeProcessStart`, asked about a sibling process that really is
+//     running -- the only version of this check that can fail if the probe is
+//     wrong.
+//  3. Every completed record is reported, in order.
+//  4. The pending files are gone once their owners have persisted.
+//
+// What this does NOT add: "safe preservation when the process-start query
+// fails". A failing Win32 query cannot be produced on demand, so that case
+// stays with the injected-probe test and is not claimed here.
+void RunConcurrentRecordScenario(
+    const std::filesystem::path& executable,
+    TempDirectory& logs) {
+    std::cout << "concurrent record children:\n";
+
+    // Every record from the scenarios above has already been drained, but
+    // drain again so the counts below describe only these two children.
+    std::ostringstream cleared;
+    (void)FatalRecordStore::DrainPriorRecords(cleared);
+
+    const auto go = logs.path() / "go.marker";
+    std::error_code ignored;
+    std::filesystem::remove(go, ignored);
+
+    std::array<RunningChild, 2> children{
+        StartChild(
+            executable,
+            logs.path() / "record_a.log",
+            logs.path() / "record_a",
+            "record_only"),
+        StartChild(
+            executable,
+            logs.path() / "record_b.log",
+            logs.path() / "record_b",
+            "record_only")};
+
+    // Nothing here may leave a child behind. A child that outlives a failing
+    // parent keeps polling for a release file that will never appear, holds
+    // a pending record in the shared root while it does, and is the state
+    // that made this scenario's first failure intermittent.
+    struct TerminateOnScopeExit {
+        std::array<RunningChild, 2>* children;
+        ~TerminateOnScopeExit() noexcept {
+            for (auto& child : *children) {
+                if (child.process.hProcess != nullptr) {
+                    TerminateProcess(child.process.hProcess, 1);
+                    CloseHandle(child.process.hThread);
+                    CloseHandle(child.process.hProcess);
+                    child.process = PROCESS_INFORMATION{};
+                }
+            }
+        }
+    } terminate_on_scope_exit{&children};
+
+    std::array<std::filesystem::path, 2> pending{};
+    std::array<std::string, 2> pids{};
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(60);
+    for (std::size_t index = 0; index < children.size(); ++index) {
+        const auto marker = children[index].marker_dir / "ready.marker";
+        while (!std::filesystem::exists(marker)) {
+            if (std::chrono::steady_clock::now() > deadline) {
+                for (auto& child : children) {
+                    if (child.process.hProcess != nullptr) {
+                        TerminateProcess(child.process.hProcess, 1);
+                    }
+                }
+                throw std::runtime_error(
+                    "a record_only child never wrote its pending marker");
+            }
+            Sleep(25);
+        }
+        pending[index] = std::filesystem::path(
+            ReadMarker(children[index].marker_dir, L"pending.marker"));
+        pids[index] = ReadMarker(children[index].marker_dir, L"pid.marker");
+        // An empty marker means the ordering above broke, not that the store
+        // misbehaved. Say which, or the next reader spends an hour on the
+        // wrong one -- as this test already cost once.
+        if (pending[index].empty() || pids[index].empty()) {
+            for (auto& child : children) {
+                if (child.process.hProcess != nullptr) {
+                    TerminateProcess(child.process.hProcess, 1);
+                }
+            }
+            throw std::runtime_error(
+                "a record_only child's markers were readable but empty, so "
+                "ready.marker is no longer ordered after them");
+        }
+    }
+
+    // 1. Two live processes, two distinct pending files.
+    CHECK(pending[0] != pending[1]);
+    CHECK(pids[0] != pids[1]);
+    for (std::size_t index = 0; index < pending.size(); ++index) {
+        if (std::filesystem::exists(pending[index])) {
+            continue;
+        }
+        // A bare CHECK here says only "false", and this exact assertion has
+        // already been chased once on a wrong theory. Report the state that
+        // distinguishes the candidates: whether the child already persisted
+        // (a final record carrying its pid), whether the release file it
+        // waits on somehow exists, and what is actually in the record root.
+        std::ostringstream detail;
+        detail << "child " << pids[index]
+               << " pending file is absent while the child is still running: "
+               << pending[index].string()
+               << "\n  go file " << go.string() << " exists: "
+               << std::boolalpha << std::filesystem::exists(go)
+               << "\n  record root now holds:";
+        std::error_code listing;
+        for (const auto& entry : std::filesystem::directory_iterator(
+                 pending[index].parent_path(), listing)) {
+            detail << "\n    " << entry.path().filename().string();
+        }
+        for (auto& child : children) {
+            if (child.process.hProcess != nullptr) {
+                DWORD code = 0;
+                GetExitCodeProcess(child.process.hProcess, &code);
+                detail << "\n  child " << child.scenario << " exit code: "
+                       << (code == STILL_ACTIVE
+                               ? std::string("still running")
+                               : std::to_string(code));
+                TerminateProcess(child.process.hProcess, 1);
+            }
+        }
+        throw std::runtime_error(detail.str());
+    }
+
+    // 2. Both owners are alive, so the production probe must keep both.
+    std::ostringstream while_alive;
+    const auto during = FatalRecordStore::DrainPriorRecords(while_alive);
+    if (!during.empty()) {
+        for (auto& child : children) {
+            if (child.process.hProcess != nullptr) {
+                TerminateProcess(child.process.hProcess, 1);
+            }
+        }
+        throw std::runtime_error(
+            "a drain taken while two children were still running reported " +
+            std::to_string(during.size()) + " completed record(s)");
+    }
+    if (
+        !std::filesystem::exists(pending[0]) ||
+        !std::filesystem::exists(pending[1])
+    ) {
+        for (auto& child : children) {
+            if (child.process.hProcess != nullptr) {
+                TerminateProcess(child.process.hProcess, 1);
+            }
+        }
+        throw std::runtime_error(
+            "the drain deleted a pending record whose owner was still alive");
+    }
+    std::cout << "  both pendings survived a drain taken while both children "
+                 "were running\n";
+
+    {
+        std::ofstream stream(go, std::ios::binary | std::ios::trunc);
+        stream << "go";
+    }
+    for (auto& child : children) {
+        const auto result = AwaitChild(child, 180000);
+        CHECK(result.exit_code == 0);
+    }
+
+    std::array<std::filesystem::path, 2> finals{
+        std::filesystem::path(
+            ReadMarker(children[0].marker_dir, L"final.marker")),
+        std::filesystem::path(
+            ReadMarker(children[1].marker_dir, L"final.marker"))};
+    CHECK(finals[0] != finals[1]);
+    for (std::size_t index = 0; index < finals.size(); ++index) {
+        CHECK(finals[index].filename().string().ends_with(
+            "-" + pids[index] + ".json"));
+        // 4. Persisting consumed the pending file.
+        CHECK(!std::filesystem::exists(pending[index]));
+    }
+
+    // 3. Both completed records are reported, and in filename order -- which
+    //    is timestamp then PID, so the expected order is derived here rather
+    //    than assumed to be the order the children were started in.
+    std::vector<std::string> expected{
+        finals[0].string(), finals[1].string()};
+    std::sort(expected.begin(), expected.end());
+    std::ostringstream reported;
+    const auto drained = FatalRecordStore::DrainPriorRecords(reported);
+    if (drained.size() != 2) {
+        throw std::runtime_error(
+            "expected 2 completed records from two concurrent children, "
+            "drained " + std::to_string(drained.size()));
+    }
+    std::vector<std::string> drained_paths;
+    for (const auto& record : drained) {
+        // DrainPriorRecords returns each record's CONTENTS, so identify them
+        // by the PID each one carries rather than by a path it never returns.
+        CHECK(!record.empty());
+        drained_paths.push_back(FieldValue(record, "pid"));
+    }
+    std::vector<std::string> expected_pids;
+    for (const auto& path : expected) {
+        const auto name = std::filesystem::path(path).filename().string();
+        const auto dash = name.rfind('-');
+        expected_pids.push_back(
+            name.substr(dash + 1, name.size() - dash - 1 - 5));
+    }
+    CHECK(drained_paths == expected_pids);
+    for (const auto& pid : expected_pids) {
+        CHECK(reported.str().find("\"pid\":" + pid) != std::string::npos);
+    }
+    std::cout << "  2 completed records drained in filename order, pids "
+              << expected_pids[0] << " and " << expected_pids[1] << '\n';
+}
+
 int RunParent(const std::filesystem::path& executable) {
     TempDirectory logs;
 
@@ -633,6 +974,8 @@ int RunParent(const std::filesystem::path& executable) {
         CHECK(Contains(drained.str(), "\"phase\":\"" + std::string(phase)));
         std::cout << "  record: " << records.front();
     }
+
+    RunConcurrentRecordScenario(executable, logs);
 
     std::cout << "test_fatal_child: PASS\n";
     return 0;

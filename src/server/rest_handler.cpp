@@ -529,6 +529,12 @@ void RestHandler::configure_chat_engine_parameters(const json& options, const js
         int image_max_tokens = request["image-max-tokens"];
         auto_chat_engine->configure_parameter("image_max_tokens", image_max_tokens);
     }
+    // GBNF grammar-constrained decoding
+    if (request.contains("grammar")) {
+        std::string grammar_str = request["grammar"].get<std::string>();
+        std::string grammar_root = request.value("grammar_root", "root");
+        auto_chat_engine->set_grammar(grammar_str, grammar_root);
+    }
 }
 
 json RestHandler::build_nstream_response(std::string response_text) {

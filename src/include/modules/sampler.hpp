@@ -12,6 +12,9 @@
 #include <random>
 #include <unordered_map>
 
+// Forward declaration for grammar-constrained sampling
+class FlmGrammar;
+
 /// \brief sampler config
 /// \param temperature the temperature
 /// \param top_k the top k
@@ -73,6 +76,11 @@ public:
     std::uniform_real_distribution<float> uniform_dist_{0.0f, 1.0f};
     bool use_optimized_sampling = true;
 
+    // Grammar-constrained sampling (optional, non-owning pointer).
+    // When set, the grammar filter is applied before top-k and the grammar
+    // state is advanced after sampling.
+    FlmGrammar * grammar = nullptr;
+
     /// \brief Constructor
     /// \param in_features the input features
     /// \param config the configuration
@@ -112,6 +120,10 @@ public:
     void ring_buffer_update(int sampled_index);
     void ring_buffer_update_sparse(int sampled_index);
     
+    /// \brief Set or clear the grammar used for constrained sampling.
+    /// \param g  pointer to a FlmGrammar instance (non-owning), or nullptr
+    void set_grammar(FlmGrammar * g) { grammar = g; }
+
     /// \brief Sample the token
     /// \param x the input buffer
     /// \return the sampled token

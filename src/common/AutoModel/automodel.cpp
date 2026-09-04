@@ -151,6 +151,7 @@ void AutoModel::_shared_load_model(std::string model_path, json model_info, int 
     this->token_history.clear();
     this->token_history.reserve(this->MAX_L);
     this->tokenizer = std::make_unique<Tokenizer>(this->model_path);
+    this->token_pieces_cache_.clear();  // force rebuild on next grammar use
 
     this->last_token = -1;
     this->total_tokens = 0;
@@ -275,6 +276,13 @@ std::string AutoModel::_shared_generate(chat_meta_info_t& meta_info, int length_
     }
     assert(this->last_token != -1);
 
+    // Ensure grammar state is cleared on every exit path (early returns,
+    // exceptions, normal completion) so it cannot leak into the next request.
+    struct GrammarGuard {
+        AutoModel * self;
+        ~GrammarGuard() { self->clear_grammar(); }
+    } grammar_guard{this};
+
     stop_reason_t reason = EOT_DETECTED;
     int last_sampled_token = this->last_token;
     this->token_history.push_back(this->last_token);
@@ -337,6 +345,7 @@ std::string AutoModel::_shared_generate(chat_meta_info_t& meta_info, int length_
     }
     meta_info.decoding_duration = (uint64_t)(time_utils::cast_to_us(this->profiler_list[DECODING_TIME].get_total_time()).first) * 1e3;
     meta_info.stop_reason = reason;
+
     if (this->total_tokens >= this->MAX_L){
         header_print("WARNING", "Max length reached, stopping generation...");
     }
@@ -691,6 +700,47 @@ void AutoModel::set_frequency_penalty_window(int frequency_penalty_window) {
 /// \note The function will check if the penalty window is valid
 void AutoModel::set_penalty_window(int penalty_window) {
     this->sampler->repeat_last_n = penalty_window;
+}
+
+void AutoModel::set_grammar(const std::string & grammar_str, const std::string & grammar_root) {
+    if (grammar_str.empty()) {
+        clear_grammar();
+        return;
+    }
+
+    // Build the token-pieces lookup on first use (one decode per vocab entry).
+    // This is cached across calls — only rebuilt if the cache is empty (i.e.
+    // after a model switch).
+    if (token_pieces_cache_.empty() && this->tokenizer && this->lm_config) {
+        int vocab_size = this->lm_config->vocab_size;
+        token_pieces_cache_.resize(vocab_size);
+        for (int i = 0; i < vocab_size; i++) {
+            token_pieces_cache_[i] = this->tokenizer->run_time_decoder(i);
+        }
+    }
+
+    // Build into a local unique_ptr first: if parsing fails we must not
+    // destroy the old grammar_ while the sampler still holds a raw pointer
+    // to it — that would be a dangling reference on the next sample().
+    auto new_grammar = FlmGrammar::create(grammar_str, grammar_root,
+                                          token_pieces_cache_, eos_token_ids);
+    if (!new_grammar) {
+        fprintf(stderr, "AutoModel::set_grammar: failed to parse grammar\n");
+        clear_grammar();
+        return;
+    }
+
+    grammar_ = std::move(new_grammar);
+    if (this->sampler) {
+        this->sampler->set_grammar(grammar_.get());
+    }
+}
+
+void AutoModel::clear_grammar() {
+    if (this->sampler) {
+        this->sampler->set_grammar(nullptr);
+    }
+    grammar_.reset();
 }
 
 /// \brief Start the ttft timer

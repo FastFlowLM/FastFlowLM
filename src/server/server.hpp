@@ -11,7 +11,6 @@
 #include <boost/beast/core.hpp>
 #include <boost/beast/http.hpp>
 #include <boost/beast/version.hpp>
-#include <boost/beast/http/empty_body.hpp>
 #include <boost/asio.hpp>
 #include <nlohmann/json.hpp>
 #include <string>

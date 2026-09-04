@@ -254,7 +254,8 @@ void HttpSession::handle_request(bool cors) {
         header_print("✈️ ", "Handling Preflight (OPTIONS) request");
 
         // reponse empty body for OPTIONS
-        auto options_res = std::make_shared<http::response<http::empty_body>>();
+        auto options_res = std::make_shared<http::response<http::string_body>>();
+        options_res->body() = "";
         options_res->version(req_.version());
         options_res->result(http::status::ok); 
         options_res->keep_alive(req_.keep_alive());

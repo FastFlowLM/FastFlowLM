@@ -127,15 +127,16 @@ require.
 ### What has been verified on hardware
 
 This backend has been run end to end against the published model on an AMD
-Ryzen AI NPU. The signed-off record — machine and driver identity, the
-FastFlowLM commit, corelib DLL hashes, every measured timing, the verbatim
-prompts and completions, and a line-by-line result against the design's
-acceptance criteria — is at
-[Phi-4 AIE4 acceptance](/docs/benchmarks/phi4_aie4_acceptance/).
+Ryzen AI NPU: a 20-step acceptance pass whose tally was **16 steps met, 1 not
+met, 3 not exercised**, and **12 of 52 criteria met, 12 partial, 2 not met, 26
+not exercised**.
 
-Read that document before relying on any claim here. It states plainly which
-criteria were met, which were not, and which were **not tested at all**, and
-the last category is large.
+Read that last number before relying on any claim here — half the criteria were
+**not tested at all**. What was and was not established is summarised in
+[Phi-4 AIE4 Implementation](/docs/phi4_aie4_implementation/); every known defect
+and limit is in [Phi-4 AIE4 Caveats](/docs/phi4_aie4_caveats/). The step-by-step
+record itself was an artifact of that one campaign and is not carried in the
+repository — see caveat 11.
 
 ### What it costs to run
 
@@ -344,11 +345,10 @@ alone.
   onset is stable near that step, and whether it depends on the prompt are all
   unknown, and no run has been made to find out.
 
-  The acceptance record itself describes both turns with one reason, *"the
-  reply is dominated by a repeated token"*, which is right about the repetition
-  and silent about the collapse. The record is not edited after the fact; the
-  correction, with the derivation from the record's own data, is in
-  [Phi-4 AIE4 acceptance provenance](/docs/benchmarks/phi4_aie4_acceptance_provenance/).
+  The acceptance record described both turns with one reason, *"the reply is
+  dominated by a repeated token"*, which was right about the repetition and
+  silent about the collapse. The paragraph above is the correction, derived from
+  that record's own data.
 - **The limit is 4095 tokens** for the prompt and the generated tokens
   together, counted over the complete rendered conversation, **so the largest
   prompt you can submit is 4,094.** This is **by design, not a shortfall**: the

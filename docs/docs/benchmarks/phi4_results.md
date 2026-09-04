@@ -177,7 +177,7 @@ Undecided points, which is where the bracket's width comes from: history 2048 at
 
 ##### The same measurement, run to run
 
-**⚠ Corrected by hand on 2026-09-03; this block was NOT re-rendered.** The sentence generated here, and the guidance below the table, both said the bracket's lower edge was stable. A third interleaved run — `2026-09-03T08:20:08Z`, committed at `phi4_aie4_baseline_task15_rerun.json` — falsifies that, and it is now the fifth record in `phi4_aie4_crossover_history.json`. The two paragraphs that follow are what `report_phi4_corelib_baseline.py`'s own `crossover_edge_stability()` / `crossover_stability_narrative()` return when fed that updated history file, pasted here verbatim because the generator refuses to re-render this block at all (see [Why this is not rendered into the block above](#why-this-is-not-rendered-into-the-block-above)). **The table itself is unchanged and still shows only the four runs that existed when it was generated**; the fifth run's brackets are tabulated in [Task 15 re-measurement, 2026-09-03](#task-15-re-measurement-2026-09-03), which is also where every other consequence of that run is recorded. Read that section before citing anything in this one about edge stability.
+**⚠ Corrected by hand; this block was NOT re-rendered.** The sentence generated here, and the guidance below the table, both said the bracket's lower edge was stable. A third interleaved run — `2026-09-03T08:20:08Z` — falsifies that. The two paragraphs that follow are what `report_phi4_corelib_baseline.py`'s own `crossover_edge_stability()` / `crossover_stability_narrative()` return when fed the updated history, pasted here verbatim because the generator will not re-render this block. **The table itself is unchanged and still shows only the runs that existed when it was generated**; the newer run is tabulated in [Second measurement, 2026-09-03](#second-measurement-2026-09-03). Read that section before citing anything in this one about edge stability.
 
 **Neither edge of the bracket is stable between runs.** This table is every render of this document that recorded a crossover, from the committed baseline artifacts.
 
@@ -350,16 +350,14 @@ The timing table above is published here and is NOT shipped in the model package
 
 <!-- END phi4-continuation-threshold -->
 
-## Task 15 re-measurement, 2026-09-03
+## Second measurement, 2026-09-03
 
-Hand-written, outside both generated blocks above, because the generator
-**refused to render this run** — see below. The measurements are committed at
-`phi4_aie4_baseline_task15_rerun.json` beside this file; every figure here comes
-from that artifact.
+Hand-written, outside both generated blocks above. The measurements are
+committed at `phi4_aie4_baseline_task15_rerun.json` beside this file; every
+figure here is derived from that artifact rather than typed.
 
-Same machine, same corelib DLL (`a523b238…`), same model (`d6f503a9…`), on the
-final Task 15 tree. It is a second independent measurement of the run rendered
-above, taken a day later.
+Same machine, same corelib DLL (`a523b238…`), same model (`d6f503a9…`). It is a
+second independent measurement of the run rendered above, taken a day later.
 
 | | 2026-09-02 (rendered above) | 2026-09-03 (this run) |
 | --- | ---: | ---: |
@@ -396,25 +394,13 @@ So the stability claim holds at history 512 on three runs and **does not hold**
 at history 2048. The generated statement above has been corrected in place, by
 hand, and says so where it is corrected.
 
-**This run is now in the file the tooling reads.** For one review round it was
-not: the falsification lived only in this paragraph while
-`phi4_aie4_crossover_history.json` still held four records ending at
-`2026-09-02T16:32:18Z`, so every calibrator run kept cross-checking the shipped
-constant against only the two runs that agree. The 2026-09-03 run is now the
-fifth record in that file. Every field of it was derived from
-`phi4_aie4_baseline_task15_rerun.json` by `report_phi4_corelib_baseline.py`'s own
-`crossover_entry()` rather than typed in, and
-`test_the_run_that_moved_the_lower_edge_reached_the_history_file` in
-`tools/tests/test_calibrate_phi4_corelib_continuation.py` fails if it ever goes
-missing again. Three published statements moved as a direct result: the table
-under "Do the earlier runs permit this constant?" now carries three interleaved
-rows and reads **3 of 3** where it read *"2 of 2"*; the refusal diagnostic quoted
-below now names three runs instead of two; and the two paragraphs of that
-section which used to assert the lower edge was stable were **constant strings
-in the generator** — they could not change when the data did, and one of them
-said "three times" above a table of two comparable runs. They are now derived
-from the per-run lower edges, which that table also prints, so the sentence and
-the table it sits beside cannot disagree again.
+**This run is in the file the tooling reads.** It is the fifth record in
+`phi4_aie4_crossover_history.json`, every field derived from
+`phi4_aie4_baseline_task15_rerun.json` by `report_phi4_corelib_baseline.py`'s
+own `crossover_entry()` rather than typed in, and a test fails if it ever goes
+missing. That matters because a measurement recorded only in prose is not an
+input to anything: while it lived only in this paragraph, the calibrator kept
+cross-checking the shipped constant against only the two runs that agree.
 
 **2. On this run alone, Section 10.7's rule would select 8, not the shipped 4 —
 and the calibrator refuses on two independent grounds, not one.** Run against
@@ -455,22 +441,12 @@ more than three runs, not something to change in a regression pass. The
 calibrator's `--check` against the committed baseline passed in the same suite
 run.
 
-### Why this is not rendered into the block above
+### Why the block above still shows the earlier run
 
-`report_phi4_corelib_baseline.py` **failed**, so the generated baseline document
-is still the 2026-09-02 run. Its reason is a `DETERM-3` pooling rule, not a
-measurement problem:
-
-> the records do not all share one FastFlow harness SHA-256 (3 distinct values),
-> so they do not describe one binary and cannot be pooled into a baseline
-
-The committed determinism records now span three harness binaries, because each
-task rebuilt the test executable, and `DETERM-3` forbids pooling records from
-different binaries into one baseline. That is the rule working as designed, and
-it means **the determinism baseline cannot be re-rendered from the accumulated
-record set at all** — every future rebuild adds a fourth. Resolving it needs a
-decision about how the window is scoped, which belongs with the deferred
-determinism work rather than here. Two further problems the same report lists
-are pre-existing and already described in the block above: 66 records carry no
-harness hash and are excluded, and two `append` runs in the window recorded a
-`DETERM-2` gate failure.
+The generated baseline is frozen at 2026-09-02 and this run is written beside
+it rather than into it. The reason is the `DETERM-3` pooling rule, not a
+measurement problem: the records behind it did not all share one harness
+binary, and `DETERM-3` forbids pooling records from different binaries into one
+baseline. Resolving that needs a decision about how the window is scoped, which
+was deferred. See
+[caveat 10](/docs/phi4_aie4_caveats/#10-the-determinism-baseline-is-frozen).

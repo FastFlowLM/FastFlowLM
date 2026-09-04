@@ -258,8 +258,11 @@ is resolved, that block should be re-rendered and the label deleted.
 The measurements on this page are real and were taken as described. The
 **instruments and raw records are not here.** Removed: the end-to-end and
 benchmark harnesses, the PowerShell suite that drove them, the 20-step
-acceptance driver and its offline guards, the 150 determinism records, and the
-acceptance record JSON.
+acceptance driver and its offline guards, the 150 determinism records, the
+acceptance record JSON, and the two pages rendered from it — the step-by-step
+acceptance document and its provenance companion. Those two were a record of
+one campaign's internal review, published into a navigation menu beside the
+model benchmark pages, which is not what that menu is for.
 
 **Why.** None of it could run anywhere except one lab machine with an AIE4
 device and the real model — not on a developer box, and, per item 8, not in
@@ -285,21 +288,20 @@ Recoverable from git history at `5c93aadb` if a future campaign wants them.
 
 ---
 
-## A note on how to read the records
+## A note on how to read this page
 
-The acceptance record has a companion
-[provenance page](../benchmarks/phi4_aie4_acceptance_provenance/) that
-documents where the record itself is wrong: two failed turns described
-inaccurately, a source revision claiming a tree that was not pristine, and the
-word "bounded" doing more work than the data supports. That page's citations
-point into the acceptance JSON, which per item 11 is now history rather than a
-file you can open.
+The acceptance record was wrong in three places that mattered, and the
+corrections rather than the original are what this page carries: two failed
+turns were described inaccurately (item 5 has the corrected reason), a source
+revision claimed a tree that was not pristine, and the word "bounded" did more
+work than the data supports (item 4).
 
-It exists because the recurring failure in this work was **a record that reads
-better than the run it describes** — a check reported as passing for work it
-did not do, a retraction reaching the code but not the rendered artifact, a
-test agreeing with the implementation about which case exists. Roughly twenty
-instances were found and fixed across the effort, several of them by reviews
-catching earlier reviews.
+That list is short only because the recurring failure in this work was **a
+record that reads better than the run it describes** — a check reported as
+passing for work it did not do, a retraction reaching the code but not the
+rendered artifact, a test agreeing with the implementation about which case
+exists. Roughly twenty instances were found and fixed across the effort,
+several of them by reviews catching earlier reviews. Assume the ones still
+undetected exist.
 
 Trust the cited line numbers over any prose summary, including this page.

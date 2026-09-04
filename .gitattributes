@@ -36,3 +36,17 @@ src/model_overlays/** -text
 # which invalidates the recorded hash and forces a matching edit to
 # `model_list.json` -- churn in a checked artefact, to buy a presentation fix.
 src/model_overlays/phi4-mini-it-aie4/corelib_phi4_manifest.json -text -diff
+
+# The same reasoning for the three AIE4 benchmark records. Together they are
+# ~5,900 lines of per-sample timing arrays emitted by the benchmark
+# instrument. They are NOT dead evidence -- `test_phi4_continuation_calibration`
+# reads all three, and they are the fixtures roughly fifteen of that module's
+# assertions are written against, so the calibrator is tested against the real
+# measurement rather than against invented numbers. They stay, and they stay
+# byte-for-byte, because that test is green and depends on their contents.
+#
+# But nobody reviews a timing array line by line. `-diff` keeps them out of the
+# rendered diff without touching a byte.
+docs/docs/benchmarks/phi4_aie4_baseline.json -diff
+docs/docs/benchmarks/phi4_aie4_baseline_task15_rerun.json -diff
+docs/docs/benchmarks/phi4_aie4_crossover_history.json -diff

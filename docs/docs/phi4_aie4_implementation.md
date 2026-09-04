@@ -100,14 +100,11 @@ and SHA-256 of every DLL staged with it.
 
 **On `xcomedusad-43`** — a 20-step acceptance run against the real model in one
 uninterrupted pass. Five single-turn probes, five coherent and factually
-correct, roughly ten seconds each after a ~20 s model load. Recorded step by
-step and criterion by criterion in the
-[acceptance record](../benchmarks/phi4_aie4_acceptance/), with its own
-corrections in the
-[provenance page](../benchmarks/phi4_aie4_acceptance_provenance/).
+correct, roughly ten seconds each after a ~20 s model load.
 
 Final acceptance tally: **16 steps met, 1 not met, 3 not exercised**;
-**12 of 52 criteria met, 12 partial, 2 not met, 26 not exercised**.
+**12 of 52 criteria met, 12 partial, 2 not met, 26 not exercised**. Read the
+last figure first: half the criteria were never exercised.
 
 **On `xcomedusad-44`** — a machine that took no part in development, given the
 shipped MSI, the model package, and a conda environment reproduced from an

@@ -1034,6 +1034,17 @@ std::unique_ptr<WebServer> create_lm_server(model_list& models, ModelDownloader&
                 json request_json;
                 request_json["model"] = parts["model"].content;
                 request_json["file"] = parts["file"].content;
+                if (parts.count("response_format")) request_json["response_format"] = parts["response_format"].content;
+                if (parts.count("language")) request_json["language"] = parts["language"].content;
+                if (parts.count("prompt")) request_json["prompt"] = parts["prompt"].content;
+                if (parts.count("stream")) request_json["stream"] = (parts["stream"].content == "true");
+                if (parts.count("temperature")) {
+                    try {
+                        request_json["temperature"] = std::stof(parts["temperature"].content);
+                    } catch (const std::exception&) {
+                        // malformed temperature: drop it and let the handler apply its default
+                    }
+                }
                 rest_handler->handle_openai_audio_transcriptions(request_json, send_response, send_streaming_response, cancellation_token);
         });
 

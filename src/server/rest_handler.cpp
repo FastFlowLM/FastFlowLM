@@ -18,6 +18,7 @@
 #include <iomanip>
 #include <locale>
 #include <random>
+#include <regex>
 #include "server.hpp"
 
 ///@brief Normalize messages by merging consecutive user messages (like Ollama does)
@@ -1307,35 +1308,123 @@ void RestHandler::handle_openai_audio_transcriptions(const json& request,
         bool stream = request.value("stream", false);
         json response;
         if (this->asr) {
+            std::string response_format = request.value("response_format", std::string("json"));
+            bool want_verbose = (response_format == "verbose_json");
+            std::string raw_output;
+            std::string language;
 #ifndef FASTFLOWLM_LINUX_LIMITED_MODELS
             this->whisper_engine->load_audio(audio_raw);
             header_print("FLM", "Transforming audio to text...");
-            // Show text
             std::cout << "Audio content: " << std::flush;
-            std::pair<std::string, std::string> audio_result = this->whisper_engine->generate(Whisper::whisper_task_type_t::e_transcribe, true, false, std::cout);
-            std::string audio_context = audio_result.first;
+            std::pair<std::string, std::string> audio_result = this->whisper_engine->generate(
+                Whisper::whisper_task_type_t::e_transcribe,
+                true,
+                want_verbose,
+                std::cout);
+            raw_output = audio_result.first;
+            language = audio_result.second;
             std::cout << std::endl;
 #else
             throw std::runtime_error("ASR models are not supported in this build");
-            std::string audio_context;
 #endif
 
-            response = {
-                {"model", model},
-                {"text", audio_context}
-                //{"usage", {
-                //    {"type", "tokens"},
-                //    {"input_tokens", 0},
-                //    {"input_tokens_details", json::array({
-                //        {
-                //            {"text_tokens", 0},
-                //            {"audio_tokens", 0}
-                //        }
-                //    })},
-                //    {"output_tokens", 0},
-                //    {"total_tokens", 0}
-                //}}
-            };
+            static const std::regex ts_regex(R"(<\|(\d+\.\d+)\|>)");
+
+            if (want_verbose) {
+                std::vector<std::tuple<float, size_t, size_t>> markers;
+                auto it = std::sregex_iterator(raw_output.begin(), raw_output.end(), ts_regex);
+                auto end = std::sregex_iterator();
+                for (; it != end; ++it) {
+                    markers.emplace_back(
+                        std::stof((*it)[1].str()),
+                        static_cast<size_t>(it->position()),
+                        static_cast<size_t>(it->position() + it->length()));
+                }
+
+                json segments = json::array();
+                std::string plain_text;
+                float max_end = 0.0f;
+                for (size_t i = 0; i + 1 < markers.size(); ++i) {
+                    float seg_start = std::get<0>(markers[i]);
+                    float seg_end = std::get<0>(markers[i + 1]);
+                    size_t text_begin = std::get<2>(markers[i]);
+                    size_t text_end = std::get<1>(markers[i + 1]);
+                    if (text_end < text_begin) continue;
+                    std::string seg_text = raw_output.substr(text_begin, text_end - text_begin);
+                    size_t a = seg_text.find_first_not_of(" \t\n\r");
+                    if (a == std::string::npos) continue;
+                    size_t b = seg_text.find_last_not_of(" \t\n\r");
+                    seg_text = seg_text.substr(a, b - a + 1);
+                    if (seg_text.empty()) continue;
+
+                    segments.push_back({
+                        {"id", (int)segments.size()},
+                        {"seek", 0},
+                        {"start", seg_start},
+                        {"end", seg_end},
+                        {"text", std::string(" ") + seg_text},
+                        {"tokens", json::array()},
+                        {"temperature", 0.0},
+                        {"avg_logprob", 0.0},
+                        {"compression_ratio", 0.0},
+                        {"no_speech_prob", 0.0}
+                    });
+                    if (!plain_text.empty()) plain_text += " ";
+                    plain_text += seg_text;
+                    if (seg_end > max_end) max_end = seg_end;
+                }
+
+                // Fallback: if no segments were emitted (e.g. fewer than two
+                // timestamp markers were produced for very short clips, or every
+                // candidate segment trimmed to empty), surface the raw transcript
+                // as a single segment so verbose_json never drops text the model
+                // actually produced.
+                if (segments.empty()) {
+                    std::string fallback_text = std::regex_replace(raw_output, ts_regex, "");
+                    size_t fa = fallback_text.find_first_not_of(" \t\n\r");
+                    if (fa != std::string::npos) {
+                        size_t fb = fallback_text.find_last_not_of(" \t\n\r");
+                        fallback_text = fallback_text.substr(fa, fb - fa + 1);
+                        float fb_start = markers.empty() ? 0.0f : std::get<0>(markers.front());
+                        float fb_end = markers.empty() ? 0.0f : std::get<0>(markers.back());
+                        segments.push_back({
+                            {"id", 0},
+                            {"seek", 0},
+                            {"start", fb_start},
+                            {"end", fb_end},
+                            {"text", std::string(" ") + fallback_text},
+                            {"tokens", json::array()},
+                            {"temperature", 0.0},
+                            {"avg_logprob", 0.0},
+                            {"compression_ratio", 0.0},
+                            {"no_speech_prob", 0.0}
+                        });
+                        plain_text = fallback_text;
+                        if (fb_end > max_end) max_end = fb_end;
+                    }
+                }
+
+                response = {
+                    {"task", "transcribe"},
+                    {"language", language},
+                    {"duration", max_end},
+                    {"text", plain_text},
+                    {"segments", segments},
+                    {"model", model}
+                };
+            } else {
+                std::string plain_text = std::regex_replace(raw_output, ts_regex, "");
+                size_t a = plain_text.find_first_not_of(" \t\n\r");
+                if (a == std::string::npos) plain_text.clear();
+                else {
+                    size_t b = plain_text.find_last_not_of(" \t\n\r");
+                    plain_text = plain_text.substr(a, b - a + 1);
+                }
+                response = {
+                    {"model", model},
+                    {"text", plain_text}
+                };
+            }
         }
         else {
             header_print("Warning", "No asr model loaded, cannot load audio file");

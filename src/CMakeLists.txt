@@ -881,3 +881,70 @@ install(FILES model_info.json DESTINATION "${FLM_SHARE_DESTINATION}")
 # xclbins, which are loaded by shared libraries need to be in location
 # relative to the executable, so we install them relative to the binary.
 install(DIRECTORY xclbins DESTINATION "${FLM_SHARE_DESTINATION}")
+
+# ---------------------------------------------------------------------------
+# Optional: build NPU kernels from source. See ../kernels/CONVENTION.md.
+#
+# OFF by default, and when OFF this block adds no target, no dependency, no
+# install rule and no compile flag -- the build is identical to a tree in which
+# kernels/ does not exist. The `flm` target never depends on it in either
+# state, so a kernel build failure cannot block the binary.
+#
+# The AIE toolchain is deliberately not modelled in CMake. There is no
+# find_package for it; aiecc is invoked by the IRON runtime from inside Python;
+# and the dependency graph is not representable, because a design's entry
+# points do not exist until the design has run. Shelling out to one script
+# keeps this block free of toolchain knowledge, and keeps that script usable
+# with no CMake at all.
+# ---------------------------------------------------------------------------
+option(FLM_BUILD_KERNELS "Build NPU kernels from source in ../kernels (needs the IRON toolchain)" OFF)
+
+if(FLM_BUILD_KERNELS)
+    set(FLM_KERNELS_DIR "${CMAKE_SOURCE_DIR}/../kernels" CACHE PATH
+        "Kernel source tree")
+    set(FLM_KERNELS_PYTHON "" CACHE FILEPATH
+        "Python from an activated IRON environment (empty = found on PATH)")
+
+    if(FLM_KERNELS_PYTHON)
+        set(_flm_kpy "${FLM_KERNELS_PYTHON}")
+    else()
+        find_package(Python3 3.10 COMPONENTS Interpreter)
+        if(NOT Python3_Interpreter_FOUND)
+            message(FATAL_ERROR
+                "FLM_BUILD_KERNELS=ON but no Python 3.10+ was found. Activate the "
+                "IRON environment before configuring, or pass "
+                "-DFLM_KERNELS_PYTHON=<path to the IRON python>. See "
+                "kernels/README.md. Leave FLM_BUILD_KERNELS=OFF to skip this.")
+        endif()
+        set(_flm_kpy "${Python3_EXECUTABLE}")
+    endif()
+
+    # Fail at CONFIGURE time with the script's own one-line diagnostic, rather
+    # than at build time with an aiecc traceback.
+    execute_process(
+        COMMAND "${_flm_kpy}" "${FLM_KERNELS_DIR}/build_kernels.py" --check-toolchain
+        RESULT_VARIABLE _flm_k_rc
+        OUTPUT_VARIABLE _flm_k_out
+        ERROR_VARIABLE _flm_k_out
+        OUTPUT_STRIP_TRAILING_WHITESPACE)
+    if(NOT _flm_k_rc EQUAL 0)
+        message(FATAL_ERROR
+            "FLM_BUILD_KERNELS=ON but the IRON toolchain is not usable:\n"
+            "  ${_flm_k_out}\n"
+            "Set -DFLM_BUILD_KERNELS=OFF (the default) to build flm without it.")
+    endif()
+    message(STATUS "FLM kernel source build: ON -- ${_flm_k_out}")
+
+    add_custom_target(flm_kernels ALL
+        COMMAND "${_flm_kpy}" "${FLM_KERNELS_DIR}/build_kernels.py"
+                --family granite --out "${CMAKE_BINARY_DIR}/kernels"
+        WORKING_DIRECTORY "${FLM_KERNELS_DIR}"
+        COMMENT "Building NPU kernels from source (IRON/aiecc)"
+        VERBATIM USES_TERMINAL)
+
+    # Built artefacts install exactly like the checked-in ones, into the same
+    # tree, because build_kernels.py lays them out as <Model>/<name>.xclbin.
+    install(DIRECTORY "${CMAKE_BINARY_DIR}/kernels/"
+            DESTINATION "${FLM_SHARE_DESTINATION}/xclbins"
+            PATTERN "_generated" EXCLUDE)
+endif()

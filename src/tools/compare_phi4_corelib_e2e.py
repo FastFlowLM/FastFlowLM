@@ -1081,7 +1081,7 @@ def self_consistency(args) -> int:
         if a_row is None or b_row is None:
             localisation["reason"] = (
                 "a run predates the per-step LM-head input capture; rebuild "
-                "test_phi4_e2e with DEV_BUILD and re-run"
+                "the end-to-end harness with DEV_BUILD and re-run"
             )
         elif len(a_row) != len(b_row):
             localisation["reason"] = (

@@ -1540,8 +1540,7 @@ class CrossoverNarrativeRenderTests(unittest.TestCase):
 
     def test_a_moving_lower_edge_renders_honestly(self):
         # THE CASE THAT WOULD HAVE SHIPPED A FALSE CLAIM: the lower edge moves
-        # on a future hardware run, which run_hardware_suite.ps1 now appends
-        # to this history automatically.
+        # on a future hardware run appended to this history.
         # The lower edge moves and the upper HOLDS: 4 -> 8 with 12 both
         # times. Writing this fixture the obvious way -- (4, 8] then (8, 12]
         # -- moves both edges and lands in the "neither is stable" case, which

@@ -46,8 +46,8 @@
 # After AllocConsole() this process's stdout IS the new console, so anything
 # written to the success stream disappears from the SSH session. Every result
 # goes to -OutJson instead. That is also why this is a separate script rather
-# than a function inside run_real_model_acceptance.ps1: the orchestrator has to
-# keep its own stdout.
+# than a function in whatever calls it: the caller has to keep its own stdout,
+# so the AllocConsole() has to happen in a process the caller does not need.
 
 [CmdletBinding()]
 param(

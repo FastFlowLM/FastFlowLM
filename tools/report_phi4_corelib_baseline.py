@@ -1608,7 +1608,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--input",
         required=True,
-        help="phi4_aie4_baseline.json written by benchmark_phi4_aie4.exe",
+        help=(
+            "phi4_aie4_baseline.json, as written by the AIE4 benchmark "
+            "instrument on a machine with a device (not in this branch)"
+        ),
     )
     parser.add_argument(
         "--determinism-glob",

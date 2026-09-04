@@ -222,41 +222,15 @@ add_task10_production_compile_check(
     task10_production_compile_off
     FALSE)
 
-# The offline acceptance guards, run by `ctest` rather than by remembering.
-#
-# verify_acceptance_guards.ps1 carries 72 assertions -- the harness's guard
-# bodies driven against the committed record, the committed acceptance document
-# re-rendered from that record by the harness's own render block, and an AST
-# lint of the harness's call sites. Until now NOTHING invoked it: not a
-# CMakeLists, not a .cmake, not a workflow. An entire verification tier that
-# runs only when a human remembers is a verification tier that reports on runs
-# it did not have.
-#
-# It needs no hardware, no corelib, no model and no flm.exe -- only PowerShell
-# and the committed record -- so it is registered BEFORE the corelib-less
-# early return below, and it is the one test in this suite that a machine
-# without an AIE4 device can run in full. `enable_testing()` is called here
-# rather than 60 lines down for the same reason.
+# `enable_testing()` and the PowerShell probe are done here, ABOVE the
+# corelib-less early return below, so that test_packaged_runtime can still be
+# registered on a machine configured without an AIE4 device. Moving either of
+# them down past that return would silently drop the one PowerShell test a
+# device-less machine can run.
 enable_testing()
 find_program(FLM_POWERSHELL_EXECUTABLE
              NAMES pwsh powershell
-             DOC "PowerShell used to run the packaging and guard tests")
-if(FLM_POWERSHELL_EXECUTABLE)
-    add_test(NAME test_acceptance_guards
-             COMMAND "${FLM_POWERSHELL_EXECUTABLE}"
-                     -NoProfile
-                     -ExecutionPolicy Bypass
-                     -File
-                     "${CMAKE_CURRENT_LIST_DIR}/verify_acceptance_guards.ps1")
-    # No SKIP_RETURN_CODE. There is no input it can be missing: if the
-    # committed record is not there, that is a failure and not a skip.
-    set_tests_properties(test_acceptance_guards PROPERTIES TIMEOUT 900)
-else()
-    message(WARNING
-        "PowerShell was not found, so test_acceptance_guards is not "
-        "registered. The offline acceptance guards will not run in this "
-        "build.")
-endif()
+             DOC "PowerShell used to run the packaging tests")
 
 if(NOT RYZENAI_CORELIB_INCLUDE_DIR)
     # Guards-only configure. Everything below this point either includes
@@ -422,50 +396,14 @@ endfunction()
 add_corelib_hardware_test(test_phi4_hardware test_phi4_hardware.cpp)
 add_corelib_hardware_test(test_fatal_child test_fatal_child.cpp)
 
-# The end-to-end harness is NOT registered with add_test. It requires a model
-# directory and explicit token IDs, and the reference comparator must run to
-# completion before it starts; run_hardware_suite.ps1 owns that sequencing.
-# Registering it here with no arguments would produce a test that fails for
-# want of a flag on every machine, which is worse than one that is absent.
-add_executable(test_phi4_e2e test_phi4_e2e.cpp)
-target_link_libraries(test_phi4_e2e PRIVATE
-    flm_corelib_aie4_testlib
-    shell32
-    ole32
-    advapi32)
-# picosha2.h, for hashing the corelib the loader actually handed us. The same
-# header backs flm::pull::CalculateFileSha256, so the artifact's hash is
-# comparable with the ones the model catalog records.
-target_include_directories(test_phi4_e2e PRIVATE
-    ${FASTFLOW_SOURCE_DIR}/pull)
-target_compile_definitions(test_phi4_e2e PRIVATE
-    FLM_REAL_CORELIB_RUNTIME_DIR="${RYZENAI_CORELIB_RUNTIME_DIR}"
-    FLM_REAL_CORELIB_EXTRA_DLL_DIRS="${RYZENAI_CORELIB_EXTRA_DLL_DIRS_ESCAPED}")
-
-# Task 13's performance and memory baseline. Like test_phi4_e2e it is NOT
-# registered with add_test: it needs a model directory, a token plan and two
-# revision identifiers that only the caller can supply, and design section 4
-# makes its output a record rather than a gate, so a ctest entry would either
-# fail everywhere for want of a flag or pass without measuring anything.
-# run_hardware_suite.ps1 owns the invocation.
-add_executable(benchmark_phi4_aie4 benchmark_phi4_aie4.cpp)
-target_link_libraries(benchmark_phi4_aie4 PRIVATE
-    flm_corelib_aie4_testlib
-    shell32
-    ole32
-    advapi32
-    # Step 5: GetProcessMemoryInfo with PROCESS_MEMORY_COUNTERS_EX.
-    psapi
-    # The NPU SKU and driver version, asked of the OS device tree rather than
-    # transcribed from a session transcript.
-    setupapi
-    # GetFileVersionInfo, for the DynamicDispatch / RyzenMM / XRT identities.
-    version)
-target_include_directories(benchmark_phi4_aie4 PRIVATE
-    ${FASTFLOW_SOURCE_DIR}/pull)
-target_compile_definitions(benchmark_phi4_aie4 PRIVATE
-    FLM_REAL_CORELIB_RUNTIME_DIR="${RYZENAI_CORELIB_RUNTIME_DIR}"
-    FLM_REAL_CORELIB_EXTRA_DLL_DIRS="${RYZENAI_CORELIB_EXTRA_DLL_DIRS_ESCAPED}")
+# The end-to-end harness (test_phi4_e2e), the performance/memory baseline
+# instrument (benchmark_phi4_aie4) and the PowerShell campaign that drove them
+# are not part of this branch. They needed an AIE4 device, the real model and a
+# caller-supplied token plan, so nothing here or in CI could run them; the
+# records they produced were evidence of one campaign rather than a gate on
+# future changes. What remains below is what a machine can actually run:
+# test_phi4_hardware and test_fatal_child when a device is present, and the
+# packaging checks when it is not.
 
 # The packaging and clean-environment checks run by default rather than only
 # when someone remembers the command. Every regression guard in that script --
@@ -476,8 +414,8 @@ target_compile_definitions(benchmark_phi4_aie4 PRIVATE
 # It reports SKIPPED via SKIP_RETURN_CODE when its optional inputs are absent,
 # so a partial run never reads as full coverage.
 #
-# FLM_POWERSHELL_EXECUTABLE is found near the top of this file, because
-# test_acceptance_guards needs it on the corelib-less path too.
+# FLM_POWERSHELL_EXECUTABLE is found near the top of this file, above the
+# corelib-less early return, so this test survives a device-less configure.
 
 # Builds the argument vector for test_packaged_runtime.ps1.
 #
@@ -642,8 +580,8 @@ add_task10_production_compile_check(
 # CheckedInArtefactsTest, invokes the calibrator with `--check` against the
 # committed header, baseline, crossover history and benchmark document.
 #
-# FLM_PYTHON_EXECUTABLE may be set explicitly, and run_hardware_suite.ps1 does
-# set it, for the same reason it passes -CmakeExe: on the AIE4 target PATH
+# FLM_PYTHON_EXECUTABLE may be set explicitly, and on an AIE4 target it should
+# be, for the same reason test_packaged_runtime takes -CmakeExe: on that PATH
 # resolves `python3` to C:/cygwin/bin/python3, a Cygwin symlink that Windows
 # cannot execute at all. A found-but-unusable interpreter is worse than none,
 # because it registers a test that can never pass for a reason having nothing

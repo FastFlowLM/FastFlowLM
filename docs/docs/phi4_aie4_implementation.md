@@ -114,16 +114,31 @@ shipped MSI, the model package, and a conda environment reproduced from an
 explicit package list. The model loads and generates. Read the caveats page
 before concluding what this does and does not prove.
 
+**The instruments that produced both are not in this branch.** They ran only on
+a machine with an AIE4 device and the real model, so the harnesses, the
+PowerShell campaign and its raw records were removed rather than merged; the
+paths cited in the two pages above resolve at commit `5c93aadb`. The
+consequence — that these figures are reports rather than artifacts you can
+re-derive — is
+[caveat 11](../phi4_aie4_caveats/#11-the-hardware-campaign-is-not-in-this-branch).
+
 ## Scale
 
 | | |
 |---|---|
-| Commits | 112 |
-| Files changed | 273 (**188 of them tests**) |
-| Lines | +73,416 / −289 |
-| `ctest` | 17 passed, 0 failed, 4 skipped |
-| Python tooling | 312 passed |
-| Offline acceptance guards | 72 assertions, both PowerShell hosts |
+| Files changed | 110 (**32 of them tests**, carrying 23,912 of the added lines) |
+| Lines | +49,620 / −289 |
+| `ctest` | **16 registered** |
+| Python tooling | **312 passed** |
 
 The test share is the point rather than an accident: most real defects in this
 work were found by tests and review, not by the compiler.
+
+**On those two test numbers.** The Python figure is a run. The ctest figure is
+a count of what a clean configure registers — not a pass tally. The last full
+`ctest` run was **17 passed / 0 failed / 4 skipped** on `xcomedusad-43` at
+commit `5c93aadb`; the seventeenth was `test_acceptance_guards`, removed here
+along with the harness it guarded. The remaining 16 have not been re-run since,
+because building this suite needs XRT and a corelib runtime that exist on the
+AIE4 targets and not on a development box. **Re-running `ctest` on
+`xcomedusad-43` is the one outstanding check on this branch.**

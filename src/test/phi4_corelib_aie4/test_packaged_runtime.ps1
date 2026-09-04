@@ -906,9 +906,9 @@ flm_aie4_install_runtime(DESTINATION bin/aie4 COMPONENT AIE4)
                 # The driver AllocConsole()s and takes its own stdout with it,
                 # so it has to be a separate process and its streams must be
                 # left alone -- piping them makes flm.exe inherit a pipe and
-                # spin on a read it can never satisfy. See the same launch
-                # shape, and the alternatives that were measured to fail, in
-                # run_real_model_acceptance.ps1's Invoke-FlmConsoleSession.
+                # spin on a read it can never satisfy. So: a separate
+                # PowerShell with untouched streams, and the result read back
+                # from the JSON file the driver writes rather than from stdout.
                 $psExe = (Get-Process -Id $PID).Path
                 & $psExe -NoProfile -ExecutionPolicy Bypass -File $driver `
                     -FlmExe $resolvedFlm `

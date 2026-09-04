@@ -532,8 +532,8 @@ int main() {
     if (!HardwareRunRequested()) {
         std::cout
             << "test_phi4_hardware: SKIPPED -- set FLM_AIE4_HARDWARE=1 to "
-               "run this on the AIE4 target. run_hardware_suite.ps1 sets "
-               "it; nothing else should.\n";
+               "run this on the AIE4 target. Set it only there: on a machine "
+               "with no device it turns a skip into a failure.\n";
         return kCTestSkipReturnCode;
     }
 

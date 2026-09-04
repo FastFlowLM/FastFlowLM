@@ -87,9 +87,12 @@ it in full.
 This backend is **not deterministic run to run**, and the difference is not a
 rounding difference in the last bits — it is a different answer.
 
-In the committed determinism campaign, **3 of 150 recorded run-pair
-comparisons** ended with the two runs emitting different token sequences. One
-pair parts at the 8th emitted token, the other two at the 14th.
+In the determinism campaign, **3 of 150 recorded run-pair comparisons** ended
+with the two runs emitting different token sequences. One pair parts at the 8th
+emitted token, the other two at the 14th.
+
+The 150 JSON records are **not carried in this branch** — see item 11 — so the
+three that diverged are summarised below rather than cited by path.
 
 Two severity measures are recorded and **they do not rank the three records the
 same way**, so each figure belongs to its own record rather than to a single
@@ -97,12 +100,12 @@ same way**, so each figure belongs to its own record rather than to a single
 
 | Record | Max absolute logit difference | Most logits moving at one step | Gate breaches |
 |---|---:|---:|---:|
-| `…-010.json` | 48.34 | 196,154 of 200,064 | 17 |
-| `…-022.json` | **49.25** | 196,748 | 8 |
-| `…-026.json` | 49.21 | **196,835** | 10 |
+| `determ1-force_append-010` | 48.34 | 196,154 of 200,064 | 17 |
+| `determ1-force_append-022` | **49.25** | 196,748 | 8 |
+| `determ1-force_append-026` | 49.21 | **196,835** | 10 |
 
 All three are on the **append** continuation route. All three **breach** the
-2-BF16-ULP bound the suite gates on — the bound is not merely approached.
+2-BF16-ULP bound the suite gated on — the bound is not merely approached.
 
 **Two things follow, and only the second is obvious.** The per-value bound did
 not hold. And even inside that bound the effect would not be bounded, because
@@ -233,26 +236,52 @@ coverage.
 
 ---
 
-## 9. Two things are recorded as unverified, on purpose
+## 9. The legacy NPU2 path was compiled and linked, not run
 
-- **The acceptance harness's REPL-hang fix** is verified by parse, by 72
-  surviving offline assertions, and by being the same bounded console call the
-  other steps use — **not by execution**. Confirming it needs AIE4 hardware, a
-  model and a console, and re-running the acceptance harness was ruled out.
-- **The legacy NPU2 path** was compiled and linked, not run. No such hardware
-  was available.
+No such hardware was available. It builds; whether it works is unestablished.
 
 ---
 
 ## 10. The determinism baseline is frozen
 
 `DETERM-3` forbids pooling measurements across harness binaries, and the
-committed records now span three. The published baseline is therefore frozen at
-its original run, later measurements are committed separately, and the
-stability sentences in that block are **hand-corrected rather than
-re-rendered** — labelled as such, so a reader can tell the two apart. If the
-pooling question is resolved, that block should be re-rendered and the label
-deleted.
+records spanned three. The published baseline is therefore frozen at its
+original run, later measurements are recorded separately, and the stability
+sentences in that block are **hand-corrected rather than re-rendered** —
+labelled as such, so a reader can tell the two apart. If the pooling question
+is resolved, that block should be re-rendered and the label deleted.
+
+---
+
+## 11. The hardware campaign is not in this branch
+
+The measurements on this page are real and were taken as described. The
+**instruments and raw records are not here.** Removed: the end-to-end and
+benchmark harnesses, the PowerShell suite that drove them, the 20-step
+acceptance driver and its offline guards, the 150 determinism records, and the
+acceptance record JSON.
+
+**Why.** None of it could run anywhere except one lab machine with an AIE4
+device and the real model — not on a developer box, and, per item 8, not in
+CI. It was evidence of one campaign rather than a gate on future changes, and
+carrying ~19,000 lines of it made the diff unreadable without making anything
+safer.
+
+**What this costs you.** The figures on this page and in the benchmark pages
+can no longer be re-derived from anything in the tree. They are reports, not
+reproducible artifacts. Treat every number here as *measured once, on
+`xcomedusad-43`, by an instrument you cannot run* — which is what it always
+was; the records' presence made it look otherwise.
+
+**What still runs.** `test_phi4_hardware` and `test_fatal_child` exercise the
+real corelib on a device when `FLM_AIE4_HARDWARE=1`;
+`provision_aie4_target.ps1` still stages a machine to do it. The remaining 16
+registered tests run without a device. The reference tooling
+(`compare_phi4_corelib_e2e.py`, `phi4_host_lm_head_reference.py`,
+`report_phi4_corelib_baseline.py`) is kept with its own tests, but **nothing
+in the tree now produces its inputs.**
+
+Recoverable from git history at `5c93aadb` if a future campaign wants them.
 
 ---
 
@@ -262,14 +291,15 @@ The acceptance record has a companion
 [provenance page](../benchmarks/phi4_aie4_acceptance_provenance/) that
 documents where the record itself is wrong: two failed turns described
 inaccurately, a source revision claiming a tree that was not pristine, and the
-word "bounded" doing more work than the data supports.
+word "bounded" doing more work than the data supports. That page's citations
+point into the acceptance JSON, which per item 11 is now history rather than a
+file you can open.
 
-That page exists because the recurring failure in this work was **a record that
-reads better than the run it describes** — a check reported as passing for work
-it did not do, a retraction reaching the code but not the rendered artifact, a
+It exists because the recurring failure in this work was **a record that reads
+better than the run it describes** — a check reported as passing for work it
+did not do, a retraction reaching the code but not the rendered artifact, a
 test agreeing with the implementation about which case exists. Roughly twenty
 instances were found and fixed across the effort, several of them by reviews
 catching earlier reviews.
 
-Trust the committed JSON and the cited line numbers over any prose summary,
-including this page.
+Trust the cited line numbers over any prose summary, including this page.

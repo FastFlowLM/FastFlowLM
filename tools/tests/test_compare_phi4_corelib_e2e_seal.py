@@ -1,9 +1,10 @@
 """The `_DETERM2_SEALED` import-time seal, exercised without hardware.
 
 Nothing else in the repository does. `src/tools/compare_phi4_corelib_e2e.py`
-is invoked only from `run_hardware_suite.ps1`, which needs an AIE4 device and
-the real model, so until now the seal was verified by hand and by review and
-by nothing that runs. A seal whose failure path is never executed is a comment.
+runs against documents produced on an AIE4 device with the real model, so
+nothing in this branch invokes it and the seal was verified by hand and by
+review and by nothing that runs. A seal whose failure path is never executed
+is a comment. These tests are what make it a seal.
 
 Each test edits the constant the way somebody would after grepping it out of a
 failure message -- in a copy, then executing the real file -- and requires the

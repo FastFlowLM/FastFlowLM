@@ -16,3 +16,23 @@
 # directions, which is the only setting that makes the recorded hash a property
 # of the commit rather than of the machine that cloned it.
 src/model_overlays/** -text
+
+# `corelib_phi4_manifest.json` is 274 KB -- 10,556 lines -- of generated
+# per-initializer records, one entry per weight tensor in the ONNX. It is
+# written by `tools/generate_phi4_corelib_manifest.py`, consumed by
+# `phi4_corelib_manifest.cpp`, and read by no human: reviewing it line by line
+# is not a thing anyone does or should do, and at that size it crowds out the
+# rest of a diff.
+#
+# `-diff` makes git treat it as binary for display only. `git diff` reports
+# that the file changed without printing its contents, and `git diff --numstat`
+# reports `-` instead of a line count. NOTHING about the file's bytes changes:
+# the size and SHA-256 recorded in `model_list.json` still describe it, and
+# `git log -p -- <path>` with `--text` still shows the contents when someone
+# genuinely needs them.
+#
+# The alternative considered and rejected was re-serialising it compactly to
+# one line. That shrinks the diff the same amount but changes every byte,
+# which invalidates the recorded hash and forces a matching edit to
+# `model_list.json` -- churn in a checked artefact, to buy a presentation fix.
+src/model_overlays/phi4-mini-it-aie4/corelib_phi4_manifest.json -text -diff

@@ -11,6 +11,15 @@ parent: Benchmarks
      Every verdict below is derived from phi4_aie4_acceptance.json.
      Do not hand-edit: the next run overwrites this file. -->
 
+**The generator and the JSON this was rendered from are no longer in the
+branch.** They ran only on a lab machine with an AIE4 device and the real
+model, so they were removed along with the rest of the hardware campaign; see
+[caveat 11](/docs/phi4_aie4_caveats/#11-the-hardware-campaign-is-not-in-this-branch).
+Every path this page names — `run_real_model_acceptance.ps1`,
+`phi4_aie4_acceptance.json`, `run_hardware_suite.ps1` — resolves at commit
+`5c93aadb`, not at HEAD. **The results below are unchanged and are what the run
+produced.**
+
 **Corrections to this record are published separately and this document is not
 edited after the fact.** Read
 [Phi-4 AIE4 acceptance provenance](/docs/benchmarks/phi4_aie4_acceptance_provenance/)

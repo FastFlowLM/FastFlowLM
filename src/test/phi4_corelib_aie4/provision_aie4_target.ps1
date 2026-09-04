@@ -16,9 +16,9 @@
 # into a prefix we own, and everything after that points only at our own paths.
 #
 # `ryzenai_corelib_get_version` reports a hard-coded 0.1.0 for every 0.x
-# revision, so the version symbol cannot identify a build. The SHA-256 can, and
-# test_phi4_e2e records the hash of the DLL the loader actually served into
-# every result artifact.
+# revision, so the version symbol cannot identify a build. The SHA-256 printed
+# by this script can, which is why it is the thing worth recording: hash the
+# DLL the loader actually served, not the one you believe you built.
 #
 # NOT byte-reproducible, and do not expect it to be. An earlier version of this
 # comment claimed the same source built against this prefix and against the
@@ -177,5 +177,7 @@ Write-Output "sha256 : $hash"
 Write-Output "source : $CorelibRevision (src/common $CommonRevision)"
 Write-Output ''
 Write-Output 'Next: derive the runtime closure with cmake/StageAie4Runtime.cmake'
-Write-Output 'against THIS DLL, then run run_hardware_suite.ps1 against the'
-Write-Output 'staged directory. Do not transcribe the closure (CLOSURE-1).'
+Write-Output 'against THIS DLL, then configure the test suite with'
+Write-Output 'RYZENAI_CORELIB_RUNTIME_DIR pointed at the staged directory and'
+Write-Output 'run ctest with FLM_AIE4_HARDWARE=1.'
+Write-Output 'Do not transcribe the closure (CLOSURE-1).'

@@ -12,6 +12,19 @@ by `src/test/phi4_corelib_aie4/run_real_model_acceptance.ps1` and overwritten on
 every run. This file exists to answer one question a careful reader will
 otherwise be unable to answer from the repository alone.
 
+> **Read this first.** The acceptance JSON, the harness, the shared guard
+> module and the offline verifier are **not in this branch** — they ran only on
+> a machine with an AIE4 device and the real model, and were removed with the
+> rest of the hardware campaign
+> ([caveat 11](/docs/phi4_aie4_caveats/#11-the-hardware-campaign-is-not-in-this-branch)).
+>
+> Every file path and every line number below resolves at commit `5c93aadb`,
+> not at HEAD. The reproduction commands at the end of this page require
+> `git checkout 5c93aadb` first; run against HEAD they will report a missing
+> file, which is not the discrepancy this page is about.
+>
+> Nothing else here changed. The corrections below are still the corrections.
+
 ## If you recompute `harness_sha256`, it will not match. Here is why.
 
 `phi4_aie4_acceptance.json` records the SHA-256 of the two scripts that

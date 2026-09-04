@@ -435,8 +435,8 @@ def main(argv: list[str] | None = None) -> int:
         action="append",
         required=True,
         help=(
-            "a test_phi4_e2e output document. Pass twice to analyse a "
-            "run-to-run pair."
+            "an AIE4 end-to-end harness output document. Pass twice to "
+            "analyse a run-to-run pair."
         ),
     )
     parser.add_argument("--output-json", required=True)
@@ -483,7 +483,7 @@ def main(argv: list[str] | None = None) -> int:
         if row is None:
             print(
                 f"{path} carries no lm_head_input_bf16 at {label}. Rebuild "
-                f"test_phi4_e2e with DEV_BUILD and re-run: without the "
+                f"the end-to-end harness with DEV_BUILD and re-run: without the "
                 f"recorded input this tool would have to infer it, which is "
                 f"the inference DETERM-1 got wrong.",
                 file=sys.stderr,

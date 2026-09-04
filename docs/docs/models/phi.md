@@ -260,16 +260,18 @@ alone.
   from rather than rolled into one "worst": the largest absolute logit
   difference is **49.25**, while the largest number of logits moving at a
   single step is **196,835 of 200,064** — and those are different records.
-  Each comparison is a committed JSON file:
+  Each comparison was a JSON record written by the campaign. The 150 records
+  are not carried in this branch — they are the output of one campaign on one
+  machine, and nothing in the tree reads them — so the three that diverged are
+  summarised here rather than cited by path:
 
-  - `src/test/phi4_corelib_aie4/determinism_records/20260902T120919Z-10264/determ1-force_append-010.json`
-    — max abs diff **48.34**; up to **196,154** of 200,064 logits differing at
-    one step (`decode[13]`) by more than the 2-BF16-ULP bound the suite gates
-    on; sequences part at token 8
-  - `src/test/phi4_corelib_aie4/determinism_records/20260902T140230Z-11788/determ1-force_append-022.json`
-    — **49.25**; up to **196,748** at `decode[15]`; part at token 14
-  - `src/test/phi4_corelib_aie4/determinism_records/20260902T140230Z-11788/determ1-force_append-026.json`
-    — **49.21**; up to **196,835** at `decode[15]`; part at token 14
+  - `determ1-force_append-010` — max abs diff **48.34**; up to **196,154** of
+    200,064 logits differing at one step (`decode[13]`) by more than the
+    2-BF16-ULP bound the suite gated on; sequences part at token 8
+  - `determ1-force_append-022` — **49.25**; up to **196,748** at `decode[15]`;
+    part at token 14
+  - `determ1-force_append-026` — **49.21**; up to **196,835** at `decode[15]`;
+    part at token 14
 
   All three are on the **append** continuation route. Two re-prefill records
   also carry a logit difference, but in both the emitted text still matched.

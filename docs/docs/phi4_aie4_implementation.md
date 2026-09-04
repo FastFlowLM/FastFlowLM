@@ -127,18 +127,38 @@ re-derive — is
 | | |
 |---|---|
 | Files changed | 110 (**32 of them tests**, carrying 23,912 of the added lines) |
-| Lines | +49,620 / −289 |
-| `ctest` | **16 registered** |
+| Lines | +49,635 / −289 |
+| `ctest` on `xcomedusad-43` | **13 passed, 3 skipped, 0 failed** (16 registered) |
 | Python tooling | **312 passed** |
 
 The test share is the point rather than an accident: most real defects in this
 work were found by tests and review, not by the compiler.
 
-**On those two test numbers.** The Python figure is a run. The ctest figure is
-a count of what a clean configure registers — not a pass tally. The last full
-`ctest` run was **17 passed / 0 failed / 4 skipped** on `xcomedusad-43` at
-commit `5c93aadb`; the seventeenth was `test_acceptance_guards`, removed here
-along with the harness it guarded. The remaining 16 have not been re-run since,
-because building this suite needs XRT and a corelib runtime that exist on the
-AIE4 targets and not on a development box. **Re-running `ctest` on
-`xcomedusad-43` is the one outstanding check on this branch.**
+The three skips are `test_phi4_hardware` and `test_fatal_child` (they want
+`FLM_AIE4_HARDWARE=1`) and `test_packaged_runtime` (it wants a staged
+installer). `test_real_corelib` is not among them — it loaded the real
+`ryzenai_corelib.dll` and passed in 11 s.
+
+### Configuring this suite on the AIE4 target
+
+**You must pass `-DFLM_PYTHON_EXECUTABLE` there.** On that machine `PATH`
+resolves `python3` to a Cygwin symlink Windows cannot execute, so the probe
+finds no usable interpreter and `test_phi4_continuation_calibration` is
+deliberately registered as a *failing* test rather than silently skipped. The
+script that used to supply this path was part of the hardware campaign and is
+no longer in the branch, so it is now the caller's job:
+
+```
+cmake -S src/test/phi4_corelib_aie4 -B <build> -G "Visual Studio 17 2022" -A x64 \
+  -DRYZENAI_CORELIB_INCLUDE_DIR=<corelib>/install-mirrored/include \
+  -DRYZENAI_CORELIB_RUNTIME_DIR=<staged aie4 runtime> \
+  -DXRT_INCLUDE_DIR=<xrt>/include -DXRT_LIB_DIR=<xrt>/lib \
+  -DBOOST_INCLUDE_DIR=<conda>/Library/include \
+  -DFLM_PYTHON_EXECUTABLE=<conda>/python.exe
+cmake --build <build> --config Release
+ctest -C Release
+```
+
+Omit that last flag and you get 15 passed, 1 failed — and the failure is the
+configure, not the code. CMake says so at configure time; the warning is worth
+reading.

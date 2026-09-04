@@ -191,16 +191,30 @@ the MSI ship. Building against a shared or conda prefix requires:
 A mismatch is a **configure-time hard failure naming both halves**, not a link
 error at the end.
 
-**One open question, settled by a single command on the CI runner.** A probe
-established that `target_link_directories` contributes nothing to
-`find_library`: a stage directory known only that way yields
-`PROBE-NOTFOUND`; on `LIB` or `CMAKE_PREFIX_PATH` it resolves. Nothing in the
-repository arranges for the Boost stage directory to be findable, and the
-workflow sets no environment. So either the runner has an ambient `LIB` that
-covers it — meaning this work introduced an **undeclared dependency on runner
-environment** that the pre-branch raw-name link never needed — or the shipping
-preset fails at configure. Run `echo $env:LIB` on the runner to find out.
-Explicit `PATHS` have been added, which is correct either way.
+### How the library is found — recorded, not actioned
+
+Nothing is required of you here. This is written down only so the next person
+to touch that block knows why the explicit `PATHS` are in it.
+
+Before this work, CMake handed the Boost library's **file name** to the linker,
+which resolved it through the linker's own search path — a path
+`target_link_directories` contributes to. This work replaced that with
+`find_library()`, and **`target_link_directories` contributes nothing to
+`find_library`**. That is probed, not assumed: a stage directory known only
+that way yields `PROBE-NOTFOUND`, while the same directory reachable through
+`LIB` or `CMAKE_PREFIX_PATH` resolves. The two mechanisms search different
+places.
+
+Nothing in the repository sets `CMAKE_PREFIX_PATH` for Boost, and the Windows
+workflow sets no environment at all. So the build either leaned on an ambient
+machine-level `LIB` on the build host — state that exists nowhere in the
+repository — or it would not have configured at all. Which of the two was never
+established, and by decision will not be: this backend is not built in CI.
+
+`src/CMakeLists.txt` now passes the staging directories as explicit `PATHS`, so
+it resolves either way and no longer depends on host environment. **Do not
+delete those `PATHS` on the grounds that the build works without them** — on
+some hosts it will, for a reason that is not in the repository.
 
 ---
 

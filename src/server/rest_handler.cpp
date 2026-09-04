@@ -885,10 +885,13 @@ void RestHandler::handle_embeddings(const json& request,
         json response;
         if (this->embed) {
             json embedding_data = json::array();
+            size_t total_prompt_tokens = 0;
 #ifndef FASTFLOWLM_LINUX_LIMITED_MODELS
             for (size_t i = 0; i < inputs.size(); ++i) {
                 std::cout << "Embedding input[" << i << "]: " << "\n" << inputs[i] << std::endl;
-                std::vector<float> embedding_result = this->auto_embedding_engine->embed(inputs[i], embedding_task_type_t::task_query);
+                size_t prompt_tokens = 0;
+                std::vector<float> embedding_result = this->auto_embedding_engine->embed_with_usage(inputs[i], embedding_task_type_t::task_query, prompt_tokens);
+                total_prompt_tokens += prompt_tokens;
                 embedding_data.push_back({
                     {"object", "embedding"},
                     {"embedding", embedding_result},
@@ -904,8 +907,8 @@ void RestHandler::handle_embeddings(const json& request,
                 {"data", embedding_data},
                 {"model", model},
                 {"usage", {
-                    {"prompt_tokens", 0},
-                    {"total_tokens", 0}
+                    {"prompt_tokens", total_prompt_tokens},
+                    {"total_tokens", total_prompt_tokens}
                 }}
             };
         }

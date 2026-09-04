@@ -57,4 +57,5 @@ public:
 
     void load_model(std::string model_path, json model_info, bool enable_preemption = false) override;
     std::vector<float> embed(std::string& text, embedding_task_type_t task_type) override;
+    std::vector<float> embed_with_usage(std::string& text, embedding_task_type_t task_type, size_t& prompt_tokens) override;
 };
